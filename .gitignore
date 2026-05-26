@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtualenv
+venv/
+.venv/
+pyside/
+
+# Logs
+logs/
+*.log
+
+# Snapshots
+snapshots/
+
+# Qt
+*.qmlc
+
+# IDE
+.vscode/
+.idea/
+
+# System
+.DS_Store
+legacy/
+*-bak.py
