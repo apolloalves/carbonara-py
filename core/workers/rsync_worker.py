@@ -9,6 +9,7 @@ from PySide6.QtCore import QThread, Signal
 class RsyncWorker(QThread):
     progress_changed = Signal(int)
     status_changed = Signal(str)
+    file_changed = Signal(str)
     log_line = Signal(str)
     finished_ok = Signal()
     failed = Signal(str)
@@ -41,20 +42,31 @@ class RsyncWorker(QThread):
                 if not line.strip():
                     continue
 
-                self.log_line.emit(line)
+                # Linha amigável com o arquivo atual
+                if line.startswith("Copiando: "):
+                    current_file = line.replace("Copiando: ", "", 1).strip()
+                    self.file_changed.emit(current_file)
+                    self.log_line.emit(f"Copiando: {current_file}")
+                    continue
 
-                match = percent_regex.search(line)
-                if match:
-                    try:
-                        percent = int(match.group(1))
-                        if 0 <= percent <= 100 and percent != last_percent:
-                            last_percent = percent
-                            self.progress_changed.emit(percent)
-                    except ValueError:
-                        pass
+                # Linhas de progresso do rsync
+                if "to-chk=" in line or "ir-chk=" in line or "%" in line:
+                    match = percent_regex.search(line)
+                    if match:
+                        try:
+                            percent = int(match.group(1))
+                            if 0 <= percent <= 100 and percent != last_percent:
+                                last_percent = percent
+                                self.progress_changed.emit(percent)
+                        except ValueError:
+                            pass
 
-                if "to-chk=" in line:
+                    # usa essa linha só para atualizar o status, sem poluir o log
                     self.status_changed.emit(line)
+                    continue
+
+                # Outras linhas úteis vão para o log
+                self.log_line.emit(line)
 
             rc = proc.wait()
 

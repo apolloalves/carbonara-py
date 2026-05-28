@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-import os
-import shutil
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import List
+
+import os
+import shutil
+import subprocess
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
@@ -20,6 +22,9 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QFrame,
 )
+
+from core.snapshots.backup import create_backup
+from ui.widgets.backup_progress import BackupProgressDialog
 
 
 SNAPSHOT_BASE = Path("/mnt/MDSATA/CarbonaraTS")
@@ -71,7 +76,7 @@ def collect_snapshots() -> List[SnapshotEntry]:
             continue
 
         for snap in sorted(
-            [p for p in kind_dir.iterdir() if p.is_dir()],
+            [p for p in kind_dir.iterdir() if p.is_dir() and p.name != "latest"],
             key=lambda p: p.stat().st_mtime,
             reverse=True,
         ):
@@ -88,7 +93,6 @@ def collect_snapshots() -> List[SnapshotEntry]:
                         ).strftime("%Y-%m-%d %H:%M:%S"),
                     )
                 )
-
             except OSError:
                 continue
 
@@ -134,9 +138,7 @@ class SnapshotItem(QFrame):
         title.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
         title.setStyleSheet("color: #ecf4ff;")
 
-        meta = QLabel(
-            f"{entry.modified_text} • {entry.size_text}"
-        )
+        meta = QLabel(f"{entry.modified_text} • {entry.size_text}")
         meta.setFont(QFont("DejaVu Sans Mono", 9))
         meta.setStyleSheet("color: #9aa6b2;")
 
@@ -222,7 +224,6 @@ class SnapshotsPage(QWidget):
 
     def refresh_list(self):
         self.list_widget.clear()
-
         self.entries = collect_snapshots()
 
         if not self.entries:
@@ -238,42 +239,31 @@ class SnapshotsPage(QWidget):
             )
 
             item.setSizeHint(label.sizeHint())
-
             self.list_widget.addItem(item)
             self.list_widget.setItemWidget(item, label)
-
             return
 
         for entry in self.entries:
             item = QListWidgetItem()
-
             widget = SnapshotItem(entry)
 
             widget.btn_restore.clicked.connect(
                 lambda _, e=entry: self.restore_snapshot(e)
             )
-
             widget.btn_integrity.clicked.connect(
                 lambda _, e=entry: self.check_integrity(e)
             )
-
             widget.btn_delete.clicked.connect(
                 lambda _, e=entry: self.delete_snapshot(e)
             )
 
             item.setSizeHint(widget.sizeHint())
-
             self.list_widget.addItem(item)
             self.list_widget.setItemWidget(item, widget)
 
     def create_snapshot(self):
-        import subprocess
-        from pathlib import Path
-
         project_root = Path(__file__).resolve().parents[3]
-        python_bin = (
-            Path.home() / "venvs" / "pyside" / "bin" / "python3"
-        )
+        python_bin = Path.home() / "venvs" / "pyside" / "bin" / "python3"
 
         script = f"""
 import sys
@@ -301,11 +291,7 @@ dialog.exec()
         ]
 
         try:
-            subprocess.Popen(
-                cmd,
-                cwd=str(project_root),
-            )
-
+            subprocess.Popen(cmd, cwd=str(project_root))
         except Exception as e:
             QMessageBox.critical(
                 self,
@@ -341,7 +327,6 @@ dialog.exec()
 
         try:
             shutil.rmtree(entry.path)
-
             self.refresh_list()
 
         except Exception as e:
