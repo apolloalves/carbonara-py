@@ -23,6 +23,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ui.pages.backups.backups_page import BackupsPage
+
 
 BG = "#000000"
 BORDER = "#1f5cff"
@@ -45,7 +47,7 @@ MENU_ENTRIES = [
     MenuEntry(1, "Dashboard", "Monitor system information and quick status", "▣"),
     MenuEntry(2, "Network", "Diagnose and configure network settings", "◌"),
     MenuEntry(3, "Packages", "Manage packages, mirrors and updates", "⬚"),
-    MenuEntry(4, "Wizards", "Guided actions for backups and maintenance", "⌁"),
+    MenuEntry(4, "Backups", "Create, restore and verify snapshots", "⌁"),
     MenuEntry(5, "Maintenance", "Clean caches, logs and system junk", "◈"),
     MenuEntry(6, "Performance", "Optimize boot, swap and system responsiveness", "⚙"),
     MenuEntry(7, "Services", "Inspect, enable and disable system services", "↻"),
@@ -225,6 +227,24 @@ class SectionHeader(QFrame):
         painter.drawText(QRect(text_x, 0, text_w, h), Qt.AlignCenter, self.text)
 
 
+class BackupsWindow(QMainWindow):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Carbonara Backups")
+        self.resize(1100, 800)
+        self.setStyleSheet(f"background: {BG};")
+
+        central = QWidget(self)
+        self.setCentralWidget(central)
+
+        layout = QVBoxLayout(central)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(0)
+
+        self.page = BackupsPage(self)
+        layout.addWidget(self.page)
+
+
 class MenuWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -235,6 +255,8 @@ class MenuWindow(QMainWindow):
 
         self.current_index = 0
         self.lines: list[MenuLine] = []
+        self.backups_window = None
+
         self._build_ui()
         self._refresh_selection()
 
@@ -370,6 +392,16 @@ class MenuWindow(QMainWindow):
     def _confirm_current(self):
         entry = MENU_ENTRIES[self.current_index]
         self.status.setText(f"Confirmed: {entry.number} — {entry.title}")
+
+        if entry.number == 4:
+            if self.backups_window is None:
+                self.backups_window = BackupsWindow(self)
+
+            self.backups_window.show()
+            self.backups_window.raise_()
+            self.backups_window.activateWindow()
+            return
+
         if entry.title == "Exit":
             self.close()
 
