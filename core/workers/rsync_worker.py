@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
 
@@ -14,14 +15,21 @@ class RsyncWorker(QThread):
     finished_ok = Signal()
     failed = Signal(str)
 
-    def __init__(self, command: list[str], title: str = "", parent=None):
+    def __init__(self, command: list[str], title: str = "", log_path: str | None = None, parent=None):
         super().__init__(parent)
         self.command = command
         self.title = title
+        self.log_path = Path(log_path) if log_path else None
 
     def run(self):
+        log_fh = None
+
         try:
             self.status_changed.emit(self.title or "Executando...")
+
+            if self.log_path:
+                self.log_path.parent.mkdir(parents=True, exist_ok=True)
+                log_fh = self.log_path.open("a", encoding="utf-8")
 
             proc = subprocess.Popen(
                 self.command,
@@ -42,31 +50,40 @@ class RsyncWorker(QThread):
                 if not line.strip():
                     continue
 
-                # Linha amigável com o arquivo atual
+                if log_fh:
+                    log_fh.write(line + "\n")
+                    log_fh.flush()
+
+                # Nome do arquivo atual
                 if line.startswith("Copiando: "):
                     current_file = line.replace("Copiando: ", "", 1).strip()
                     self.file_changed.emit(current_file)
                     self.log_line.emit(f"Copiando: {current_file}")
                     continue
 
-                # Linhas de progresso do rsync
-                if "to-chk=" in line or "ir-chk=" in line or "%" in line:
-                    match = percent_regex.search(line)
-                    if match:
-                        try:
-                            percent = int(match.group(1))
-                            if 0 <= percent <= 100 and percent != last_percent:
-                                last_percent = percent
-                                self.progress_changed.emit(percent)
-                        except ValueError:
-                            pass
+                # Ignora ruído visual de delete
+                if line.startswith("deleting "):
+                    continue
 
-                    # usa essa linha só para atualizar o status, sem poluir o log
+                # Progresso geral
+                match = percent_regex.search(line)
+                if match:
+                    try:
+                        percent = int(match.group(1))
+                        if 0 <= percent <= 100 and percent != last_percent:
+                            last_percent = percent
+                            self.progress_changed.emit(percent)
+                    except ValueError:
+                        pass
+
                     self.status_changed.emit(line)
                     continue
 
-                # Outras linhas úteis vão para o log
-                self.log_line.emit(line)
+                # Mensagens úteis vão para o log da GUI
+                if any(x in line for x in ("sending incremental file list", "sent ", "received ")):
+                    self.log_line.emit(line)
+                else:
+                    self.log_line.emit(line)
 
             rc = proc.wait()
 
@@ -79,3 +96,7 @@ class RsyncWorker(QThread):
 
         except Exception as e:
             self.failed.emit(str(e))
+
+        finally:
+            if log_fh:
+                log_fh.close()
