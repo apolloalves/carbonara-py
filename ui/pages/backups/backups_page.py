@@ -1,13 +1,7 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
-from PySide6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QLabel,
-    QFrame,
-)
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QFrame
 
 from ui.pages.backups.snapshots_page import SnapshotsPage
 
@@ -25,36 +19,26 @@ class BackupsPage(QWidget):
         )
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(16, 16, 16, 16)
+        root.setContentsMargins(24, 20, 24, 24)
         root.setSpacing(12)
 
-        header = QFrame()
-        header.setStyleSheet(
-            """
-            QFrame {
-                border: 1px solid rgba(31, 92, 255, 120);
-                border-radius: 12px;
-                background: rgba(8, 12, 20, 220);
-            }
-            """
-        )
-
-        header_layout = QVBoxLayout(header)
-        header_layout.setContentsMargins(16, 14, 16, 14)
-        header_layout.setSpacing(4)
-
         title = QLabel("Backups")
-        title.setFont(QFont("DejaVu Sans Mono", 18, QFont.Bold))
+        title.setFont(QFont("DejaVu Sans Mono", 22, QFont.Bold))
         title.setStyleSheet("color: #23a6ff;")
 
         subtitle = QLabel("Create, restore and verify Carbonara snapshots")
         subtitle.setFont(QFont("DejaVu Sans Mono", 10))
         subtitle.setStyleSheet("color: #9aa6b2;")
 
-        header_layout.addWidget(title)
-        header_layout.addWidget(subtitle)
+        top = QFrame()
+        top.setStyleSheet("background: transparent; border: none;")
+        top_layout = QVBoxLayout(top)
+        top_layout.setContentsMargins(0, 0, 0, 0)
+        top_layout.setSpacing(2)
+        top_layout.addWidget(title)
+        top_layout.addWidget(subtitle)
 
         self.snapshots_page = SnapshotsPage(self)
 
-        root.addWidget(header)
+        root.addWidget(top)
         root.addWidget(self.snapshots_page, 1)
