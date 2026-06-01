@@ -26,12 +26,23 @@ from PySide6.QtWidgets import (
 )
 
 from core.operation_manager import OperationManager
-from core.snapshots.backup import create_backup
 from core.system.storage import (
     StorageDestination,
     format_gb,
     list_backup_destinations,
 )
+
+
+# Glyphs no mesmo espírito do menu principal
+DEST_GLYPH = "▣"
+ROOT_GLYPH = "▣"
+HOME_GLYPH = "⌂"
+RESTORE_GLYPH = "↺"
+INTEGRITY_GLYPH = "◉"
+DELETE_GLYPH = "⌫"
+REFRESH_GLYPH = "↻"
+CREATE_GLYPH = "✚"
+SNAPSHOT_GLYPH = "◌"
 
 
 @dataclass(frozen=True)
@@ -112,10 +123,28 @@ def clear_layout(layout):
             child_layout.deleteLater()
 
 
+def glyph_badge(glyph: str, size: int = 34) -> QLabel:
+    label = QLabel(glyph)
+    label.setAlignment(Qt.AlignCenter)
+    label.setFixedSize(size, size)
+    label.setFont(QFont("DejaVu Sans Mono", 16, QFont.Bold))
+    label.setStyleSheet(
+        """
+        QLabel {
+            color: #23a6ff;
+            background: rgba(35, 166, 255, 28);
+            border-radius: 10px;
+        }
+        """
+    )
+    return label
+
+
 class SnapshotCard(QFrame):
     def __init__(self, entry: SnapshotEntry, parent=None):
         super().__init__(parent)
         self.entry = entry
+
         self.setObjectName("SnapshotCard")
         self.setStyleSheet(
             """
@@ -128,20 +157,24 @@ class SnapshotCard(QFrame):
                 border: 1px solid rgba(35, 166, 255, 180);
                 background: rgba(16, 22, 34, 245);
             }
+
             QPushButton {
-                padding: 7px 12px;
-                border-radius: 8px;
+                padding: 8px 14px;
+                border-radius: 10px;
                 border: 1px solid rgba(31, 92, 255, 120);
                 background: rgba(10, 15, 25, 230);
                 color: #ecf4ff;
             }
+
             QPushButton:hover {
                 background: rgba(23, 147, 209, 70);
                 border: 1px solid rgba(35, 166, 255, 180);
             }
+
             QPushButton#DangerButton {
                 border: 1px solid rgba(220, 80, 80, 120);
             }
+
             QPushButton#DangerButton:hover {
                 background: rgba(220, 80, 80, 40);
                 border: 1px solid rgba(255, 120, 120, 180);
@@ -153,8 +186,13 @@ class SnapshotCard(QFrame):
         root.setContentsMargins(14, 12, 14, 12)
         root.setSpacing(12)
 
-        left = QVBoxLayout()
-        left.setSpacing(5)
+        left = QHBoxLayout()
+        left.setSpacing(12)
+
+        icon_label = glyph_badge(SNAPSHOT_GLYPH, 40)
+
+        text_block = QVBoxLayout()
+        text_block.setSpacing(4)
 
         title = QLabel(f"{entry.kind} • {entry.path.name}")
         title.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
@@ -164,12 +202,15 @@ class SnapshotCard(QFrame):
         meta.setFont(QFont("DejaVu Sans Mono", 9))
         meta.setStyleSheet("color: #9aa6b2;")
 
-        left.addWidget(title)
-        left.addWidget(meta)
+        text_block.addWidget(title)
+        text_block.addWidget(meta)
 
-        self.btn_restore = QPushButton("Restore")
-        self.btn_integrity = QPushButton("Integrity")
-        self.btn_delete = QPushButton("Delete")
+        left.addWidget(icon_label)
+        left.addLayout(text_block)
+
+        self.btn_restore = QPushButton(f"{RESTORE_GLYPH} Restore")
+        self.btn_integrity = QPushButton(f"{INTEGRITY_GLYPH} Integrity")
+        self.btn_delete = QPushButton(f"{DELETE_GLYPH} Delete")
         self.btn_delete.setObjectName("DangerButton")
 
         root.addLayout(left, 1)
@@ -179,7 +220,7 @@ class SnapshotCard(QFrame):
 
 
 class SectionCard(QFrame):
-    def __init__(self, title_text: str, path_text: str, parent=None):
+    def __init__(self, title_text: str, path_text: str, glyph: str, parent=None):
         super().__init__(parent)
         self.setObjectName("SectionCard")
         self.setStyleSheet(
@@ -199,6 +240,11 @@ class SectionCard(QFrame):
         head = QHBoxLayout()
         head.setSpacing(10)
 
+        icon_label = glyph_badge(glyph, 34)
+
+        labels = QVBoxLayout()
+        labels.setSpacing(2)
+
         title = QLabel(title_text)
         title.setFont(QFont("DejaVu Sans Mono", 12, QFont.Bold))
         title.setStyleSheet("color: #ecf4ff;")
@@ -207,11 +253,10 @@ class SectionCard(QFrame):
         path.setFont(QFont("DejaVu Sans Mono", 9))
         path.setStyleSheet("color: #9aa6b2;")
 
-        labels = QVBoxLayout()
-        labels.setSpacing(2)
         labels.addWidget(title)
         labels.addWidget(path)
 
+        head.addWidget(icon_label)
         head.addLayout(labels)
         head.addStretch(1)
 
@@ -332,7 +377,6 @@ class SnapshotsPage(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(14)
 
-        # Top control card
         self.control_card = QFrame()
         self.control_card.setObjectName("ControlCard")
         self.control_card.setStyleSheet(
@@ -348,7 +392,6 @@ class SnapshotsPage(QWidget):
         control_layout.setContentsMargins(18, 16, 18, 16)
         control_layout.setSpacing(18)
 
-        # Destination block
         destination_block = QVBoxLayout()
         destination_block.setSpacing(8)
 
@@ -362,15 +405,22 @@ class SnapshotsPage(QWidget):
         self.cmb_destination.setMaxVisibleItems(8)
         self.cmb_destination.setFocusPolicy(Qt.StrongFocus)
         self.cmb_destination.setView(QListView())
-        self.cmb_destination.view().setMouseTracking(True)
-        self.cmb_destination.activated[int].connect(self.on_destination_activated)
+        self.cmb_destination.currentIndexChanged.connect(self._on_destination_changed)
+        self.cmb_destination.activated[int].connect(self._on_destination_activated)
 
         destination_block.addWidget(lbl_destination)
         destination_block.addWidget(self.cmb_destination)
 
-        # Summary block
         summary_block = QVBoxLayout()
         summary_block.setSpacing(6)
+
+        top_summary = QHBoxLayout()
+        top_summary.setSpacing(12)
+
+        self.destination_badge = glyph_badge(DEST_GLYPH, 46)
+
+        summary_text = QVBoxLayout()
+        summary_text.setSpacing(4)
 
         self.lbl_destination_info = QLabel("Select a backup destination")
         self.lbl_destination_info.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
@@ -379,6 +429,13 @@ class SnapshotsPage(QWidget):
         self.lbl_destination_meta = QLabel("—")
         self.lbl_destination_meta.setObjectName("Muted")
         self.lbl_destination_meta.setFont(QFont("DejaVu Sans Mono", 9))
+
+        summary_text.addWidget(self.lbl_destination_info)
+        summary_text.addWidget(self.lbl_destination_meta)
+
+        top_summary.addWidget(self.destination_badge)
+        top_summary.addLayout(summary_text)
+        top_summary.addStretch(1)
 
         self.space_bar = QFrame()
         self.space_bar.setFixedHeight(8)
@@ -408,17 +465,15 @@ class SnapshotsPage(QWidget):
         self.lbl_space_percent.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
         self.lbl_space_percent.setStyleSheet("color: #4ade80;")
 
-        summary_block.addWidget(self.lbl_destination_info)
-        summary_block.addWidget(self.lbl_destination_meta)
+        summary_block.addLayout(top_summary)
         summary_block.addWidget(self.space_bar)
         summary_block.addWidget(self.lbl_space_percent)
 
-        # Actions
         actions_block = QHBoxLayout()
         actions_block.setSpacing(10)
 
-        self.btn_refresh = QPushButton("Refresh")
-        self.btn_create = QPushButton("Create Snapshot")
+        self.btn_refresh = QPushButton(f"{REFRESH_GLYPH} Refresh")
+        self.btn_create = QPushButton(f"{CREATE_GLYPH} Create Snapshot")
         self.btn_refresh.clicked.connect(self.refresh_destinations)
         self.btn_create.clicked.connect(self.create_snapshot)
         self.btn_create.setObjectName("PrimaryButton")
@@ -435,7 +490,6 @@ class SnapshotsPage(QWidget):
         control_layout.addLayout(summary_block, 3)
         control_layout.addLayout(actions_wrap, 2)
 
-        # Scrollable snapshot area
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -455,6 +509,12 @@ class SnapshotsPage(QWidget):
 
     def current_destination(self) -> StorageDestination | None:
         return self.cmb_destination.currentData()
+
+    def _format_combo_item(self, dest: StorageDestination) -> str:
+        return (
+            f"{DEST_GLYPH} {dest.label}  •  {format_gb(dest.free_gb)} livre  •  "
+            f"{dest.mountpoint}  •  {dest.fs_type}"
+        )
 
     def refresh_destinations(self):
         current_mount = None
@@ -495,13 +555,13 @@ class SnapshotsPage(QWidget):
         self.update_destination_summary()
         self.rebuild_snapshot_view()
 
-    def _format_combo_item(self, dest: StorageDestination) -> str:
-        return (
-            f"{dest.label}  •  {format_gb(dest.free_gb)} livre  •  "
-            f"{dest.mountpoint}  •  {dest.fs_type}"
-        )
+    def _on_destination_changed(self, index: int):
+        if index < 0:
+            self.lbl_space_percent.setText("—")
+            return
+        self.update_destination_summary()
 
-    def on_destination_activated(self, index: int):
+    def _on_destination_activated(self, index: int):
         if index < 0:
             return
         self.update_destination_summary()
@@ -520,7 +580,7 @@ class SnapshotsPage(QWidget):
         if dest.total_bytes > 0:
             used_pct = int(round((dest.used_bytes / dest.total_bytes) * 100))
 
-        free_pct = 100 - used_pct
+        free_pct = max(0, 100 - used_pct)
         fill_width = max(0, int(self.space_bar.width() * used_pct / 100))
         self.space_fill.setGeometry(0, 0, fill_width, 8)
 
@@ -583,7 +643,7 @@ class SnapshotsPage(QWidget):
 
         grouped = defaultdict(list)
         for entry in entries:
-            grouped[entry.kind].append(entry)
+            grouped[entry.kind.upper()].append(entry)
 
         ordered_kinds = []
         for preferred in ("ROOT", "HOME"):
@@ -595,7 +655,12 @@ class SnapshotsPage(QWidget):
                 ordered_kinds.append(kind)
 
         for kind in ordered_kinds:
-            section = SectionCard(kind, str(backup_root / kind))
+            section_icon = ROOT_GLYPH if kind == "ROOT" else HOME_GLYPH if kind == "HOME" else SNAPSHOT_GLYPH
+            section = SectionCard(
+                kind,
+                str(backup_root / kind),
+                section_icon,
+            )
             for entry in grouped[kind]:
                 card = SnapshotCard(entry)
                 card.btn_restore.clicked.connect(

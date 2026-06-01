@@ -1,7 +1,9 @@
+from __future__ import annotations
+
 import sys
 from dataclasses import dataclass
 
-from PySide6.QtCore import Qt, QRect, QEvent
+from PySide6.QtCore import Qt, QRect, QEvent, Signal, QPoint
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -18,7 +20,9 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
+    QPushButton,
     QSizePolicy,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -80,6 +84,115 @@ def clamp(value: int, low: int, high: int) -> int:
     return max(low, min(high, value))
 
 
+class TitleBar(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._drag_pos: QPoint | None = None
+
+        self.setFixedHeight(42)
+        self.setStyleSheet(
+            """
+            QWidget {
+                background: #0a0a0a;
+                border-bottom: 1px solid rgba(31, 92, 255, 110);
+            }
+            QLabel {
+                color: #f4f7fb;
+                background: transparent;
+            }
+            QPushButton {
+                color: #f4f7fb;
+                background: transparent;
+                border: none;
+                min-width: 42px;
+                min-height: 30px;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background: rgba(255, 255, 255, 18);
+            }
+            QPushButton#CloseButton:hover {
+                background: rgba(255, 70, 70, 70);
+            }
+            """
+        )
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(14, 4, 10, 4)
+        layout.setSpacing(8)
+
+        self.logo = QLabel("Carbonara Backups")
+        self.logo.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+        self.logo.setAlignment(Qt.AlignCenter)
+
+        layout.addWidget(self.logo)
+        layout.addStretch(1)
+
+        self.btn_min = QPushButton("–")
+        self.btn_max = QPushButton("▢")
+        self.btn_close = QPushButton("×")
+        self.btn_close.setObjectName("CloseButton")
+
+        self.btn_min.clicked.connect(self._minimize)
+        self.btn_max.clicked.connect(self._toggle_max_restore)
+        self.btn_close.clicked.connect(self._close)
+
+        layout.addWidget(self.btn_min)
+        layout.addWidget(self.btn_max)
+        layout.addWidget(self.btn_close)
+
+    def _window(self) -> QMainWindow | None:
+        w = self.window()
+        return w if isinstance(w, QMainWindow) else None
+
+    def _minimize(self):
+        win = self._window()
+        if win:
+            win.showMinimized()
+
+    def _toggle_max_restore(self):
+        win = self._window()
+        if not win:
+            return
+
+        if win.isMaximized():
+            win.showNormal()
+        else:
+            win.showMaximized()
+
+    def _close(self):
+        win = self._window()
+        if win:
+            win.close()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint() - self.window().frameGeometry().topLeft()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._drag_pos is not None and event.buttons() & Qt.LeftButton:
+            win = self.window()
+            if win and not win.isMaximized():
+                win.move(event.globalPosition().toPoint() - self._drag_pos)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self._drag_pos = None
+        super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._toggle_max_restore()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
+
 class MenuLine(QFrame):
     def __init__(self, entry: MenuEntry, parent=None):
         super().__init__(parent)
@@ -110,18 +223,34 @@ class MenuLine(QFrame):
 
         painter.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
         painter.setPen(icon_color)
-        painter.drawText(QRect(10, 0, 28, self.height()), Qt.AlignCenter, self.entry.icon)
+        painter.drawText(
+            QRect(10, 0, 28, self.height()),
+            Qt.AlignCenter,
+            self.entry.icon,
+        )
 
         painter.setFont(QFont("DejaVu Sans Mono", 12, QFont.Bold))
         painter.setPen(num_color)
-        painter.drawText(QRect(50, 0, 26, self.height()), Qt.AlignVCenter | Qt.AlignLeft, str(self.entry.number))
+        painter.drawText(
+            QRect(50, 0, 26, self.height()),
+            Qt.AlignVCenter | Qt.AlignLeft,
+            str(self.entry.number),
+        )
 
         painter.setPen(QColor(TEXT))
-        painter.drawText(QRect(90, 0, 220, self.height()), Qt.AlignVCenter | Qt.AlignLeft, self.entry.title)
+        painter.drawText(
+            QRect(90, 0, 220, self.height()),
+            Qt.AlignVCenter | Qt.AlignLeft,
+            self.entry.title,
+        )
 
         painter.setPen(QColor(MUTED))
         painter.setFont(QFont("DejaVu Sans Mono", 10))
-        painter.drawText(QRect(320, 0, 650, self.height()), Qt.AlignVCenter | Qt.AlignLeft, self.entry.desc)
+        painter.drawText(
+            QRect(320, 0, 650, self.height()),
+            Qt.AlignVCenter | Qt.AlignLeft,
+            self.entry.desc,
+        )
 
 
 class TopBanner(QFrame):
@@ -227,44 +356,79 @@ class SectionHeader(QFrame):
         painter.drawText(QRect(text_x, 0, text_w, h), Qt.AlignCenter, self.text)
 
 
-class BackupsWindow(QMainWindow):
+class BackupsHost(QWidget):
+    back_requested = Signal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Carbonara Backups")
-        self.resize(1100, 800)
-        self.setStyleSheet(f"background: {BG};")
 
-        central = QWidget(self)
-        self.setCentralWidget(central)
+        self.setStyleSheet(
+            """
+            QWidget {
+                background: transparent;
+            }
+            QPushButton {
+                padding: 8px 14px;
+                border-radius: 10px;
+                border: 1px solid rgba(31, 92, 255, 120);
+                background: rgba(10, 15, 25, 230);
+                color: #ecf4ff;
+            }
+            QPushButton:hover {
+                background: rgba(23, 147, 209, 70);
+                border: 1px solid rgba(35, 166, 255, 180);
+            }
+            """
+        )
 
-        layout = QVBoxLayout(central)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(0)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(12)
+
+        top = QHBoxLayout()
+        top.setSpacing(10)
+
+        self.back_button = QPushButton("← Back to menu")
+        self.back_button.clicked.connect(self.back_requested.emit)
+
+        top.addWidget(self.back_button)
+        top.addStretch(1)
 
         self.page = BackupsPage(self)
-        layout.addWidget(self.page)
+
+        root.addLayout(top)
+        root.addWidget(self.page, 1)
 
 
-class MenuWindow(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle("Carbonara CLI")
-        self.resize(1280, 900)
-        self.setMinimumSize(1100, 780)
-        self.setStyleSheet(f"background: {BG};")
+class MenuPage(QWidget):
+    backups_requested = Signal()
+    exit_requested = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
 
         self.current_index = 0
         self.lines: list[MenuLine] = []
-        self.backups_window = None
 
-        self._build_ui()
-        self._refresh_selection()
+        self.setStyleSheet(
+            """
+            QWidget {
+                background: transparent;
+            }
+            QFrame {
+                background: transparent;
+                border: none;
+            }
+            QLineEdit {
+                color: #ecf4ff;
+                background: transparent;
+                border: none;
+                padding: 0px;
+            }
+            """
+        )
 
-    def _build_ui(self):
-        central = QWidget()
-        self.setCentralWidget(central)
-
-        self.outer_layout = QVBoxLayout(central)
+        self.outer_layout = QVBoxLayout(self)
         self.outer_layout.setContentsMargins(18, 18, 18, 18)
         self.outer_layout.setSpacing(16)
         self.outer_layout.setAlignment(Qt.AlignTop)
@@ -394,16 +558,11 @@ class MenuWindow(QMainWindow):
         self.status.setText(f"Confirmed: {entry.number} — {entry.title}")
 
         if entry.number == 4:
-            if self.backups_window is None:
-                self.backups_window = BackupsWindow(self)
-
-            self.backups_window.show()
-            self.backups_window.raise_()
-            self.backups_window.activateWindow()
+            self.backups_requested.emit()
             return
 
         if entry.title == "Exit":
-            self.close()
+            self.exit_requested.emit()
 
     def _accept_typed_choice(self):
         text = self.input_box.text().strip()
@@ -437,7 +596,7 @@ class MenuWindow(QMainWindow):
                 self._accept_typed_choice()
                 return True
             if key == Qt.Key_Escape:
-                self.close()
+                self.window().close()
                 return True
         return super().eventFilter(obj, event)
 
@@ -453,7 +612,56 @@ class MenuWindow(QMainWindow):
             self._confirm_current()
             return
         if key == Qt.Key_Escape:
-            self.close()
+            self.window().close()
+            return
+        super().keyPressEvent(event)
+
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+
+        self.setWindowTitle("Carbonara CLI")
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
+        self.resize(1280, 900)
+        self.setMinimumSize(1100, 780)
+        self.setStyleSheet(f"background: {BG};")
+
+        central = QWidget(self)
+        self.setCentralWidget(central)
+
+        root = QVBoxLayout(central)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        self.titlebar = TitleBar(self)
+        self.stack = QStackedWidget(self)
+
+        self.menu_page = MenuPage(self)
+        self.backups_host = BackupsHost(self)
+
+        self.stack.addWidget(self.menu_page)
+        self.stack.addWidget(self.backups_host)
+
+        root.addWidget(self.titlebar)
+        root.addWidget(self.stack, 1)
+
+        self.menu_page.backups_requested.connect(self.show_backups)
+        self.menu_page.exit_requested.connect(self.close)
+        self.backups_host.back_requested.connect(self.show_menu)
+
+        self.stack.setCurrentWidget(self.menu_page)
+
+    def show_menu(self):
+        self.stack.setCurrentWidget(self.menu_page)
+        self.menu_page.input_box.setFocus()
+
+    def show_backups(self):
+        self.stack.setCurrentWidget(self.backups_host)
+
+    def keyPressEvent(self, event: QKeyEvent):
+        if event.key() == Qt.Key_Escape and self.stack.currentWidget() is self.backups_host:
+            self.show_menu()
             return
         super().keyPressEvent(event)
 
@@ -463,7 +671,7 @@ def main():
     app.setStyle("Fusion")
     app.setFont(QFont("DejaVu Sans Mono", 10))
 
-    win = MenuWindow()
+    win = MainWindow()
     win.show()
     sys.exit(app.exec())
 

@@ -30,15 +30,15 @@ class BackupsPage(QWidget):
         subtitle.setFont(QFont("DejaVu Sans Mono", 10))
         subtitle.setStyleSheet("color: #9aa6b2;")
 
-        top = QFrame()
-        top.setStyleSheet("background: transparent; border: none;")
-        top_layout = QVBoxLayout(top)
-        top_layout.setContentsMargins(0, 0, 0, 0)
-        top_layout.setSpacing(2)
-        top_layout.addWidget(title)
-        top_layout.addWidget(subtitle)
+        header = QFrame()
+        header.setStyleSheet("background: transparent; border: none;")
+        header_layout = QVBoxLayout(header)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(2)
+        header_layout.addWidget(title)
+        header_layout.addWidget(subtitle)
 
         self.snapshots_page = SnapshotsPage(self)
 
-        root.addWidget(top)
+        root.addWidget(header)
         root.addWidget(self.snapshots_page, 1)
