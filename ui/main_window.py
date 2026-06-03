@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass
 
-from PySide6.QtCore import Qt, QRect, QEvent, Signal, QPoint
+from PySide6.QtCore import Qt, QRect, QEvent, QPoint, Signal
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -13,6 +13,7 @@ from PySide6.QtGui import (
     QKeyEvent,
     QFontMetrics,
 )
+
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -357,8 +358,6 @@ class SectionHeader(QFrame):
 
 
 class BackupsHost(QWidget):
-    back_requested = Signal()
-
     def __init__(self, parent=None):
         super().__init__(parent)
 
@@ -367,36 +366,14 @@ class BackupsHost(QWidget):
             QWidget {
                 background: transparent;
             }
-            QPushButton {
-                padding: 8px 14px;
-                border-radius: 10px;
-                border: 1px solid rgba(31, 92, 255, 120);
-                background: rgba(10, 15, 25, 230);
-                color: #ecf4ff;
-            }
-            QPushButton:hover {
-                background: rgba(23, 147, 209, 70);
-                border: 1px solid rgba(35, 166, 255, 180);
-            }
             """
         )
 
         root = QVBoxLayout(self)
         root.setContentsMargins(18, 18, 18, 18)
-        root.setSpacing(12)
-
-        top = QHBoxLayout()
-        top.setSpacing(10)
-
-        self.back_button = QPushButton("← Back to menu")
-        self.back_button.clicked.connect(self.back_requested.emit)
-
-        top.addWidget(self.back_button)
-        top.addStretch(1)
+        root.setSpacing(0)
 
         self.page = BackupsPage(self)
-
-        root.addLayout(top)
         root.addWidget(self.page, 1)
 
 
@@ -648,7 +625,7 @@ class MainWindow(QMainWindow):
 
         self.menu_page.backups_requested.connect(self.show_backups)
         self.menu_page.exit_requested.connect(self.close)
-        self.backups_host.back_requested.connect(self.show_menu)
+        self.backups_host.page.back_requested.connect(self.show_menu)
 
         self.stack.setCurrentWidget(self.menu_page)
 

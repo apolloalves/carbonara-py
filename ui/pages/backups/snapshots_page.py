@@ -33,7 +33,6 @@ from core.system.storage import (
 )
 
 
-# Glyphs no mesmo espírito do menu principal
 DEST_GLYPH = "▣"
 ROOT_GLYPH = "▣"
 HOME_GLYPH = "⌂"
@@ -138,6 +137,47 @@ def glyph_badge(glyph: str, size: int = 34) -> QLabel:
         """
     )
     return label
+
+
+def style_combo_popup(combo: QComboBox) -> None:
+    view = combo.view()
+    view.setMouseTracking(True)
+    view.viewport().setMouseTracking(True)
+    view.setAttribute(Qt.WA_Hover, True)
+    view.viewport().setAttribute(Qt.WA_Hover, True)
+    view.setUniformItemSizes(True)
+    view.setStyleSheet(
+        """
+        QListView {
+            background: #0a0f19;
+            color: #ecf4ff;
+            border: 1px solid rgba(31, 92, 255, 140);
+            outline: 0;
+            padding: 4px;
+        }
+
+        QListView::item {
+            min-height: 32px;
+            padding: 8px 10px;
+            border-radius: 6px;
+        }
+
+        QListView::item:hover {
+            background: rgba(35, 166, 255, 70);
+            color: #ecf4ff;
+        }
+
+        QListView::item:selected {
+            background: rgba(35, 166, 255, 180);
+            color: #08111d;
+        }
+
+        QListView::item:selected:hover {
+            background: rgba(70, 188, 255, 220);
+            color: #08111d;
+        }
+        """
+    )
 
 
 class SnapshotCard(QFrame):
@@ -274,6 +314,7 @@ class SnapshotsPage(QWidget):
         self.entries: list[SnapshotEntry] = []
         self.destinations: list[StorageDestination] = []
         self._backup_proc: subprocess.Popen | None = None
+        self.scope = "both"
 
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(1000)
@@ -334,28 +375,12 @@ class SnapshotsPage(QWidget):
                 height: 0px;
             }
 
-            QComboBox QAbstractItemView {
-                background: #0a0f19;
-                color: #ecf4ff;
-                border: 1px solid rgba(31, 92, 255, 140);
-                selection-background-color: #1f5cff;
-                selection-color: #ecf4ff;
-                outline: 0;
-                padding: 4px;
+            QLabel#Muted {
+                color: #9aa6b2;
             }
 
-            QComboBox QAbstractItemView::item {
-                min-height: 32px;
-                padding: 8px 10px;
-            }
-
-            QComboBox QAbstractItemView::item:hover {
-                background: rgba(23, 147, 209, 65);
-            }
-
-            QComboBox QAbstractItemView::item:selected {
-                background: rgba(35, 166, 255, 180);
-                color: #ecf4ff;
+            QLabel#FooterHint {
+                color: #9aa6b2;
             }
 
             QScrollArea {
@@ -365,10 +390,6 @@ class SnapshotsPage(QWidget):
 
             QScrollArea > QWidget > QWidget {
                 background: transparent;
-            }
-
-            QLabel#Muted {
-                color: #9aa6b2;
             }
             """
         )
@@ -390,7 +411,11 @@ class SnapshotsPage(QWidget):
         )
         control_layout = QHBoxLayout(self.control_card)
         control_layout.setContentsMargins(18, 16, 18, 16)
-        control_layout.setSpacing(18)
+        control_layout.setSpacing(24)
+
+        # Left column: destination + scope stacked
+        left_panel = QVBoxLayout()
+        left_panel.setSpacing(14)
 
         destination_block = QVBoxLayout()
         destination_block.setSpacing(8)
@@ -407,10 +432,43 @@ class SnapshotsPage(QWidget):
         self.cmb_destination.setView(QListView())
         self.cmb_destination.currentIndexChanged.connect(self._on_destination_changed)
         self.cmb_destination.activated[int].connect(self._on_destination_activated)
+        style_combo_popup(self.cmb_destination)
 
         destination_block.addWidget(lbl_destination)
         destination_block.addWidget(self.cmb_destination)
 
+        scope_block = QVBoxLayout()
+        scope_block.setSpacing(8)
+
+        lbl_scope = QLabel("Scope")
+        lbl_scope.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+        lbl_scope.setStyleSheet("color: #ecf4ff;")
+
+        self.cmb_scope = QComboBox()
+        self.cmb_scope.setEditable(False)
+        self.cmb_scope.setInsertPolicy(QComboBox.NoInsert)
+        self.cmb_scope.addItem("ROOT only", "root")
+        self.cmb_scope.addItem("HOME only", "home")
+        self.cmb_scope.addItem("ROOT + HOME", "both")
+        self.cmb_scope.setCurrentIndex(2)
+        self.cmb_scope.currentIndexChanged.connect(self._on_scope_changed)
+        self.cmb_scope.setView(QListView())
+        self.cmb_scope.setMaxVisibleItems(8)
+        self.cmb_scope.setFocusPolicy(Qt.StrongFocus)
+        style_combo_popup(self.cmb_scope)
+
+        self.lbl_scope_help = QLabel("Snapshot both root and home")
+        self.lbl_scope_help.setObjectName("Muted")
+        self.lbl_scope_help.setFont(QFont("DejaVu Sans Mono", 9))
+
+        scope_block.addWidget(lbl_scope)
+        scope_block.addWidget(self.cmb_scope)
+        scope_block.addWidget(self.lbl_scope_help)
+
+        left_panel.addLayout(destination_block)
+        left_panel.addLayout(scope_block)
+
+        # Center column: summary
         summary_block = QVBoxLayout()
         summary_block.setSpacing(6)
 
@@ -469,6 +527,7 @@ class SnapshotsPage(QWidget):
         summary_block.addWidget(self.space_bar)
         summary_block.addWidget(self.lbl_space_percent)
 
+        # Right column: actions
         actions_block = QHBoxLayout()
         actions_block.setSpacing(10)
 
@@ -486,7 +545,7 @@ class SnapshotsPage(QWidget):
         actions_wrap.addStretch(1)
         actions_wrap.addLayout(actions_block)
 
-        control_layout.addLayout(destination_block, 3)
+        control_layout.addLayout(left_panel, 3)
         control_layout.addLayout(summary_block, 3)
         control_layout.addLayout(actions_wrap, 2)
 
@@ -506,6 +565,19 @@ class SnapshotsPage(QWidget):
         root.addWidget(self.scroll, 1)
 
         self.refresh_destinations()
+
+    def _on_scope_changed(self, index: int):
+        scope = self.cmb_scope.currentData()
+        if scope == "root":
+            self.lbl_scope_help.setText("Snapshot only the system root")
+        elif scope == "home":
+            self.lbl_scope_help.setText("Snapshot only /home")
+        else:
+            self.lbl_scope_help.setText("Snapshot both root and home")
+
+    def current_scope(self) -> str:
+        scope = self.cmb_scope.currentData()
+        return scope if scope in {"root", "home", "both"} else "both"
 
     def current_destination(self) -> StorageDestination | None:
         return self.cmb_destination.currentData()
@@ -603,6 +675,7 @@ class SnapshotsPage(QWidget):
 
     def set_busy(self, busy: bool):
         self.cmb_destination.setEnabled(not busy)
+        self.cmb_scope.setEnabled(not busy)
         self.btn_refresh.setEnabled(not busy)
         self.btn_create.setEnabled(not busy)
         self.scroll.setEnabled(not busy)
@@ -723,7 +796,7 @@ from ui.widgets.backup_progress import BackupProgressDialog
 
 app = QApplication([])
 dialog = BackupProgressDialog()
-create_backup(dialog, destination_mountpoint={dest.mountpoint!r}, scope='both')
+create_backup(dialog, destination_mountpoint={dest.mountpoint!r}, scope={self.current_scope()!r})
 dialog.exec()
 """
 
