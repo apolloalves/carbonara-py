@@ -575,80 +575,82 @@ class SnapshotsPage(QWidget):
 # COLUNA DIREITA
 # ==========================================================
 
-        right_panel = QVBoxLayout()
-        right_panel.setSpacing(24)
-        top_summary = QHBoxLayout()
-        top_summary.setSpacing(14)
+right_panel = QVBoxLayout()
+right_panel.setSpacing(24)
 
-        self.destination_badge = glyph_badge(DEST_GLYPH, 46)
-        summary_text = QVBoxLayout()
-        summary_text.setSpacing(4)
+top_summary = QHBoxLayout()
+top_summary.setSpacing(14)
 
-        self.lbl_destination_info = QLabel("Select a backup destination")
-        self.lbl_destination_info.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
-        self.lbl_destination_info.setStyleSheet("color: #ecf4ff;")
+self.destination_badge = glyph_badge(DEST_GLYPH, 46)
 
-        self.lbl_destination_meta = QLabel("—")
-        self.lbl_destination_meta.setObjectName("Muted")
-        self.lbl_destination_meta.setFont(QFont("DejaVu Sans Mono", 9))
+summary_text = QVBoxLayout()
+summary_text.setSpacing(4)
 
-        summary_text.addWidget(self.lbl_destination_info)
-        summary_text.addWidget(self.lbl_destination_meta)
+self.lbl_destination_info = QLabel("Select a backup destination")
+self.lbl_destination_info.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+self.lbl_destination_info.setStyleSheet("color: #ecf4ff;")
 
-        top_summary.addWidget(self.destination_badge)
-        top_summary.addLayout(summary_text)
-        top_summary.addStretch()
+self.lbl_destination_meta = QLabel("—")
+self.lbl_destination_meta.setObjectName("Muted")
+self.lbl_destination_meta.setFont(QFont("DejaVu Sans Mono", 9))
 
-        self.space_bar = QFrame()
-        self.space_bar.setFixedHeight(8)
-        self.space_bar.setStyleSheet("""
-        QFrame {
-        border: none;
-        border-radius: 4px;
-        background: rgba(255,255,255,18);
-        }
-        """)
+summary_text.addWidget(self.lbl_destination_info)
+summary_text.addWidget(self.lbl_destination_meta)
 
-        self.space_fill = QFrame(self.space_bar)
-        self.space_fill.setGeometry(0, 0, 0, 8)
-        self.space_fill.setStyleSheet("""
-        QFrame {
-        border: none;
-        border-radius: 4px;
-        background: rgba(35,166,255,210);
-        }
-        """)
+top_summary.addWidget(self.destination_badge)
+top_summary.addLayout(summary_text)
+top_summary.addStretch()
 
-        self.lbl_space_percent = QLabel("—")
-        self.lbl_space_percent.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
-        self.lbl_space_percent.setStyleSheet("color: #4ade80;")
+self.space_bar = QFrame()
+self.space_bar.setFixedHeight(8)
+self.space_bar.setStyleSheet("""
+QFrame {
+    border: none;
+    border-radius: 4px;
+    background: rgba(255,255,255,18);
+}
+""")
 
-        space_row = QHBoxLayout()
-        space_row.setSpacing(10)
-        space_row.addWidget(self.space_bar, 1)
-        space_row.addWidget(self.lbl_space_percent)
+self.space_fill = QFrame(self.space_bar)
+self.space_fill.setGeometry(0, 0, 0, 8)
+self.space_fill.setStyleSheet("""
+QFrame {
+    border: none;
+    border-radius: 4px;
+    background: rgba(35,166,255,210);
+}
+""")
 
-        buttons_row = QHBoxLayout()
-        buttons_row.setSpacing(12)
+self.lbl_space_percent = QLabel("—")
+self.lbl_space_percent.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
+self.lbl_space_percent.setStyleSheet("color: #4ade80;")
 
-        self.btn_refresh = QPushButton(f"{REFRESH_GLYPH} Refresh")
-        self.btn_create = QPushButton(f"{CREATE_GLYPH} Create Snapshot")
+space_row = QHBoxLayout()
+space_row.setSpacing(10)
+space_row.addWidget(self.space_bar, 1)
+space_row.addWidget(self.lbl_space_percent)
 
-        self.btn_refresh.clicked.connect(self.refresh_destinations)
-        self.btn_create.clicked.connect(self.create_snapshot)
-        self.btn_create.setObjectName("PrimaryButton")
+buttons_row = QHBoxLayout()
+buttons_row.setSpacing(12)
 
-        buttons_row.addStretch()
-        buttons_row.addWidget(self.btn_refresh)
-        buttons_row.addWidget(self.btn_create)
+self.btn_refresh = QPushButton(f"{REFRESH_GLYPH} Refresh")
+self.btn_create = QPushButton(f"{CREATE_GLYPH} Create Snapshot")
 
-        right_panel.addLayout(top_summary)
-        right_panel.addLayout(space_row)
-        right_panel.addStretch()
-        right_panel.addLayout(buttons_row)
+self.btn_refresh.clicked.connect(self.refresh_destinations)
+self.btn_create.clicked.connect(self.create_snapshot)
+self.btn_create.setObjectName("PrimaryButton")
 
-        control_layout.addLayout(left_panel, 5)
-        control_layout.addLayout(right_panel, 4)
+buttons_row.addStretch()
+buttons_row.addWidget(self.btn_refresh)
+buttons_row.addWidget(self.btn_create)
+
+right_panel.addLayout(top_summary)
+right_panel.addLayout(space_row)
+right_panel.addStretch()
+right_panel.addLayout(buttons_row)
+
+control_layout.addLayout(left_panel, 5)
+control_layout.addLayout(right_panel, 4)
 
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
@@ -661,6 +663,7 @@ class SnapshotsPage(QWidget):
         self.scroll_layout.addStretch(1)
 
         self.scroll.setWidget(self.scroll_content)
+
         root.addWidget(self.control_card)
         root.addWidget(self.scroll, 1)
 
