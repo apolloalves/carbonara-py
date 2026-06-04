@@ -9,9 +9,10 @@ import json
 import os
 import shutil
 import subprocess
-
+import qtawesome as qta
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QFont
+
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -123,23 +124,28 @@ def clear_layout(layout):
             clear_layout(child_layout)
             child_layout.deleteLater()
 
-
-def glyph_badge(glyph: str, size: int = 34) -> QLabel:
-    label = QLabel(glyph)
+def icon_badge(icon_name: str, size: int = 34) -> QLabel:
+    label = QLabel()
     label.setAlignment(Qt.AlignCenter)
     label.setFixedSize(size, size)
-    label.setFont(QFont("DejaVu Sans Mono", 16, QFont.Bold))
+
+    pixmap = qta.icon(
+        icon_name,
+        color="#23A6FF"
+    ).pixmap(size - 8, size - 8)
+
+    label.setPixmap(pixmap)
+
     label.setStyleSheet(
         """
         QLabel {
-            color: #ecf4ff;
             background: rgba(35, 166, 255, 34);
             border-radius: 10px;
         }
         """
     )
-    return label
 
+    return label
 
 def style_combo_popup(combo: QComboBox) -> None:
     view = combo.view()
@@ -328,7 +334,7 @@ class SnapshotCard(QFrame):
         left = QHBoxLayout()
         left.setSpacing(12)
 
-        icon_label = glyph_badge(SNAPSHOT_GLYPH, 40)
+        icon_label = icon_badge("mdi6.folder-multiple", 40)
 
         text_block = QVBoxLayout()
         text_block.setSpacing(4)
@@ -379,7 +385,7 @@ class SectionCard(QFrame):
         head = QHBoxLayout()
         head.setSpacing(10)
 
-        icon_label = glyph_badge(glyph, 34)
+        icon_label = icon_badge("mdi6.folder-multiple", 34)
 
         labels = QVBoxLayout()
         labels.setSpacing(2)
@@ -518,7 +524,7 @@ class SnapshotsPage(QWidget):
         destination_header = QHBoxLayout()
         destination_header.setSpacing(8)
 
-        destination_icon = glyph_badge("▣", 26)
+        destination_icon = icon_badge("mdi6.folder-multiple", 26)
 
         lbl_destination = QLabel("Destination")
         lbl_destination.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
@@ -576,11 +582,12 @@ class SnapshotsPage(QWidget):
 # ==========================================================
 
         right_panel = QVBoxLayout()
-        right_panel.setSpacing(24)
+        right_panel.setSpacing(8)
+        right_panel.addSpacing(24)
         top_summary = QHBoxLayout()
         top_summary.setSpacing(14)
 
-        self.destination_badge = glyph_badge(DEST_GLYPH, 46)
+        self.destination_badge = icon_badge("mdi6.harddisk", 46)
         summary_text = QVBoxLayout()
         summary_text.setSpacing(4)
 
@@ -625,8 +632,8 @@ class SnapshotsPage(QWidget):
 
         space_row = QHBoxLayout()
         space_row.setSpacing(10)
-        space_row.addWidget(self.space_bar, 1)
-        space_row.addWidget(self.lbl_space_percent)
+        space_row.addWidget(self.space_bar, 8)
+        space_row.addWidget(self.lbl_space_percent,1)
 
         buttons_row = QHBoxLayout()
         buttons_row.setSpacing(12)
