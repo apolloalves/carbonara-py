@@ -49,14 +49,9 @@ class BackupsPage(QWidget):
         self.btn_back = QPushButton("← Back to menu")
         self.btn_back.clicked.connect(self.back_requested.emit)
 
-        self.lbl_hotkey = QLabel("Esc returns to the menu too")
-        self.lbl_hotkey.setObjectName("HintLabel")
-        self.lbl_hotkey.setFont(QFont("DejaVu Sans Mono", 9))
-        self.lbl_hotkey.setAlignment(Qt.AlignVCenter | Qt.AlignRight)
-
         top_row.addWidget(self.btn_back)
         top_row.addStretch(1)
-        top_row.addWidget(self.lbl_hotkey)
+        
 
         header = QFrame()
         header.setStyleSheet("background: transparent; border: none;")
@@ -100,3 +95,4 @@ class BackupsPage(QWidget):
             self.back_requested.emit()
             return
         super().keyPressEvent(event)
+
