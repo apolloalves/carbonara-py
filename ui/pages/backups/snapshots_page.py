@@ -10,7 +10,7 @@ import os
 import shutil
 import subprocess
 import qtawesome as qta
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import Qt, QTimer, Signal, QSize
 from PySide6.QtGui import QFont
 
 from PySide6.QtWidgets import (
@@ -34,17 +34,21 @@ from core.system.storage import (
     list_backup_destinations,
 )
 
+#Material Icons
+DEST_GLYPH      = "mdi6.harddisk"
+ROOT_GLYPH      = "mdi6.linux"
+HOME_GLYPH      = "mdi6.home"
+BOTH_GLYPH      = "mdi6.folder-multiple"
 
-DEST_GLYPH = "▣"
-ROOT_GLYPH = "▣"
-HOME_GLYPH = "⌂"
-BOTH_GLYPH = "◈"
-RESTORE_GLYPH = "↺"
-INTEGRITY_GLYPH = "◉"
-DELETE_GLYPH = "⌫"
-REFRESH_GLYPH = "↻"
-CREATE_GLYPH = "✚"
-SNAPSHOT_GLYPH = "◌"
+RESTORE_GLYPH   = "mdi6.restore"
+INTEGRITY_GLYPH = "mdi6.shield-check"
+DELETE_GLYPH    = "mdi6.delete"
+
+REFRESH_GLYPH   = "mdi6.refresh"
+CREATE_GLYPH    = "mdi6.plus-circle"
+
+SNAPSHOT_GLYPH  = "mdi6.archive"
+
 
 
 @dataclass(frozen=True)
@@ -354,7 +358,26 @@ class SnapshotCard(QFrame):
         left.addWidget(icon_label)
         left.addLayout(text_block)
 
-        self.btn_restore = QPushButton(f"{RESTORE_GLYPH} Restore")
+        # btn restore
+        self.btn_restore = QPushButton("Restore")
+        self.btn_restore.setIcon(
+            qta.icon(
+            RESTORE_GLYPH, 
+            color="#FFFFFF"
+            )
+        )
+        self.btn_restore.setIconSize(QSize(18, 18))
+            
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
         self.btn_integrity = QPushButton(f"{INTEGRITY_GLYPH} Integrity")
         self.btn_delete = QPushButton(f"{DELETE_GLYPH} Delete")
         self.btn_delete.setObjectName("DangerButton")
@@ -588,7 +611,7 @@ class SnapshotsPage(QWidget):
         top_summary = QHBoxLayout()
         top_summary.setSpacing(14)
 
-        self.destination_badge = icon_badge("mdi6.harddisk", 46)
+        self.destination_badge = icon_badge(DEST_GLYPH, 46)
         summary_text = QVBoxLayout()
         summary_text.setSpacing(4)
 
