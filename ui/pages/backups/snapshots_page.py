@@ -131,8 +131,9 @@ def icon_badge(icon_name: str, size: int = 34) -> QLabel:
 
     pixmap = qta.icon(
         icon_name,
-        color="#23A6FF"
-    ).pixmap(size - 8, size - 8)
+        #color="#23A6FF"
+        color="#FFFFFF"
+    ).pixmap(size - 2, size - 2)
 
     label.setPixmap(pixmap)
 
