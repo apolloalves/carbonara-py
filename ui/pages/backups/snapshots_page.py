@@ -622,6 +622,7 @@ class SnapshotsPage(QWidget):
         top_summary.setSpacing(14)
 
         self.destination_badge = icon_badge(DEST_GLYPH, 46)
+        
         summary_text = QVBoxLayout()
         summary_text.setSpacing(4)
 
@@ -745,7 +746,7 @@ class SnapshotsPage(QWidget):
 
     def _format_combo_item(self, dest: StorageDestination) -> str:
         return (
-            f"{DEST_GLYPH} {dest.label}  •  {format_gb(dest.free_gb)} livre  •  "
+            f" {dest.label}  •  {format_gb(dest.free_gb)} livre  •  "
             f"{dest.mountpoint}  •  {dest.fs_type}"
         )
 
