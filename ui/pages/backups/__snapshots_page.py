@@ -9,9 +9,10 @@ import json
 import os
 import shutil
 import subprocess
-
-from PySide6.QtCore import Qt, QTimer, Signal
+import qtawesome as qta
+from PySide6.QtCore import Qt, QTimer, Signal, QSize
 from PySide6.QtGui import QFont
+
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -33,17 +34,21 @@ from core.system.storage import (
     list_backup_destinations,
 )
 
+#Material Icons
+DEST_GLYPH      = "mdi6.harddisk"
+ROOT_GLYPH      = ""
+HOME_GLYPH      = ""
+BOTH_GLYPH      = ""
 
-DEST_GLYPH = "▣"
-ROOT_GLYPH = "▣"
-HOME_GLYPH = "⌂"
-BOTH_GLYPH = "◈"
-RESTORE_GLYPH = "↺"
-INTEGRITY_GLYPH = "◉"
-DELETE_GLYPH = "⌫"
-REFRESH_GLYPH = "↻"
-CREATE_GLYPH = "✚"
-SNAPSHOT_GLYPH = "◌"
+RESTORE_GLYPH   = "mdi6.file-restore-outline"
+INTEGRITY_GLYPH = "mdi6.shield-check"
+DELETE_GLYPH    = "mdi6.delete"
+
+REFRESH_GLYPH   = "mdi6.refresh"
+CREATE_GLYPH    = "mdi6.folder-multiple"
+
+SNAPSHOT_GLYPH  = "mdi6.archive"
+
 
 
 @dataclass(frozen=True)
@@ -123,23 +128,29 @@ def clear_layout(layout):
             clear_layout(child_layout)
             child_layout.deleteLater()
 
-
-def glyph_badge(glyph: str, size: int = 34) -> QLabel:
-    label = QLabel(glyph)
+def icon_badge(icon_name: str, size: int = 34) -> QLabel:
+    label = QLabel()
     label.setAlignment(Qt.AlignCenter)
     label.setFixedSize(size, size)
-    label.setFont(QFont("DejaVu Sans Mono", 16, QFont.Bold))
+
+    pixmap = qta.icon(
+        icon_name,
+        #color="#23A6FF"
+        color="#FFFFFF"
+    ).pixmap(size - 2, size - 2)
+
+    label.setPixmap(pixmap)
+
     label.setStyleSheet(
         """
         QLabel {
-            color: #ecf4ff;
             background: rgba(35, 166, 255, 34);
             border-radius: 10px;
         }
         """
     )
-    return label
 
+    return label
 
 def style_combo_popup(combo: QComboBox) -> None:
     view = combo.view()
@@ -328,7 +339,7 @@ class SnapshotCard(QFrame):
         left = QHBoxLayout()
         left.setSpacing(12)
 
-        icon_label = glyph_badge(SNAPSHOT_GLYPH, 40)
+        icon_label = icon_badge(SNAPSHOT_GLYPH, 46)
 
         text_block = QVBoxLayout()
         text_block.setSpacing(4)
@@ -347,9 +358,38 @@ class SnapshotCard(QFrame):
         left.addWidget(icon_label)
         left.addLayout(text_block)
 
-        self.btn_restore = QPushButton(f"{RESTORE_GLYPH} Restore")
-        self.btn_integrity = QPushButton(f"{INTEGRITY_GLYPH} Integrity")
-        self.btn_delete = QPushButton(f"{DELETE_GLYPH} Delete")
+        # Button Snapshot Restore
+        self.btn_restore = QPushButton("RESTORE")
+        self.btn_restore.setIcon(
+            qta.icon(
+            RESTORE_GLYPH, 
+            color="#FFFFFF"
+            
+            )
+        )
+        self.btn_restore.setIconSize(QSize(18, 18))
+            
+        # Button Snapshot Integrity 
+        self.btn_integrity = QPushButton("INTEGRITY")
+        self.btn_integrity.setIcon(
+            qta.icon(
+            INTEGRITY_GLYPH,
+            color="#FFFFFF"
+            
+            )
+        )
+        self.btn_restore.setIconSize(QSize(18, 18))
+        
+        # Button Snapshot Delete
+        self.btn_delete = QPushButton("DELETE")
+        self.btn_delete.setIcon(
+            qta.icon(
+            DELETE_GLYPH,
+            color="#FFFFFF"
+            
+            )
+        )
+        self.btn_delete.setIconSize(QSize(18, 18))
         self.btn_delete.setObjectName("DangerButton")
 
         root.addLayout(left, 1)
@@ -379,7 +419,7 @@ class SectionCard(QFrame):
         head = QHBoxLayout()
         head.setSpacing(10)
 
-        icon_label = glyph_badge(glyph, 34)
+        icon_label = icon_badge(CREATE_GLYPH, 40)
 
         labels = QVBoxLayout()
         labels.setSpacing(2)
@@ -440,14 +480,17 @@ class SnapshotsPage(QWidget):
             }
 
             QPushButton#PrimaryButton {
-                background: rgba(35, 166, 255, 210);
-                border: 1px solid rgba(35, 166, 255, 255);
-                color: #08111d;
-                font-weight: bold;
+            background: rgba(74, 222, 128, 0.88);
+            border: 1px solid rgba(74, 222, 128, 1);
+            color: #08111d;
+            font-weight: bold;
+            
             }
 
             QPushButton#PrimaryButton:hover {
-                background: rgba(70, 188, 255, 235);
+            background: rgba(94, 234, 149, 1);
+            border: 1px solid rgba(94, 234, 149, 1);
+            
             }
 
             QComboBox {
@@ -518,7 +561,7 @@ class SnapshotsPage(QWidget):
         destination_header = QHBoxLayout()
         destination_header.setSpacing(8)
 
-        destination_icon = glyph_badge("▣", 26)
+        destination_icon = icon_badge(CREATE_GLYPH, 46)
 
         lbl_destination = QLabel("Destination")
         lbl_destination.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
@@ -575,82 +618,126 @@ class SnapshotsPage(QWidget):
 # COLUNA DIREITA
 # ==========================================================
 
-right_panel = QVBoxLayout()
-right_panel.setSpacing(24)
+        # ==========================================================
+        # COLUNA DIREITA — envolta em QFrame com borda
+        # ==========================================================
 
-top_summary = QHBoxLayout()
-top_summary.setSpacing(14)
+        self.right_frame = QFrame()
+        self.right_frame.setObjectName("RightPanel")
+        self.right_frame.setStyleSheet(
+            """
+            QFrame#RightPanel {
+                border: 1px solid rgba(31, 92, 255, 55);
+                border-radius: 16px;
+                background: rgba(8, 12, 20, 120);
+            }
+            """
+        )
 
-self.destination_badge = glyph_badge(DEST_GLYPH, 46)
+        right_panel = QVBoxLayout(self.right_frame)
+        right_panel.setContentsMargins(16, 14, 16, 14)
+        right_panel.setSpacing(6)
+        right_panel.addSpacing(8)
 
-summary_text = QVBoxLayout()
-summary_text.setSpacing(4)
+        top_summary = QHBoxLayout()
+        top_summary.setSpacing(14)
+        top_summary.setAlignment(Qt.AlignVCenter)
 
-self.lbl_destination_info = QLabel("Select a backup destination")
-self.lbl_destination_info.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
-self.lbl_destination_info.setStyleSheet("color: #ecf4ff;")
+        self.destination_badge = icon_badge(DEST_GLYPH, 54)
 
-self.lbl_destination_meta = QLabel("—")
-self.lbl_destination_meta.setObjectName("Muted")
-self.lbl_destination_meta.setFont(QFont("DejaVu Sans Mono", 9))
+        summary_text = QVBoxLayout()
+        summary_text.setSpacing(2)
+        summary_text.setAlignment(Qt.AlignVCenter)
 
-summary_text.addWidget(self.lbl_destination_info)
-summary_text.addWidget(self.lbl_destination_meta)
+        self.lbl_destination_info = QLabel("Select a backup destination")
+        self.lbl_destination_info.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+        self.lbl_destination_info.setStyleSheet("color: #ecf4ff;")
 
-top_summary.addWidget(self.destination_badge)
-top_summary.addLayout(summary_text)
-top_summary.addStretch()
+        self.lbl_destination_meta = QLabel("—")
+        self.lbl_destination_meta.setObjectName("Muted")
+        self.lbl_destination_meta.setFont(QFont("DejaVu Sans Mono", 9))
 
-self.space_bar = QFrame()
-self.space_bar.setFixedHeight(8)
-self.space_bar.setStyleSheet("""
-QFrame {
-    border: none;
-    border-radius: 4px;
-    background: rgba(255,255,255,18);
-}
-""")
+        summary_text.addWidget(self.lbl_destination_info)
+        summary_text.addWidget(self.lbl_destination_meta)
 
-self.space_fill = QFrame(self.space_bar)
-self.space_fill.setGeometry(0, 0, 0, 8)
-self.space_fill.setStyleSheet("""
-QFrame {
-    border: none;
-    border-radius: 4px;
-    background: rgba(35,166,255,210);
-}
-""")
+        top_summary.addWidget(self.destination_badge)
+        top_summary.addLayout(summary_text)
+        top_summary.addStretch()
 
-self.lbl_space_percent = QLabel("—")
-self.lbl_space_percent.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
-self.lbl_space_percent.setStyleSheet("color: #4ade80;")
+        self.space_bar = QFrame()
+        self.space_bar.setFixedHeight(3)
+        self.space_bar.setStyleSheet("""
+        QFrame {
+        border: none;
+        border-radius: 4px;
+        background: rgba(255,255,255,18);
+        }
+        """)
 
-space_row = QHBoxLayout()
-space_row.setSpacing(10)
-space_row.addWidget(self.space_bar, 1)
-space_row.addWidget(self.lbl_space_percent)
+        self.space_fill = QFrame(self.space_bar)
+        self.space_fill.setGeometry(0, 0, 0, 6)
+        self.space_fill.setStyleSheet("""
+        QFrame {
+        border: none;
+        border-radius: 3px;
+        background: rgba(35,166,255,210);
+        }
+        """)
 
-buttons_row = QHBoxLayout()
-buttons_row.setSpacing(12)
+        self.lbl_space_percent = QLabel("—")
+        self.lbl_space_percent.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
+        self.lbl_space_percent.setStyleSheet("color: #4ade80;")
 
-self.btn_refresh = QPushButton(f"{REFRESH_GLYPH} Refresh")
-self.btn_create = QPushButton(f"{CREATE_GLYPH} Create Snapshot")
+        space_row = QHBoxLayout()
+        space_row.setSpacing(10)
+        space_row.setContentsMargins(68, 0, 0, 0)
+        space_row.addWidget(self.space_bar, 8)
+        space_row.addWidget(self.lbl_space_percent,1)
 
-self.btn_refresh.clicked.connect(self.refresh_destinations)
-self.btn_create.clicked.connect(self.create_snapshot)
-self.btn_create.setObjectName("PrimaryButton")
+        buttons_row = QHBoxLayout()
+        buttons_row.setSpacing(24)
+        
 
-buttons_row.addStretch()
-buttons_row.addWidget(self.btn_refresh)
-buttons_row.addWidget(self.btn_create)
+        # Button Snapshot Refresh 
+        self.btn_refresh = QPushButton( "REFRESH")
+        self.btn_refresh.setIcon(
+           
+            qta.icon(REFRESH_GLYPH, 
+            color="#FFFFFF"
+            )
+        )
+         
+        self.btn_refresh.setIconSize(QSize(24, 24))
+        self.btn_refresh.setFixedWidth(200) 
+        
+        # Button Snapshot Create
+        
+        self.btn_create = QPushButton( "CREATE SNAPSHOT")
+        self.btn_create.setIcon(
+            
+            qta.icon(CREATE_GLYPH 
+            )
+        )
+         
+        self.btn_create.setIconSize(QSize(24, 24))
+        self.btn_create.setFixedWidth(200)
+        
+        self.btn_refresh.clicked.connect(self.refresh_destinations)
+        self.btn_create.clicked.connect(self.create_snapshot)
+        self.btn_create.setObjectName("PrimaryButton")
 
-right_panel.addLayout(top_summary)
-right_panel.addLayout(space_row)
-right_panel.addStretch()
-right_panel.addLayout(buttons_row)
+        buttons_row.addStretch()
+        buttons_row.addWidget(self.btn_refresh)
+        buttons_row.addSpacing(10)
+        buttons_row.addWidget(self.btn_create)
 
-control_layout.addLayout(left_panel, 5)
-control_layout.addLayout(right_panel, 4)
+        right_panel.addLayout(top_summary)
+        right_panel.addLayout(space_row)
+        right_panel.addStretch()
+        right_panel.addLayout(buttons_row)
+
+        control_layout.addLayout(left_panel, 5)
+        control_layout.addWidget(self.right_frame, 4)
 
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
@@ -663,7 +750,6 @@ control_layout.addLayout(right_panel, 4)
         self.scroll_layout.addStretch(1)
 
         self.scroll.setWidget(self.scroll_content)
-
         root.addWidget(self.control_card)
         root.addWidget(self.scroll, 1)
 
@@ -687,7 +773,7 @@ control_layout.addLayout(right_panel, 4)
 
     def _format_combo_item(self, dest: StorageDestination) -> str:
         return (
-            f"{DEST_GLYPH} {dest.label}  •  {format_gb(dest.free_gb)} livre  •  "
+            f" {dest.label}  •  {format_gb(dest.free_gb)} livre  •  "
             f"{dest.mountpoint}  •  {dest.fs_type}"
         )
 

@@ -670,6 +670,8 @@ class SnapshotsPage(QWidget):
 
         space_row = QHBoxLayout()
         space_row.setSpacing(10)
+        space_row.setContentsMargins(68, 0, 0, 0)
+        
         space_row.addWidget(self.space_bar, 8)
         space_row.addWidget(self.lbl_space_percent,1)
 
