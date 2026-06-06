@@ -299,58 +299,62 @@ class SnapshotCard(QFrame):
         self.setStyleSheet(
             """
             QFrame#SnapshotCard {
-                border: 1px solid rgba(31, 92, 255, 70);
-                border-radius: 14px;
-                background: rgba(12, 16, 24, 225);
+                border: 1px solid rgba(31, 92, 255, 80);
+                border-radius: 12px;
+                background: rgba(10, 14, 22, 240);
             }
             QFrame#SnapshotCard:hover {
-                border: 1px solid rgba(35, 166, 255, 180);
-                background: rgba(16, 22, 34, 245);
+                border: 1px solid rgba(31, 141, 218, 200);
+                background: rgba(14, 20, 32, 255);
             }
 
             QPushButton {
-                padding: 8px 14px;
-                border-radius: 10px;
-                border: 1px solid rgba(31, 92, 255, 120);
-                background: rgba(10, 15, 25, 230);
-                color: #ecf4ff;
+                padding: 6px 14px;
+                border-radius: 8px;
+                border: 1px solid rgba(31, 92, 255, 100);
+                background: rgba(15, 20, 35, 220);
+                color: #c8d4e0;
+                font: 700 8pt "DejaVu Sans Mono";
             }
 
             QPushButton:hover {
-                background: rgba(23, 147, 209, 70);
-                border: 1px solid rgba(35, 166, 255, 180);
+                background: rgba(31, 141, 218, 50);
+                border: 1px solid rgba(31, 141, 218, 200);
+                color: #ecf4ff;
             }
 
             QPushButton#DangerButton {
-                border: 1px solid rgba(220, 80, 80, 120);
+                border: 1px solid rgba(200, 60, 60, 100);
+                color: #c8d4e0;
             }
 
             QPushButton#DangerButton:hover {
-                background: rgba(220, 80, 80, 40);
-                border: 1px solid rgba(255, 120, 120, 180);
+                background: rgba(200, 60, 60, 40);
+                border: 1px solid rgba(255, 100, 100, 180);
+                color: #ffaaaa;
             }
             """
         )
 
         root = QHBoxLayout(self)
-        root.setContentsMargins(14, 12, 14, 12)
-        root.setSpacing(12)
+        root.setContentsMargins(16, 14, 16, 14)
+        root.setSpacing(16)
 
         left = QHBoxLayout()
-        left.setSpacing(12)
+        left.setSpacing(14)
 
-        icon_label = icon_badge(SNAPSHOT_GLYPH, 46)
+        icon_label = icon_badge(SNAPSHOT_GLYPH, 38)
 
         text_block = QVBoxLayout()
-        text_block.setSpacing(4)
+        text_block.setSpacing(3)
 
-        title = QLabel(f"{entry.kind} • {entry.path.name}")
+        title = QLabel(entry.path.name)
         title.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
         title.setStyleSheet("color: #ecf4ff;")
 
         meta = QLabel(entry.meta_text)
-        meta.setFont(QFont("DejaVu Sans Mono", 9))
-        meta.setStyleSheet("color: #9aa6b2;")
+        meta.setFont(QFont("DejaVu Sans Mono", 8))
+        meta.setStyleSheet("color: #6b7a8d;")
 
         text_block.addWidget(title)
         text_block.addWidget(meta)
@@ -358,44 +362,31 @@ class SnapshotCard(QFrame):
         left.addWidget(icon_label)
         left.addLayout(text_block)
 
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+
         # Button Snapshot Restore
         self.btn_restore = QPushButton("RESTORE")
-        self.btn_restore.setIcon(
-            qta.icon(
-            RESTORE_GLYPH, 
-            color="#FFFFFF"
-            
-            )
-        )
-        self.btn_restore.setIconSize(QSize(18, 18))
-            
-        # Button Snapshot Integrity 
+        self.btn_restore.setIcon(qta.icon(RESTORE_GLYPH, color="#FFFFFF"))
+        self.btn_restore.setIconSize(QSize(16, 16))
+
+        # Button Snapshot Integrity
         self.btn_integrity = QPushButton("INTEGRITY")
-        self.btn_integrity.setIcon(
-            qta.icon(
-            INTEGRITY_GLYPH,
-            color="#FFFFFF"
-            
-            )
-        )
-        self.btn_restore.setIconSize(QSize(18, 18))
-        
+        self.btn_integrity.setIcon(qta.icon(INTEGRITY_GLYPH, color="#FFFFFF"))
+        self.btn_integrity.setIconSize(QSize(16, 16))
+
         # Button Snapshot Delete
         self.btn_delete = QPushButton("DELETE")
-        self.btn_delete.setIcon(
-            qta.icon(
-            DELETE_GLYPH,
-            color="#FFFFFF"
-            
-            )
-        )
-        self.btn_delete.setIconSize(QSize(18, 18))
+        self.btn_delete.setIcon(qta.icon(DELETE_GLYPH, color="#ff8888"))
+        self.btn_delete.setIconSize(QSize(16, 16))
         self.btn_delete.setObjectName("DangerButton")
 
+        btn_row.addWidget(self.btn_restore)
+        btn_row.addWidget(self.btn_integrity)
+        btn_row.addWidget(self.btn_delete)
+
         root.addLayout(left, 1)
-        root.addWidget(self.btn_restore)
-        root.addWidget(self.btn_integrity)
-        root.addWidget(self.btn_delete)
+        root.addLayout(btn_row)
 
 
 class SectionCard(QFrame):
@@ -405,44 +396,59 @@ class SectionCard(QFrame):
         self.setStyleSheet(
             """
             QFrame#SectionCard {
-                border: 1px solid rgba(31, 92, 255, 55);
-                border-radius: 16px;
-                background: rgba(8, 12, 20, 145);
+                border: none;
+                border-radius: 0px;
+                background: transparent;
             }
             """
         )
 
         self.layout_main = QVBoxLayout(self)
-        self.layout_main.setContentsMargins(16, 14, 16, 14)
-        self.layout_main.setSpacing(12)
+        self.layout_main.setContentsMargins(0, 0, 0, 0)
+        self.layout_main.setSpacing(8)
 
-        head = QHBoxLayout()
-        head.setSpacing(10)
+        # ── cabeçalho da seção ──
+        head_frame = QFrame()
+        head_frame.setObjectName("SectionHeader")
+        head_frame.setStyleSheet(
+            """
+            QFrame#SectionHeader {
+                border: none;
+                border-left: 3px solid rgba(31, 141, 218, 200);
+                border-radius: 0px;
+                background: transparent;
+            }
+            """
+        )
+        head_layout = QHBoxLayout(head_frame)
+        head_layout.setContentsMargins(12, 4, 0, 4)
+        head_layout.setSpacing(10)
 
-        icon_label = icon_badge(CREATE_GLYPH, 40)
+        icon_label = icon_badge(glyph if glyph else CREATE_GLYPH, 32)
 
         labels = QVBoxLayout()
-        labels.setSpacing(2)
+        labels.setSpacing(1)
 
         title = QLabel(title_text)
-        title.setFont(QFont("DejaVu Sans Mono", 12, QFont.Bold))
+        title.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
         title.setStyleSheet("color: #ecf4ff;")
 
         path = QLabel(path_text)
-        path.setFont(QFont("DejaVu Sans Mono", 9))
-        path.setStyleSheet("color: #9aa6b2;")
+        path.setFont(QFont("DejaVu Sans Mono", 8))
+        path.setStyleSheet("color: #6b7a8d;")
 
         labels.addWidget(title)
         labels.addWidget(path)
 
-        head.addWidget(icon_label)
-        head.addLayout(labels)
-        head.addStretch(1)
+        head_layout.addWidget(icon_label)
+        head_layout.addLayout(labels)
+        head_layout.addStretch(1)
 
         self.body = QVBoxLayout()
-        self.body.setSpacing(10)
+        self.body.setSpacing(6)
+        self.body.setContentsMargins(0, 0, 0, 0)
 
-        self.layout_main.addLayout(head)
+        self.layout_main.addWidget(head_frame)
         self.layout_main.addLayout(self.body)
 
 
@@ -635,20 +641,21 @@ class SnapshotsPage(QWidget):
         right_panel.setSpacing(8)
         right_panel.addSpacing(12)
         top_summary = QHBoxLayout()
-        top_summary.setSpacing(14)
+        top_summary.setSpacing(8)
 
-        self.destination_badge = icon_badge(DEST_GLYPH, 54)
+        self.destination_badge = icon_badge(DEST_GLYPH, 42)
         
         summary_text = QVBoxLayout()
-        summary_text.setSpacing(1)
+        summary_text.setSpacing(0)
 
         self.lbl_destination_info = QLabel("Select a backup destination")
-        self.lbl_destination_info.setFont(QFont("DejaVu Sans Mono", 12, QFont.Bold))
+        self.lbl_destination_info.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
         self.lbl_destination_info.setStyleSheet("color: #ecf4ff;")
 
         self.lbl_destination_meta = QLabel("—")
         self.lbl_destination_meta.setObjectName("Muted")
-        self.lbl_destination_meta.setFont(QFont("DejaVu Sans Mono", 10))
+        self.lbl_destination_meta.setStyleSheet("color: #c8d4e0;")
+        self.lbl_destination_meta.setFont(QFont("DejaVu Sans Mono", 9))
 
         summary_text.addWidget(self.lbl_destination_info)
         summary_text.addWidget(self.lbl_destination_meta)
