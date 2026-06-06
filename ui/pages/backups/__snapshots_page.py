@@ -234,7 +234,7 @@ class ScopeCard(QFrame):
             }
 
             QLabel#ScopeSubtitle {
-                color: #9aa6b2;
+                color: #c8d4e0;
                 background: transparent;
                 border: none;
             }
@@ -243,7 +243,7 @@ class ScopeCard(QFrame):
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(6)
+        root.setSpacing(3)
 
         self.btn = QPushButton(f"{glyph}  {title}")
         self.btn.setMinimumHeight(44)
@@ -255,7 +255,7 @@ class ScopeCard(QFrame):
         self.subtitle = QLabel(subtitle)
         self.subtitle.setObjectName("ScopeSubtitle")
         self.subtitle.setAlignment(Qt.AlignCenter)
-        self.subtitle.setFont(QFont("DejaVu Sans Mono", 8))
+        self.subtitle.setFont(QFont("DejaVu Sans Mono", 9))
         self.subtitle.setWordWrap(False)
         self.subtitle.setToolTip(subtitle)
         self.subtitle.setTextInteractionFlags(Qt.NoTextInteraction)
@@ -623,7 +623,7 @@ class SnapshotsPage(QWidget):
         self.right_frame.setStyleSheet(
             """
             QFrame#RightPanel {
-                border: 1px solid rgba(31, 92, 255, 120);
+                border: 1px solid rgba(31, 141, 218, 255);
                 border-radius: 16px;
                 background: rgba(8, 12, 20, 120);
             }
@@ -631,23 +631,24 @@ class SnapshotsPage(QWidget):
         )
 
         right_panel = QVBoxLayout(self.right_frame)
+        right_panel.setContentsMargins(16, 16, 16, 16)
         right_panel.setSpacing(8)
-        right_panel.addSpacing(24)
+        right_panel.addSpacing(12)
         top_summary = QHBoxLayout()
         top_summary.setSpacing(14)
 
         self.destination_badge = icon_badge(DEST_GLYPH, 54)
         
         summary_text = QVBoxLayout()
-        summary_text.setSpacing(4)
+        summary_text.setSpacing(1)
 
         self.lbl_destination_info = QLabel("Select a backup destination")
-        self.lbl_destination_info.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+        self.lbl_destination_info.setFont(QFont("DejaVu Sans Mono", 12, QFont.Bold))
         self.lbl_destination_info.setStyleSheet("color: #ecf4ff;")
 
         self.lbl_destination_meta = QLabel("—")
         self.lbl_destination_meta.setObjectName("Muted")
-        self.lbl_destination_meta.setFont(QFont("DejaVu Sans Mono", 9))
+        self.lbl_destination_meta.setFont(QFont("DejaVu Sans Mono", 10))
 
         summary_text.addWidget(self.lbl_destination_info)
         summary_text.addWidget(self.lbl_destination_meta)
@@ -657,7 +658,7 @@ class SnapshotsPage(QWidget):
         top_summary.addStretch()
 
         self.space_bar = QFrame()
-        self.space_bar.setFixedHeight(3)
+        self.space_bar.setFixedHeight(6)
         self.space_bar.setStyleSheet("""
         QFrame {
         border: none;
@@ -682,8 +683,6 @@ class SnapshotsPage(QWidget):
 
         space_row = QHBoxLayout()
         space_row.setSpacing(10)
-        space_row.setContentsMargins(68, 0, 0, 0)
-        
         space_row.addWidget(self.space_bar, 8)
         space_row.addWidget(self.lbl_space_percent,1)
 
@@ -700,7 +699,7 @@ class SnapshotsPage(QWidget):
         )
          
         self.btn_refresh.setIconSize(QSize(24, 24))
-        self.btn_refresh.setFixedWidth(200) 
+        self.btn_refresh.setFixedWidth(180) 
         
         # Button Snapshot Create
         
@@ -712,7 +711,7 @@ class SnapshotsPage(QWidget):
         )
          
         self.btn_create.setIconSize(QSize(24, 24))
-        self.btn_create.setFixedWidth(200)
+        self.btn_create.setFixedWidth(180)
         
         self.btn_refresh.clicked.connect(self.refresh_destinations)
         self.btn_create.clicked.connect(self.create_snapshot)
