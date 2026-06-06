@@ -612,15 +612,28 @@ class SnapshotsPage(QWidget):
 
         left_panel.addLayout(destination_block)
         left_panel.addLayout(scope_block)
-        
-        
+
+
 # ==========================================================
 # COLUNA DIREITA
 # ==========================================================
 
-        right_panel = QVBoxLayout()
+        self.right_frame = QFrame()
+        self.right_frame.setObjectName("RightPanel")
+        self.right_frame.setStyleSheet(
+            """
+            QFrame#RightPanel {
+                border: 1px solid rgba(31, 141, 218, 255);
+                border-radius: 16px;
+                background: rgba(8, 12, 20, 120);
+            }
+            """
+        )
+
+        right_panel = QVBoxLayout(self.right_frame)
+        right_panel.setContentsMargins(18, 18, 18, 18)
         right_panel.setSpacing(8)
-        right_panel.addSpacing(24)
+        right_panel.addSpacing(8)
         top_summary = QHBoxLayout()
         top_summary.setSpacing(14)
 
@@ -716,7 +729,7 @@ class SnapshotsPage(QWidget):
         right_panel.addLayout(buttons_row)
 
         control_layout.addLayout(left_panel, 5)
-        control_layout.addLayout(right_panel, 4)
+        control_layout.addWidget(self.right_frame, 4)
 
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)

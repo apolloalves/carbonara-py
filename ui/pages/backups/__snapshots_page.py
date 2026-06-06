@@ -612,22 +612,18 @@ class SnapshotsPage(QWidget):
 
         left_panel.addLayout(destination_block)
         left_panel.addLayout(scope_block)
-        
-        
+
+
 # ==========================================================
 # COLUNA DIREITA
 # ==========================================================
-
-        # ==========================================================
-        # COLUNA DIREITA — envolta em QFrame com borda
-        # ==========================================================
 
         self.right_frame = QFrame()
         self.right_frame.setObjectName("RightPanel")
         self.right_frame.setStyleSheet(
             """
             QFrame#RightPanel {
-                border: 1px solid rgba(31, 92, 255, 55);
+                border: 1px solid rgba(31, 92, 255, 120);
                 border-radius: 16px;
                 background: rgba(8, 12, 20, 120);
             }
@@ -635,19 +631,15 @@ class SnapshotsPage(QWidget):
         )
 
         right_panel = QVBoxLayout(self.right_frame)
-        right_panel.setContentsMargins(16, 14, 16, 14)
-        right_panel.setSpacing(6)
-        right_panel.addSpacing(8)
-
+        right_panel.setSpacing(8)
+        right_panel.addSpacing(24)
         top_summary = QHBoxLayout()
         top_summary.setSpacing(14)
-        top_summary.setAlignment(Qt.AlignVCenter)
 
         self.destination_badge = icon_badge(DEST_GLYPH, 54)
-
+        
         summary_text = QVBoxLayout()
-        summary_text.setSpacing(2)
-        summary_text.setAlignment(Qt.AlignVCenter)
+        summary_text.setSpacing(4)
 
         self.lbl_destination_info = QLabel("Select a backup destination")
         self.lbl_destination_info.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
@@ -691,12 +683,12 @@ class SnapshotsPage(QWidget):
         space_row = QHBoxLayout()
         space_row.setSpacing(10)
         space_row.setContentsMargins(68, 0, 0, 0)
+        
         space_row.addWidget(self.space_bar, 8)
         space_row.addWidget(self.lbl_space_percent,1)
 
         buttons_row = QHBoxLayout()
-        buttons_row.setSpacing(24)
-        
+        buttons_row.setSpacing(12)
 
         # Button Snapshot Refresh 
         self.btn_refresh = QPushButton( "REFRESH")
@@ -728,7 +720,6 @@ class SnapshotsPage(QWidget):
 
         buttons_row.addStretch()
         buttons_row.addWidget(self.btn_refresh)
-        buttons_row.addSpacing(10)
         buttons_row.addWidget(self.btn_create)
 
         right_panel.addLayout(top_summary)
