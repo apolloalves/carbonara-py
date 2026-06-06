@@ -40,12 +40,12 @@ ROOT_GLYPH      = "mdi6.linux"
 HOME_GLYPH      = "mdi6.home"
 BOTH_GLYPH      = "mdi6.folder-multiple"
 
-RESTORE_GLYPH   = "mdi6.restore"
+RESTORE_GLYPH   = "mdi6.file-restore-outline"
 INTEGRITY_GLYPH = "mdi6.shield-check"
 DELETE_GLYPH    = "mdi6.delete"
 
 REFRESH_GLYPH   = "mdi6.refresh"
-CREATE_GLYPH    = "mdi6.plus-circle"
+CREATE_GLYPH    = "mdi6.folder-plus"
 
 SNAPSHOT_GLYPH  = "mdi6.archive"
 
@@ -390,7 +390,6 @@ class SnapshotCard(QFrame):
             )
         )
         self.btn_delete.setIconSize(QSize(18, 18))
-        
         self.btn_delete.setObjectName("DangerButton")
 
         root.addLayout(left, 1)
@@ -673,9 +672,29 @@ class SnapshotsPage(QWidget):
         buttons_row = QHBoxLayout()
         buttons_row.setSpacing(12)
 
-        self.btn_refresh = QPushButton(f"{REFRESH_GLYPH} Refresh")
-        self.btn_create = QPushButton(f"{CREATE_GLYPH} Create Snapshot")
-
+        # Button Snapshot Refresh 
+        self.btn_refresh = QPushButton( "REFRESH")
+        self.btn_refresh.setIcon(
+           
+            qta.icon(REFRESH_GLYPH, 
+            color="#FFFFFF"
+            )
+        )
+         
+        self.btn_refresh.setIconSize(QSize(24, 24))
+        self.btn_refresh.setFixedWidth(200) 
+        
+        # Button Snapshot Create 
+        self.btn_create = QPushButton( "CREATE SNAPSHOT")
+        self.btn_create.setIcon(
+            
+            qta.icon(CREATE_GLYPH 
+            )
+        )
+         
+        self.btn_create.setIconSize(QSize(24, 24))
+        self.btn_create.setFixedWidth(200)
+        
         self.btn_refresh.clicked.connect(self.refresh_destinations)
         self.btn_create.clicked.connect(self.create_snapshot)
         self.btn_create.setObjectName("PrimaryButton")
