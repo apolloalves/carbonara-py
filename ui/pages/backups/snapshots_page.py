@@ -358,28 +358,39 @@ class SnapshotCard(QFrame):
         left.addWidget(icon_label)
         left.addLayout(text_block)
 
-        # btn restore
+        # Button Snapshot Restore
         self.btn_restore = QPushButton("Restore")
         self.btn_restore.setIcon(
             qta.icon(
             RESTORE_GLYPH, 
             color="#FFFFFF"
+            
             )
         )
         self.btn_restore.setIconSize(QSize(18, 18))
             
+        # Button Snapshot Integrity 
+        self.btn_integrity = QPushButton("Integrity")
+        self.btn_integrity.setIcon(
+            qta.icon(
+            INTEGRITY_GLYPH,
+            color="#FFFFFF"
+            
+            )
+        )
+        self.btn_restore.setIconSize(QSize(18, 18))
         
+        # Button Snapshot Delete
+        self.btn_delete = QPushButton("Delete")
+        self.btn_delete.setIcon(
+            qta.icon(
+            DELETE_GLYPH,
+            color="#FFFFFF"
+            
+            )
+        )
+        self.btn_delete.setIconSize(QSize(18, 18))
         
-        
-        
-        
-        
-        
-        
-        
-        
-        self.btn_integrity = QPushButton(f"{INTEGRITY_GLYPH} Integrity")
-        self.btn_delete = QPushButton(f"{DELETE_GLYPH} Delete")
         self.btn_delete.setObjectName("DangerButton")
 
         root.addLayout(left, 1)
