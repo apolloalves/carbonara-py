@@ -36,16 +36,16 @@ from core.system.storage import (
 
 #Material Icons
 DEST_GLYPH      = "mdi6.harddisk"
-ROOT_GLYPH      = "mdi6.linux"
-HOME_GLYPH      = "mdi6.home"
-BOTH_GLYPH      = "mdi6.folder-multiple"
+ROOT_GLYPH      = ""
+HOME_GLYPH      = ""
+BOTH_GLYPH      = ""
 
 RESTORE_GLYPH   = "mdi6.file-restore-outline"
 INTEGRITY_GLYPH = "mdi6.shield-check"
 DELETE_GLYPH    = "mdi6.delete"
 
 REFRESH_GLYPH   = "mdi6.refresh"
-CREATE_GLYPH    = "mdi6.folder-plus"
+CREATE_GLYPH    = "mdi6.folder-multiple"
 
 SNAPSHOT_GLYPH  = "mdi6.archive"
 
@@ -339,7 +339,7 @@ class SnapshotCard(QFrame):
         left = QHBoxLayout()
         left.setSpacing(12)
 
-        icon_label = icon_badge("mdi6.folder-multiple", 40)
+        icon_label = icon_badge(SNAPSHOT_GLYPH, 46)
 
         text_block = QVBoxLayout()
         text_block.setSpacing(4)
@@ -359,7 +359,7 @@ class SnapshotCard(QFrame):
         left.addLayout(text_block)
 
         # Button Snapshot Restore
-        self.btn_restore = QPushButton("Restore")
+        self.btn_restore = QPushButton("RESTORE")
         self.btn_restore.setIcon(
             qta.icon(
             RESTORE_GLYPH, 
@@ -370,7 +370,7 @@ class SnapshotCard(QFrame):
         self.btn_restore.setIconSize(QSize(18, 18))
             
         # Button Snapshot Integrity 
-        self.btn_integrity = QPushButton("Integrity")
+        self.btn_integrity = QPushButton("INTEGRITY")
         self.btn_integrity.setIcon(
             qta.icon(
             INTEGRITY_GLYPH,
@@ -381,7 +381,7 @@ class SnapshotCard(QFrame):
         self.btn_restore.setIconSize(QSize(18, 18))
         
         # Button Snapshot Delete
-        self.btn_delete = QPushButton("Delete")
+        self.btn_delete = QPushButton("DELETE")
         self.btn_delete.setIcon(
             qta.icon(
             DELETE_GLYPH,
@@ -419,7 +419,7 @@ class SectionCard(QFrame):
         head = QHBoxLayout()
         head.setSpacing(10)
 
-        icon_label = icon_badge("mdi6.folder-multiple", 34)
+        icon_label = icon_badge(CREATE_GLYPH, 40)
 
         labels = QVBoxLayout()
         labels.setSpacing(2)
@@ -480,14 +480,17 @@ class SnapshotsPage(QWidget):
             }
 
             QPushButton#PrimaryButton {
-                background: rgba(35, 166, 255, 210);
-                border: 1px solid rgba(35, 166, 255, 255);
-                color: #08111d;
-                font-weight: bold;
+            background: rgba(74, 222, 128, 0.88);
+            border: 1px solid rgba(74, 222, 128, 1);
+            color: #08111d;
+            font-weight: bold;
+            
             }
 
             QPushButton#PrimaryButton:hover {
-                background: rgba(70, 188, 255, 235);
+            background: rgba(94, 234, 149, 1);
+            border: 1px solid rgba(94, 234, 149, 1);
+            
             }
 
             QComboBox {
@@ -558,7 +561,7 @@ class SnapshotsPage(QWidget):
         destination_header = QHBoxLayout()
         destination_header.setSpacing(8)
 
-        destination_icon = icon_badge("mdi6.folder-multiple", 26)
+        destination_icon = icon_badge(CREATE_GLYPH, 46)
 
         lbl_destination = QLabel("Destination")
         lbl_destination.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
@@ -621,7 +624,7 @@ class SnapshotsPage(QWidget):
         top_summary = QHBoxLayout()
         top_summary.setSpacing(14)
 
-        self.destination_badge = icon_badge(DEST_GLYPH, 46)
+        self.destination_badge = icon_badge(DEST_GLYPH, 54)
         
         summary_text = QVBoxLayout()
         summary_text.setSpacing(4)
@@ -642,7 +645,7 @@ class SnapshotsPage(QWidget):
         top_summary.addStretch()
 
         self.space_bar = QFrame()
-        self.space_bar.setFixedHeight(8)
+        self.space_bar.setFixedHeight(3)
         self.space_bar.setStyleSheet("""
         QFrame {
         border: none;
@@ -652,11 +655,11 @@ class SnapshotsPage(QWidget):
         """)
 
         self.space_fill = QFrame(self.space_bar)
-        self.space_fill.setGeometry(0, 0, 0, 8)
+        self.space_fill.setGeometry(0, 0, 0, 6)
         self.space_fill.setStyleSheet("""
         QFrame {
         border: none;
-        border-radius: 4px;
+        border-radius: 3px;
         background: rgba(35,166,255,210);
         }
         """)
@@ -685,7 +688,8 @@ class SnapshotsPage(QWidget):
         self.btn_refresh.setIconSize(QSize(24, 24))
         self.btn_refresh.setFixedWidth(200) 
         
-        # Button Snapshot Create 
+        # Button Snapshot Create
+        
         self.btn_create = QPushButton( "CREATE SNAPSHOT")
         self.btn_create.setIcon(
             
