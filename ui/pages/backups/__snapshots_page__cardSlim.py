@@ -541,7 +541,7 @@ class SnapshotsPage(QWidget):
         self.control_card.setStyleSheet(
             """
             QFrame#ControlCard {
-                border: 1px solid rgba(31, 92, 255, 55);
+                border: 1px solid rgba(31, 92, 255, 120);
                 border-radius: 18px;
                 background: rgba(8, 12, 20, 150);
             }
@@ -549,12 +549,12 @@ class SnapshotsPage(QWidget):
         )
         control_layout = QHBoxLayout(self.control_card)
         control_layout.setContentsMargins(18, 16, 18, 16)
-        control_layout.setSpacing(48)
-        control_layout.setAlignment(Qt.AlignTop)
+        control_layout.setSpacing(24)
 
         # ── COLUNA ESQUERDA ──
         left_panel = QVBoxLayout()
         left_panel.setSpacing(14)
+        left_panel.setAlignment(Qt.AlignTop)
 
         destination_block = QVBoxLayout()
         destination_block.setSpacing(8)
@@ -611,7 +611,7 @@ class SnapshotsPage(QWidget):
         self.right_frame.setStyleSheet(
             """
             QFrame#RightPanel {
-                border: 1px solid rgba(31, 141, 218, 255);
+                border: 1px solid rgba(31, 92, 255, 120);
                 border-radius: 16px;
                 background: rgba(8, 12, 20, 120);
             }
@@ -619,17 +619,19 @@ class SnapshotsPage(QWidget):
         )
 
         right_panel = QVBoxLayout(self.right_frame)
-        right_panel.setContentsMargins(16, 12, 16, 12)
-        right_panel.setSpacing(2)
+        right_panel.setContentsMargins(14, 18, 14, 18)
+        right_panel.setSpacing(6)
 
-        top_summary = QHBoxLayout()
-        top_summary.setSpacing(8)
-        top_summary.setAlignment(Qt.AlignVCenter)
+        # Linha superior: ícone + nome + meta
+        top_row = QHBoxLayout()
+        top_row.setSpacing(10)
+        top_row.setAlignment(Qt.AlignVCenter)
 
-        self.destination_badge = icon_badge(DEST_GLYPH, 36)
+        self.destination_badge = icon_badge(DEST_GLYPH, 52)
+        self.destination_badge.setStyleSheet("background: transparent; border: none;")
 
-        summary_text = QVBoxLayout()
-        summary_text.setSpacing(0)
+        info_col = QVBoxLayout()
+        info_col.setSpacing(5)
 
         self.lbl_destination_info = QLabel("Select a backup destination")
         self.lbl_destination_info.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
@@ -637,15 +639,16 @@ class SnapshotsPage(QWidget):
 
         self.lbl_destination_meta = QLabel("—")
         self.lbl_destination_meta.setObjectName("Muted")
-        self.lbl_destination_meta.setStyleSheet("color: #9aa6b2; margin-top: -1px;")
+        self.lbl_destination_meta.setStyleSheet("color: #9aa6b2;")
         self.lbl_destination_meta.setFont(QFont("DejaVu Sans Mono", 9))
 
-        summary_text.addWidget(self.lbl_destination_info)
-        summary_text.addWidget(self.lbl_destination_meta)
+        info_col.addWidget(self.lbl_destination_info)
+        info_col.addWidget(self.lbl_destination_meta)
 
-        top_summary.addWidget(self.destination_badge, 0, Qt.AlignVCenter)
-        top_summary.addLayout(summary_text)
-        top_summary.addStretch()
+        # Barra dentro do info_col, colada nos metadados
+        bar_row = QHBoxLayout()
+        bar_row.setSpacing(8)
+        bar_row.setContentsMargins(0, 0, 0, 0)
 
         self.space_bar = QFrame()
         self.space_bar.setFixedHeight(5)
@@ -670,19 +673,23 @@ class SnapshotsPage(QWidget):
         self.lbl_space_percent = QLabel("—")
         self.lbl_space_percent.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
         self.lbl_space_percent.setStyleSheet("color: #4ade80;")
+        self.lbl_space_percent.setFixedWidth(80)
+        self.lbl_space_percent.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
-        space_row = QHBoxLayout()
-        space_row.setSpacing(10)
-        space_row.setContentsMargins(50, -18, 0, 0)
-        space_row.addWidget(self.space_bar, 8)
-        space_row.addWidget(self.lbl_space_percent, 1)
+        bar_row.addWidget(self.space_bar, 1)
+        bar_row.addWidget(self.lbl_space_percent)
 
-        right_panel.addLayout(top_summary)
-        right_panel.addLayout(space_row)
+        info_col.addLayout(bar_row)
 
-        # botões FORA do right_frame
+        top_row.addWidget(self.destination_badge, 0, Qt.AlignTop)
+        top_row.addLayout(info_col)
+
+        right_panel.addLayout(top_row)
+
+        # Botões fora da borda
         buttons_row = QHBoxLayout()
         buttons_row.setSpacing(12)
+        buttons_row.setContentsMargins(0, 52, 0, 0)
 
         self.btn_refresh = QPushButton("REFRESH")
         self.btn_refresh.setIcon(qta.icon(REFRESH_GLYPH, color="#FFFFFF"))
@@ -702,13 +709,18 @@ class SnapshotsPage(QWidget):
         buttons_row.addWidget(self.btn_refresh)
         buttons_row.addWidget(self.btn_create)
 
-        # coluna direita: label + card bordado alinhados com esquerda
         right_column = QVBoxLayout()
         right_column.setSpacing(0)
         right_column.setContentsMargins(0, 0, 0, 0)
+        right_column.setAlignment(Qt.AlignTop)
 
+        # Espaçador invisível — espelha label 'Destination' + spacing do left_panel
+        lbl_spacer = QLabel("Destination")
+        lbl_spacer.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+        lbl_spacer.setVisible(False)  # invisível mas ocupa espaço
+        right_column.addWidget(lbl_spacer)
+        right_column.addSpacing(18)
         right_column.addWidget(self.right_frame)
-        right_column.addSpacing(24)
         right_column.addLayout(buttons_row)
 
         control_layout.addLayout(left_panel, 5)
@@ -808,6 +820,13 @@ class SnapshotsPage(QWidget):
             self.lbl_destination_meta.setText("—")
             self.lbl_space_percent.setText("—")
             self.space_fill.setGeometry(0, 0, 0, 5)
+            self.right_frame.setStyleSheet("""
+                QFrame#RightPanel {
+                    border: 1px solid rgba(31, 92, 255, 120);
+                    border-radius: 16px;
+                    background: rgba(8, 12, 20, 120);
+                }
+            """)
             return
 
         used_pct = 0
@@ -818,6 +837,13 @@ class SnapshotsPage(QWidget):
         fill_width = max(0, int(self.space_bar.width() * used_pct / 100))
         self.space_fill.setGeometry(0, 0, fill_width, 5)
 
+        self.right_frame.setStyleSheet("""
+            QFrame#RightPanel {
+                border: 1px solid rgba(35, 166, 255, 220);
+                border-radius: 16px;
+                background: rgba(8, 12, 20, 120);
+            }
+        """)
         self.lbl_destination_info.setText(dest.label)
         self.lbl_destination_meta.setText(
             f"{format_gb(dest.free_gb)} livre de {format_gb(dest.total_gb)} • "
