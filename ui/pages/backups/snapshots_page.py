@@ -58,6 +58,7 @@ class SnapshotEntry:
     path: Path
     meta_text: str
     modified_text: str
+    size_str: str = ""
 
 
 def read_snapshot_metadata(path: Path) -> dict:
@@ -101,6 +102,14 @@ def collect_snapshots(backup_root: Path) -> List[SnapshotEntry]:
                     continue
 
                 source = meta.get("source", "")
+                size_bytes = meta.get("size_bytes", 0)
+                size_str = ""
+                if size_bytes and size_bytes > 0:
+                    gb = size_bytes / (1024 ** 3)
+                    if gb >= 1:
+                        size_str = f"{gb:.1f} GB"
+                    else:
+                        size_str = f"{size_bytes / (1024 ** 2):.0f} MB"
 
                 meta_text = f"{created_at} • {status}"
                 if source:
@@ -114,6 +123,7 @@ def collect_snapshots(backup_root: Path) -> List[SnapshotEntry]:
                         modified_text=datetime.fromtimestamp(
                             stat.st_mtime
                         ).strftime("%Y-%m-%d %H:%M:%S"),
+                        size_str=size_str,
                     )
                 )
             except OSError:
@@ -348,21 +358,41 @@ class SnapshotCard(QFrame):
         left = QHBoxLayout()
         left.setSpacing(14)
 
-        icon_label = icon_badge(SNAPSHOT_GLYPH, 38)
+        icon_label = icon_badge(SNAPSHOT_GLYPH, 32)
 
         text_block = QVBoxLayout()
         text_block.setSpacing(3)
 
         title = QLabel(entry.path.name)
-        title.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+        title.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
         title.setStyleSheet("color: #ecf4ff;")
 
+        # Linha de meta + tamanho em destaque
+        meta_row = QHBoxLayout()
+        meta_row.setSpacing(8)
+        meta_row.setContentsMargins(0, 0, 0, 0)
+
         meta = QLabel(entry.meta_text)
-        meta.setFont(QFont("DejaVu Sans Mono", 8))
+        meta.setFont(QFont("DejaVu Sans Mono", 9))
         meta.setStyleSheet("color: #6b7a8d;")
 
+        meta_row.addWidget(meta)
+
+        if entry.size_str:
+            size_prefix = QLabel("snapshot size")
+            size_prefix.setFont(QFont("DejaVu Sans Mono", 8))
+            size_prefix.setStyleSheet("color: #6b7a8d;")
+            meta_row.addWidget(size_prefix)
+
+            size_val = QLabel(entry.size_str)
+            size_val.setFont(QFont("DejaVu Sans Mono", 8, QFont.Bold))
+            size_val.setStyleSheet("color: #4ade80;")
+            meta_row.addWidget(size_val)
+
+        meta_row.addStretch()
+
         text_block.addWidget(title)
-        text_block.addWidget(meta)
+        text_block.addLayout(meta_row)
 
         left.addWidget(icon_label)
         left.addLayout(text_block)
