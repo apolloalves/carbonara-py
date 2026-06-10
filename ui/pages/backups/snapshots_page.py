@@ -10,7 +10,7 @@ import os
 import shutil
 import subprocess
 import qtawesome as qta
-from PySide6.QtCore import Qt, QTimer, Signal, QSize
+from PySide6.QtCore import Qt, QTimer, Signal, QSize, QThread
 from PySide6.QtGui import QFont
 
 from PySide6.QtWidgets import (
@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QListView,
     QScrollArea,
     QSizePolicy,
+    QDialog,
 )
 
 from core.operation_manager import OperationManager
@@ -1046,19 +1047,387 @@ dialog.exec()
             )
             return
 
-        answer = QMessageBox.question(
-            self,
-            "Delete Snapshot",
-            f"Delete snapshot?\n\n{entry.path}",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
-
-        if answer != QMessageBox.Yes:
+        dialog = _DeleteConfirmDialog(entry, parent=self)
+        if dialog.exec() != QDialog.Accepted:
             return
 
+        if not OperationManager.start("delete", f"Delete snapshot {entry.path.name}"):
+            QMessageBox.warning(self, "Carbonara", "Another operation is already running.")
+            return
+
+        self.set_busy(True)
+
+        # Dialog de progresso — aparece enquanto o worker roda
+        self._delete_progress = _DeleteProgressDialog(entry.path.name, parent=self)
+        self._delete_progress.show()
+
+        worker = _DeleteWorker(entry.path, parent=self)
+        worker.finished_ok.connect(lambda msg: self._on_delete_ok(msg))
+        worker.failed.connect(lambda msg: self._on_delete_fail(msg))
+        worker.start()
+        self._delete_worker = worker
+
+    def _on_delete_ok(self, msg: str) -> None:
+        self._delete_progress.close()
+        OperationManager.finish()
+        self.set_busy(False)
+        self.refresh_list()
+
+    def _on_delete_fail(self, msg: str) -> None:
+        self._delete_progress.close()
+        OperationManager.finish()
+        self.set_busy(False)
+        QMessageBox.critical(self, "Delete Snapshot", f"Falha ao remover snapshot:\n\n{msg}")
+        self.refresh_list()
+
+
+# ── Delete helpers ────────────────────────────────────────────────────────────
+
+class _DeleteConfirmDialog(QDialog):
+    """Dialog de confirmação estilizado para delete de snapshot."""
+
+    def __init__(self, entry: SnapshotEntry, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Confirmar exclusão")
+        self.setModal(True)
+        self.setFixedSize(520, 220)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self._build_ui(entry)
+        self._apply_styles()
+
+    def _build_ui(self, entry: SnapshotEntry) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        # Header
+        header = QFrame()
+        header.setObjectName("DelHeader")
+        header.setFixedHeight(48)
+        h_layout = QHBoxLayout(header)
+        h_layout.setContentsMargins(18, 0, 16, 0)
+
+        icon = QLabel()
+        icon.setFixedSize(28, 28)
+        icon.setAlignment(Qt.AlignCenter)
+        import qtawesome as qta
+        icon.setPixmap(qta.icon("mdi6.delete", color="#ff6666").pixmap(18, 18))
+        icon.setStyleSheet("QLabel { background: rgba(200,60,60,40); border-radius: 8px; }")
+
+        lbl = QLabel("Excluir Snapshot")
+        lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+        lbl.setStyleSheet("color: #ecf4ff;")
+
+        btn_x = QPushButton("✕")
+        btn_x.setObjectName("DelClose")
+        btn_x.setFixedSize(26, 26)
+        btn_x.clicked.connect(self.reject)
+
+        h_layout.addWidget(icon)
+        h_layout.addSpacing(10)
+        h_layout.addWidget(lbl)
+        h_layout.addStretch()
+        h_layout.addWidget(btn_x)
+
+        # Body
+        body = QFrame()
+        body.setObjectName("DelBody")
+        b_layout = QVBoxLayout(body)
+        b_layout.setContentsMargins(24, 18, 24, 20)
+        b_layout.setSpacing(10)
+
+        warn = QLabel("Esta ação é irreversível. O snapshot será permanentemente removido do disco.")
+        warn.setWordWrap(True)
+        warn.setFont(QFont("DejaVu Sans Mono", 9))
+        warn.setStyleSheet("color: #c8d4e0;")
+
+        snap_label = QLabel(entry.path.name)
+        snap_label.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+        snap_label.setStyleSheet(
+            "color: #ff9966; background: rgba(200,60,60,20); "
+            "border: 1px solid rgba(200,60,60,60); border-radius: 6px; padding: 4px 10px;"
+        )
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
+
+        btn_cancel = QPushButton("Cancelar")
+        btn_cancel.setObjectName("DelBtnCancel")
+        btn_cancel.setFixedWidth(110)
+        btn_cancel.clicked.connect(self.reject)
+
+        btn_confirm = QPushButton("Excluir")
+        btn_confirm.setObjectName("DelBtnConfirm")
+        btn_confirm.setFixedWidth(110)
+        btn_confirm.clicked.connect(self.accept)
+
+        btn_row.addStretch()
+        btn_row.addWidget(btn_cancel)
+        btn_row.addWidget(btn_confirm)
+
+        b_layout.addWidget(warn)
+        b_layout.addWidget(snap_label)
+        b_layout.addStretch()
+        b_layout.addLayout(btn_row)
+
+        root.addWidget(header)
+        root.addWidget(body, stretch=1)
+
+    def _apply_styles(self) -> None:
+        self.setStyleSheet("""
+            QFrame#DelHeader {
+                background: rgba(30, 10, 10, 255);
+                border-bottom: 1px solid rgba(200, 60, 60, 100);
+                border-top-left-radius: 12px;
+                border-top-right-radius: 12px;
+            }
+            QFrame#DelBody {
+                background: #080c14;
+                border-bottom-left-radius: 12px;
+                border-bottom-right-radius: 12px;
+            }
+            QPushButton#DelClose {
+                background: transparent;
+                border: none;
+                color: #4a5a6a;
+                font-size: 12px;
+                border-radius: 6px;
+            }
+            QPushButton#DelClose:hover {
+                background: rgba(200, 60, 60, 60);
+                color: #ff8888;
+            }
+            QPushButton#DelBtnCancel {
+                background: rgba(10, 15, 25, 230);
+                border: 1px solid rgba(31, 92, 255, 120);
+                border-radius: 8px;
+                color: #ecf4ff;
+                font-family: "DejaVu Sans Mono";
+                font-size: 11px;
+                padding: 6px 0;
+            }
+            QPushButton#DelBtnCancel:hover {
+                background: rgba(23, 147, 209, 70);
+                border-color: rgba(35, 166, 255, 180);
+            }
+            QPushButton#DelBtnConfirm {
+                background: rgba(180, 40, 40, 180);
+                border: 1px solid rgba(255, 80, 80, 160);
+                border-radius: 8px;
+                color: #ffffff;
+                font-family: "DejaVu Sans Mono";
+                font-size: 11px;
+                font-weight: 700;
+                padding: 6px 0;
+            }
+            QPushButton#DelBtnConfirm:hover {
+                background: rgba(220, 60, 60, 220);
+                border-color: rgba(255, 120, 120, 220);
+            }
+        """)
+
+    # Drag
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+    def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.LeftButton and hasattr(self, '_drag'):
+            self.move(event.globalPosition().toPoint() - self._drag)
+
+
+class _DeleteProgressDialog(QDialog):
+    """Loader exibido enquanto o snapshot está sendo removido."""
+
+    def __init__(self, snap_name: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Removendo snapshot")
+        self.setModal(True)
+        self.setFixedSize(420, 160)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self._dots = 0
+        self._build_ui(snap_name)
+        self._apply_styles()
+
+        self._timer = QTimer(self)
+        self._timer.setInterval(400)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start()
+
+    def _build_ui(self, snap_name: str) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        # Header
+        header = QFrame()
+        header.setObjectName("DPHeader")
+        header.setFixedHeight(46)
+        h_layout = QHBoxLayout(header)
+        h_layout.setContentsMargins(18, 0, 18, 0)
+
+        import qtawesome as qta
+        icon = QLabel()
+        icon.setFixedSize(26, 26)
+        icon.setAlignment(Qt.AlignCenter)
+        icon.setPixmap(qta.icon("mdi6.delete", color="#ff6666").pixmap(16, 16))
+        icon.setStyleSheet("QLabel { background: rgba(200,60,60,40); border-radius: 7px; }")
+
+        lbl = QLabel("Removendo Snapshot")
+        lbl.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+        lbl.setStyleSheet("color: #ecf4ff;")
+
+        h_layout.addWidget(icon)
+        h_layout.addSpacing(10)
+        h_layout.addWidget(lbl)
+        h_layout.addStretch()
+
+        # Body
+        body = QFrame()
+        body.setObjectName("DPBody")
+        b_layout = QVBoxLayout(body)
+        b_layout.setContentsMargins(24, 16, 24, 20)
+        b_layout.setSpacing(10)
+
+        self.lbl_status = QLabel("Aguardando autenticação...")
+        self.lbl_status.setFont(QFont("DejaVu Sans Mono", 10))
+        self.lbl_status.setStyleSheet("color: #c8d4e0;")
+        self.lbl_status.setAlignment(Qt.AlignCenter)
+
+        snap_lbl = QLabel(snap_name)
+        snap_lbl.setFont(QFont("DejaVu Sans Mono", 9))
+        snap_lbl.setStyleSheet("color: #6b7a8d;")
+        snap_lbl.setAlignment(Qt.AlignCenter)
+
+        # Barra indeterminada slim
+        from PySide6.QtWidgets import QProgressBar
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 0)   # modo indeterminado — pulsa
+        self.progress.setFixedHeight(4)
+        self.progress.setTextVisible(False)
+        self.progress.setObjectName("DPBar")
+
+        b_layout.addWidget(self.lbl_status)
+        b_layout.addWidget(snap_lbl)
+        b_layout.addSpacing(4)
+        b_layout.addWidget(self.progress)
+
+        root.addWidget(header)
+        root.addWidget(body, stretch=1)
+
+    def _apply_styles(self) -> None:
+        self.setStyleSheet("""
+            QFrame#DPHeader {
+                background: rgba(30, 10, 10, 255);
+                border-bottom: 1px solid rgba(200, 60, 60, 100);
+                border-top-left-radius: 12px;
+                border-top-right-radius: 12px;
+            }
+            QFrame#DPBody {
+                background: #080c14;
+                border-bottom-left-radius: 12px;
+                border-bottom-right-radius: 12px;
+            }
+            QProgressBar#DPBar {
+                background: rgba(31, 92, 255, 20);
+                border: none;
+                border-radius: 2px;
+            }
+            QProgressBar#DPBar::chunk {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:0,
+                    stop:0 rgba(31, 92, 255, 220),
+                    stop:1 rgba(35, 166, 255, 220)
+                );
+                border-radius: 2px;
+            }
+        """)
+
+    def _tick(self) -> None:
+        self._dots = (self._dots + 1) % 4
+        dots = "." * self._dots
+        self.lbl_status.setText(f"Removendo{dots}")
+
+    def closeEvent(self, event) -> None:
+        self._timer.stop()
+        super().closeEvent(event)
+
+    # Drag
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.LeftButton and hasattr(self, '_drag'):
+            self.move(event.globalPosition().toPoint() - self._drag)
+
+
+class _DeleteWorker(QThread):
+    finished_ok = Signal(str)
+    failed = Signal(str)
+
+    def __init__(self, snapshot_path: Path, parent=None):
+        super().__init__(parent)
+        self._path = snapshot_path
+
+    def run(self) -> None:
         try:
-            shutil.rmtree(entry.path)
-            self.refresh_list()
-        except Exception as e:
-            QMessageBox.critical(self, "Delete Snapshot", str(e))
+            kind_base = self._path.parent
+            link = kind_base / "latest"
+
+            # Verifica se este snapshot é o apontado pelo latest
+            is_latest = False
+            try:
+                if link.is_symlink():
+                    resolved = (kind_base / link.readlink()).resolve()
+                    is_latest = resolved == self._path.resolve()
+            except Exception:
+                pass
+
+            # Calcula qual será o novo latest antes de deletar
+            new_latest: Path | None = None
+            if is_latest:
+                candidates = sorted(
+                    [p for p in kind_base.iterdir()
+                     if p.is_dir() and p.name != "latest" and p != self._path],
+                    key=lambda p: p.name,
+                )
+                new_latest = candidates[-1] if candidates else None
+
+            # Script python que roda como root via pkexec
+            script = f"""
+import shutil, os
+from pathlib import Path
+
+target = Path({str(self._path)!r})
+link   = Path({str(link)!r})
+
+shutil.rmtree(target)
+
+# Atualiza symlink latest
+if link.is_symlink() or link.exists():
+    link.unlink()
+
+new_latest = {repr(str(new_latest)) if new_latest else repr(None)}
+if new_latest:
+    link.symlink_to(Path(new_latest).name)
+"""
+            import subprocess
+            from pathlib import Path as _Path
+
+            python_bin = str(_Path.home() / "venvs" / "pyside" / "bin" / "python3")
+
+            result = subprocess.run(
+                ["pkexec", python_bin, "-c", script],
+                capture_output=True,
+                text=True,
+            )
+
+            if result.returncode != 0:
+                err = result.stderr.strip() or f"exit code {result.returncode}"
+                self.failed.emit(err)
+                return
+
+            self.finished_ok.emit(f"Snapshot {self._path.name} removido com sucesso.")
+
+        except Exception as exc:
+            self.failed.emit(str(exc))
