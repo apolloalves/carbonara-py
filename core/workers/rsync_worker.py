@@ -26,10 +26,19 @@ class RsyncWorker(QThread):
         self.command = command
         self.title = title
         self.log_path = Path(log_path) if log_path else None
+        self._process: subprocess.Popen | None = None
 
-    def run(self):
+    def kill(self) -> None:
+        """Mata o processo rsync pelo PID — não bloqueia a thread chamadora."""
+        proc = self._process
+        if proc is not None:
+            try:
+                proc.kill()   # SIGKILL imediato, sem wait()
+            except OSError:
+                pass
+
+    def run(self) -> None:
         log_fh = None
-
         try:
             if self.log_path:
                 self.log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -37,7 +46,7 @@ class RsyncWorker(QThread):
 
             self.status_changed.emit(self.title or "Executando...")
 
-            process = subprocess.Popen(
+            self._process = subprocess.Popen(
                 self.command,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -45,15 +54,13 @@ class RsyncWorker(QThread):
                 bufsize=1,
                 universal_newlines=True,
             )
-
-            assert process.stdout is not None
+            assert self._process.stdout is not None
 
             last_percent = -1
             percent_regex = re.compile(r"(\d{1,3})%")
 
-            for raw_line in process.stdout:
+            for raw_line in self._process.stdout:
                 line = raw_line.rstrip("\n")
-
                 if not line.strip():
                     continue
 
@@ -86,8 +93,7 @@ class RsyncWorker(QThread):
 
                 self.log_line.emit(line)
 
-            rc = process.wait()
-
+            rc = self._process.wait()
             if rc == 0:
                 self.progress_changed.emit(100)
                 self.status_changed.emit("Concluído com sucesso.")
@@ -97,7 +103,7 @@ class RsyncWorker(QThread):
 
         except Exception as exc:
             self.failed.emit(str(exc))
-
         finally:
+            self._process = None
             if log_fh:
                 log_fh.close()

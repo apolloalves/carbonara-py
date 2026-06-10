@@ -94,6 +94,11 @@ def collect_snapshots(backup_root: Path) -> List[SnapshotEntry]:
                 ).strftime("%Y-%m-%d %H:%M:%S")
 
                 status = meta.get("status", "unknown")
+
+                # Ignora snapshots incompletos (processo cancelado ou travado)
+                if status in ("running", "failed"):
+                    continue
+
                 source = meta.get("source", "")
 
                 meta_text = f"{created_at} • {status}"
@@ -915,8 +920,10 @@ class SnapshotsPage(QWidget):
         self.scroll_layout.addStretch(1)
 
     def refresh_list(self):
-        self.update_destination_summary()
-        self.rebuild_snapshot_view()
+        # refresh_destinations relê o disco (bytes livres/usados) e chama
+        # rebuild_snapshot_view internamente — garante que o espaço livre
+        # exibido no RightPanel reflita o estado real após o backup.
+        self.refresh_destinations()
 
     def create_snapshot(self):
         dest = self.current_destination()
@@ -994,9 +1001,14 @@ dialog.exec()
         self._backup_proc = None
         OperationManager.finish()
         self.set_busy(False)
+
+        # ── PATCH 2: sempre atualiza a lista, depois decide se mostra aviso ──
         self.refresh_list()
 
-        if rc != 0:
+        # rc=0 → sucesso silencioso
+        # rc=2 → cancelamento intencional pelo usuário (BackupProgressDialog.done(2))
+        # rc=anything else → erro real
+        if rc not in (0, 2):
             QMessageBox.warning(
                 self,
                 "Carbonara",

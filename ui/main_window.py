@@ -119,13 +119,16 @@ class TitleBar(QWidget):
         )
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(14, 4, 10, 4)
+        layout.setContentsMargins(14, 6, 10, 6)
         layout.setSpacing(8)
 
         self.logo = QLabel("Carbonara Backups")
-        self.logo.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+        self.logo.setFont(
+            QFont("DejaVu Sans Mono", 12, QFont.Bold)
+        )
         self.logo.setAlignment(Qt.AlignCenter)
 
+        layout.addStretch(1)
         layout.addWidget(self.logo)
         layout.addStretch(1)
 
