@@ -26,6 +26,12 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QDialog,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QAbstractItemView,
+    QSplitter,
+    QProgressBar,
+    QPlainTextEdit,
 )
 
 from core.operation_manager import OperationManager
@@ -1424,8 +1430,8 @@ class _RestoreDialog(QDialog):
 
     def _on_file_browser(self) -> None:
         self.accept()
-        QMessageBox.information(self.parent(), "File Browser",
-            "File Browser será implementado em breve.")
+        dlg = _FileBrowserDialog(self.entry, parent=self.parent())
+        dlg.exec()
 
     def _on_alt_restore(self) -> None:
         self.accept()
@@ -1660,6 +1666,657 @@ class _RestoreInstructionsDialog(QDialog):
         if event.buttons() == Qt.LeftButton and hasattr(self, '_drag'):
             self.move(event.globalPosition().toPoint() - self._drag)
 
+
+
+
+class _FileBrowserDialog(QDialog):
+    """File browser para restaurar arquivos/pastas individuais do snapshot."""
+
+    def __init__(self, entry, parent=None):
+        super().__init__(parent)
+        self.entry = entry
+        self.snapshot_root = entry.path
+        self.setWindowTitle("File Browser")
+        self.setModal(True)
+        self.setFixedSize(900, 620)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self._current_path = self.snapshot_root
+        self._selected_items = []
+        self._conflict_mode = "overwrite"
+        self._build_ui()
+        self._apply_styles()
+        self._populate_tree(self.snapshot_root)
+
+    def _build_ui(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        # Header
+        header = QFrame()
+        header.setObjectName("FBHeader")
+        header.setFixedHeight(48)
+        hl = QHBoxLayout(header)
+        hl.setContentsMargins(16, 0, 14, 0)
+        hl.setSpacing(10)
+
+        ico = QLabel()
+        ico.setFixedSize(28, 28)
+        ico.setAlignment(Qt.AlignCenter)
+        ico.setPixmap(qta.icon("mdi6.folder-search", color="#4ade80").pixmap(18, 18))
+        ico.setStyleSheet("QLabel { background: rgba(74,222,128,30); border-radius: 8px; }")
+
+        lbl = QLabel("File Browser")
+        lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+        lbl.setStyleSheet("color: #ecf4ff;")
+
+        snap_lbl = QLabel(self.entry.path.name)
+        snap_lbl.setFont(QFont("DejaVu Sans Mono", 8))
+        snap_lbl.setStyleSheet("color: #6b7a8d;")
+
+        btn_x = QPushButton("✕")
+        btn_x.setObjectName("FBClose")
+        btn_x.setFixedSize(26, 26)
+        btn_x.clicked.connect(self.reject)
+
+        hl.addWidget(ico)
+        hl.addWidget(lbl)
+        hl.addWidget(snap_lbl)
+        hl.addStretch()
+        hl.addWidget(btn_x)
+
+        # Breadcrumb
+        bc = QFrame()
+        bc.setObjectName("FBBreadcrumb")
+        bc.setFixedHeight(34)
+        bcl = QHBoxLayout(bc)
+        bcl.setContentsMargins(14, 0, 14, 0)
+        bcl.setSpacing(6)
+
+        btn_up = QPushButton()
+        btn_up.setIcon(qta.icon("mdi6.arrow-left", color="#c8d4e0"))
+        btn_up.setIconSize(QSize(16, 16))
+        btn_up.setObjectName("FBNavBtn")
+        btn_up.setFixedSize(28, 28)
+        btn_up.clicked.connect(self._go_up)
+
+        self.lbl_path = QLabel("/")
+        self.lbl_path.setFont(QFont("DejaVu Sans Mono", 9))
+        self.lbl_path.setStyleSheet("color: #9aa6b2;")
+
+        bcl.addWidget(btn_up)
+        bcl.addWidget(self.lbl_path, 1)
+
+        # Corpo
+        body = QFrame()
+        body.setObjectName("FBBody")
+        body_l = QVBoxLayout(body)
+        body_l.setContentsMargins(12, 8, 12, 12)
+        body_l.setSpacing(8)
+
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.setHandleWidth(2)
+        splitter.setStyleSheet("QSplitter::handle { background: rgba(31,92,255,40); }")
+
+        # Árvore
+        self.tree = QTreeWidget()
+        self.tree.setHeaderHidden(True)
+        self.tree.setObjectName("FBTree")
+        self.tree.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.tree.setIconSize(QSize(18, 18))
+        self.tree.itemDoubleClicked.connect(self._on_double_click)
+        self.tree.itemSelectionChanged.connect(self._on_selection_changed)
+        self.tree.itemExpanded.connect(self._on_item_expanded)
+        self.tree.setColumnCount(2)
+        self.tree.header().hide()
+        # Coluna 0 estica, coluna 1 (tamanho) largura fixa
+        from PySide6.QtWidgets import QHeaderView
+        self.tree.header().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.tree.header().setSectionResizeMode(1, QHeaderView.Fixed)
+        self.tree.header().resizeSection(1, 80)
+
+        # Painel direito
+        right = QFrame()
+        right.setObjectName("FBRight")
+        right_l = QVBoxLayout(right)
+        right_l.setContentsMargins(8, 0, 0, 0)
+        right_l.setSpacing(8)
+
+        lbl_sel = QLabel("Selecionados para restore:")
+        lbl_sel.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
+        lbl_sel.setStyleSheet("color: #c8d4e0;")
+
+        self.list_selected = QPlainTextEdit()
+        self.list_selected.setReadOnly(True)
+        self.list_selected.setObjectName("FBSelected")
+        self.list_selected.setPlaceholderText("Nenhum item selecionado.\nSelecione arquivos/pastas na árvore.")
+
+        # Conflito
+        cf_frame = QFrame()
+        cf_frame.setObjectName("FBConflict")
+        cf_l = QVBoxLayout(cf_frame)
+        cf_l.setContentsMargins(8, 8, 8, 8)
+        cf_l.setSpacing(6)
+
+        lbl_cf = QLabel("Se o arquivo já existir no sistema:")
+        lbl_cf.setFont(QFont("DejaVu Sans Mono", 8))
+        lbl_cf.setStyleSheet("color: #9aa6b2;")
+
+        self.btn_overwrite = QPushButton("Sobrescrever")
+        self.btn_overwrite.setObjectName("FBConflictBtn")
+        self.btn_overwrite.setCheckable(True)
+        self.btn_overwrite.setChecked(True)
+        self.btn_overwrite.clicked.connect(lambda: self._set_conflict("overwrite"))
+
+        self.btn_skip = QPushButton("Pular existentes")
+        self.btn_skip.setObjectName("FBConflictBtn")
+        self.btn_skip.setCheckable(True)
+        self.btn_skip.clicked.connect(lambda: self._set_conflict("skip"))
+
+        cf_l.addWidget(lbl_cf)
+        cf_row = QHBoxLayout()
+        cf_row.addWidget(self.btn_overwrite)
+        cf_row.addWidget(self.btn_skip)
+        cf_l.addLayout(cf_row)
+
+        self.btn_restore = QPushButton("  Restaurar selecionados")
+        self.btn_restore.setIcon(qta.icon("mdi6.file-restore-outline", color="#08111d"))
+        self.btn_restore.setIconSize(QSize(16, 16))
+        self.btn_restore.setObjectName("FBBtnRestore")
+        self.btn_restore.setEnabled(False)
+        self.btn_restore.clicked.connect(self._on_restore)
+
+        right_l.addWidget(lbl_sel)
+        right_l.addWidget(self.list_selected, 1)
+        right_l.addWidget(cf_frame)
+        right_l.addWidget(self.btn_restore)
+
+        splitter.addWidget(self.tree)
+        splitter.addWidget(right)
+        splitter.setSizes([520, 350])
+
+        body_l.addWidget(splitter, 1)
+
+        # Log
+        self.log_frame = QFrame()
+        self.log_frame.setObjectName("FBLogFrame")
+        self.log_frame.setVisible(False)
+        log_l = QVBoxLayout(self.log_frame)
+        log_l.setContentsMargins(0, 0, 0, 0)
+        log_l.setSpacing(4)
+
+        self.restore_progress = QProgressBar()
+        self.restore_progress.setRange(0, 0)
+        self.restore_progress.setFixedHeight(4)
+        self.restore_progress.setTextVisible(False)
+        self.restore_progress.setObjectName("FBProgressBar")
+
+        self.log_view = QPlainTextEdit()
+        self.log_view.setReadOnly(True)
+        self.log_view.setObjectName("FBLog")
+        self.log_view.setFixedHeight(100)
+
+        log_l.addWidget(self.restore_progress)
+        log_l.addWidget(self.log_view)
+        body_l.addWidget(self.log_frame)
+
+        root.addWidget(header)
+        root.addWidget(bc)
+        root.addWidget(body, 1)
+
+    def _apply_styles(self):
+        self.setStyleSheet("""
+            QDialog {
+                background: #080c14;
+                border: 1px solid rgba(31,92,255,80);
+                border-radius: 14px;
+            }
+            QFrame#FBHeader {
+                background: rgba(8,20,14,255);
+                border-bottom: 1px solid rgba(74,222,128,80);
+                border-top-left-radius: 14px;
+                border-top-right-radius: 14px;
+            }
+            QFrame#FBBreadcrumb {
+                background: rgba(6,9,16,200);
+                border-bottom: 1px solid rgba(31,92,255,40);
+            }
+            QFrame#FBBody {
+                background: #080c14;
+                border-bottom-left-radius: 14px;
+                border-bottom-right-radius: 14px;
+            }
+            QFrame#FBRight { background: transparent; }
+            QFrame#FBConflict {
+                background: rgba(10,15,25,180);
+                border: 1px solid rgba(31,92,255,50);
+                border-radius: 8px;
+            }
+            QFrame#FBLogFrame { background: transparent; }
+            QPushButton#FBClose {
+                background: transparent; border: none;
+                color: #4a5a6a; font-size: 12px; border-radius: 6px;
+            }
+            QPushButton#FBClose:hover { background: rgba(200,60,60,60); color: #ff8888; }
+            QPushButton#FBNavBtn {
+                background: rgba(10,15,25,200);
+                border: 1px solid rgba(31,92,255,80); border-radius: 6px;
+            }
+            QPushButton#FBNavBtn:hover {
+                background: rgba(23,147,209,70);
+                border-color: rgba(35,166,255,180);
+            }
+            QTreeWidget#FBTree {
+                background: rgba(6,9,16,240);
+                border: 1px solid rgba(31,92,255,55);
+                border-radius: 8px; color: #c8d4e0;
+                font-family: "DejaVu Sans Mono"; font-size: 10px; outline: none;
+            }
+            QTreeWidget#FBTree::item { padding: 4px 6px; border-radius: 4px; }
+            QTreeWidget#FBTree::item:hover { background: rgba(35,166,255,30); }
+            QTreeWidget#FBTree::item:selected { background: rgba(35,166,255,80); color: #ecf4ff; }
+            QPlainTextEdit#FBSelected {
+                background: rgba(6,9,16,200);
+                border: 1px solid rgba(31,92,255,55); border-radius: 8px;
+                color: #9aa6b2; font-family: "DejaVu Sans Mono";
+                font-size: 9px; padding: 6px;
+            }
+            QPlainTextEdit#FBLog {
+                background: rgba(6,9,16,200);
+                border: 1px solid rgba(31,92,255,40); border-radius: 6px;
+                color: #6b7a8d; font-family: "DejaVu Sans Mono";
+                font-size: 9px; padding: 4px;
+            }
+            QPushButton#FBConflictBtn {
+                background: rgba(10,15,25,200);
+                border: 1px solid rgba(31,92,255,80); border-radius: 6px;
+                color: #9aa6b2; font-family: "DejaVu Sans Mono";
+                font-size: 9px; padding: 4px 8px;
+            }
+            QPushButton#FBConflictBtn:checked {
+                background: rgba(35,166,255,100);
+                border-color: rgba(35,166,255,200); color: #ecf4ff;
+            }
+            QPushButton#FBBtnRestore {
+                background: rgba(74,222,128,180);
+                border: 1px solid rgba(74,222,128,220);
+                border-radius: 8px; color: #08111d;
+                font-family: "DejaVu Sans Mono"; font-size: 11px;
+                font-weight: 700; padding: 7px 0;
+            }
+            QPushButton#FBBtnRestore:hover { background: rgba(94,234,149,220); }
+            QPushButton#FBBtnRestore:disabled {
+                background: rgba(30,40,30,180);
+                border-color: rgba(74,222,128,40); color: #3a4a3a;
+            }
+            QProgressBar#FBProgressBar {
+                background: rgba(31,92,255,20); border: none; border-radius: 2px;
+            }
+            QProgressBar#FBProgressBar::chunk {
+                background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
+                    stop:0 rgba(74,222,128,200), stop:1 rgba(35,166,255,200));
+                border-radius: 2px;
+            }
+        """)
+
+    def _populate_tree(self, path):
+        self.tree.clear()
+        self._current_path = path
+        try:
+            rel = path.relative_to(self.snapshot_root)
+            display = "/" + str(rel) if str(rel) != "." else "/"
+        except ValueError:
+            display = str(path)
+        self.lbl_path.setText(display)
+
+        try:
+            entries = sorted(path.iterdir(), key=lambda p: (p.is_file(), p.name.lower()))
+        except PermissionError:
+            return
+
+        for entry in entries:
+            if entry.name == "snapshot.json":
+                continue
+            item = self._make_item(entry)
+            self.tree.addTopLevelItem(item)
+            # Adiciona filho sentinel para pastas não vazias
+            if entry.is_dir() and not entry.is_symlink():
+                self._add_sentinel_if_needed(item, entry)
+
+    def _make_item(self, entry: Path) -> QTreeWidgetItem:
+        item = QTreeWidgetItem()
+        item.setText(0, entry.name)
+        item.setData(0, Qt.UserRole, entry)
+        item.setData(0, Qt.UserRole + 1, False)  # loaded = False
+        if entry.is_symlink():
+            item.setIcon(0, qta.icon("mdi6.link-variant", color="#9aa6b2"))
+        elif entry.is_dir():
+            item.setIcon(0, qta.icon("mdi6.folder", color="#23a6ff"))
+        else:
+            item.setIcon(0, self._file_icon(entry))
+            try:
+                item.setText(1, self._fmt_size(entry.stat().st_size))
+            except OSError:
+                pass
+        return item
+
+    def _add_sentinel_if_needed(self, item: QTreeWidgetItem, path: Path) -> None:
+        """Adiciona filho placeholder se a pasta tiver conteúdo."""
+        try:
+            has_children = any(
+                e for e in path.iterdir() if e.name != "snapshot.json"
+            )
+            if has_children:
+                sentinel = QTreeWidgetItem()
+                sentinel.setText(0, "carregando...")
+                sentinel.setData(0, Qt.UserRole, None)  # marca sentinel
+                sentinel.setDisabled(True)
+                item.addChild(sentinel)
+        except PermissionError:
+            pass
+
+    def _on_item_expanded(self, item: QTreeWidgetItem) -> None:
+        """Popula filhos de uma pasta quando expandida (lazy loading)."""
+        already_loaded = item.data(0, Qt.UserRole + 1)
+        if already_loaded:
+            return
+
+        path: Path = item.data(0, Qt.UserRole)
+        if not path or not path.is_dir():
+            return
+
+        # Remove sentinel
+        item.takeChildren()
+
+        try:
+            entries = sorted(path.iterdir(), key=lambda p: (p.is_file(), p.name.lower()))
+        except PermissionError:
+            return
+
+        for entry in entries:
+            if entry.name == "snapshot.json":
+                continue
+            child = self._make_item(entry)
+            item.addChild(child)
+            if entry.is_dir() and not entry.is_symlink():
+                self._add_sentinel_if_needed(child, entry)
+
+        item.setData(0, Qt.UserRole + 1, True)  # loaded = True
+
+    def _file_icon(self, path):
+        ext = path.suffix.lower()
+        m = {
+            ".py": ("mdi6.language-python", "#4ade80"),
+            ".sh": ("mdi6.console", "#4ade80"),
+            ".conf": ("mdi6.cog", "#9aa6b2"),
+            ".json": ("mdi6.code-json", "#ff9966"),
+            ".log": ("mdi6.text-box-outline", "#6b7a8d"),
+            ".service": ("mdi6.cog-outline", "#9aa6b2"),
+        }
+        g, c = m.get(ext, ("mdi6.file-outline", "#6b7a8d"))
+        return qta.icon(g, color=c)
+
+    def _fmt_size(self, size):
+        if size >= 1024**3: return f"{size/1024**3:.1f} GB"
+        if size >= 1024**2: return f"{size/1024**2:.1f} MB"
+        if size >= 1024: return f"{size/1024:.0f} KB"
+        return f"{size} B"
+
+    def _go_up(self):
+        if self._current_path != self.snapshot_root:
+            self._populate_tree(self._current_path.parent)
+
+    def _on_double_click(self, item, col):
+        path = item.data(0, Qt.UserRole)
+        if path and path.is_dir() and not path.is_symlink():
+            self._populate_tree(path)
+
+    def _on_selection_changed(self):
+        paths = [
+            item.data(0, Qt.UserRole)
+            for item in self.tree.selectedItems()
+            if item.data(0, Qt.UserRole)
+        ]
+        self._selected_items = paths
+        if paths:
+            self.list_selected.setPlainText(
+                "\n".join(str(p.relative_to(self.snapshot_root)) for p in paths)
+            )
+        else:
+            self.list_selected.clear()
+        self.btn_restore.setEnabled(bool(paths))
+
+    def _set_conflict(self, mode):
+        self._conflict_mode = mode
+        self.btn_overwrite.setChecked(mode == "overwrite")
+        self.btn_skip.setChecked(mode == "skip")
+
+    def _on_restore(self):
+        if not self._selected_items:
+            return
+        confirm = _ConfirmRestoreDialog(
+            f"{len(self._selected_items)} item(ns)",
+            self._conflict_mode, parent=self
+        )
+        if confirm.exec() != QDialog.Accepted:
+            return
+
+        items_repr = repr([str(p) for p in self._selected_items])
+        snap_root_repr = repr(str(self.snapshot_root))
+        conflict_repr = repr(self._conflict_mode)
+
+        script = f"""
+import shutil
+from pathlib import Path
+
+snapshot_root = Path({snap_root_repr})
+items = {items_repr}
+conflict = {conflict_repr}
+
+for src_str in items:
+    src = Path(src_str)
+    try:
+        rel = src.relative_to(snapshot_root)
+    except ValueError:
+        continue
+    dst = Path("/") / rel
+    if src.is_dir():
+        for f in src.rglob("*"):
+            if f.is_file() or f.is_symlink():
+                try:
+                    rel_f = f.relative_to(snapshot_root)
+                    dst_f = Path("/") / rel_f
+                    if dst_f.exists() and conflict == "skip":
+                        print(f"SKIP: {{dst_f}}")
+                        continue
+                    dst_f.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(f, dst_f)
+                    print(f"OK: {{dst_f}}")
+                except Exception as ex:
+                    print(f"ERR: {{dst_f}} -- {{ex}}")
+    else:
+        try:
+            if dst.exists() and conflict == "skip":
+                print(f"SKIP: {{dst}}")
+            else:
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dst)
+                print(f"OK: {{dst}}")
+        except Exception as ex:
+            print(f"ERR: {{dst}} -- {{ex}}")
+"""
+        project_root = Path(__file__).resolve().parents[3]
+        python_bin = str(Path.home() / "venvs" / "pyside" / "bin" / "python3")
+
+        self.log_frame.setVisible(True)
+        self.log_view.clear()
+        self.btn_restore.setEnabled(False)
+        self.restore_progress.setRange(0, 0)
+
+        worker = _FileBrowserRestoreWorker(
+            python_bin=python_bin,
+            project_root=str(project_root),
+            script=script,
+            parent=self,
+        )
+        worker.log_line.connect(self._on_log_line)
+        worker.finished_ok.connect(self._on_restore_done)
+        worker.failed.connect(self._on_restore_fail)
+        self._restore_worker = worker
+        worker.start()
+
+    def _on_log_line(self, line):
+        self.log_view.appendPlainText(line)
+        self.log_view.verticalScrollBar().setValue(
+            self.log_view.verticalScrollBar().maximum()
+        )
+
+    def _on_restore_done(self):
+        self.restore_progress.setRange(0, 1)
+        self.restore_progress.setValue(1)
+        self.btn_restore.setEnabled(True)
+        self._on_log_line("─── Restore concluído ───")
+
+    def _on_restore_fail(self, msg):
+        self.restore_progress.setRange(0, 1)
+        self.restore_progress.setValue(0)
+        self.btn_restore.setEnabled(True)
+        self._on_log_line(f"ERRO: {msg}")
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.LeftButton and hasattr(self, "_drag"):
+            self.move(event.globalPosition().toPoint() - self._drag)
+
+
+class _ConfirmRestoreDialog(QDialog):
+    def __init__(self, label, conflict, parent=None):
+        super().__init__(parent)
+        self.setModal(True)
+        self.setFixedSize(440, 180)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        header = QFrame()
+        header.setObjectName("CRHeader")
+        header.setFixedHeight(44)
+        hl = QHBoxLayout(header)
+        hl.setContentsMargins(16, 0, 14, 0)
+        ico = QLabel()
+        ico.setFixedSize(24, 24)
+        ico.setAlignment(Qt.AlignCenter)
+        ico.setPixmap(qta.icon("mdi6.file-restore-outline", color="#4ade80").pixmap(16, 16))
+        ico.setStyleSheet("QLabel { background: rgba(74,222,128,30); border-radius: 6px; }")
+        lbl = QLabel("Confirmar Restore")
+        lbl.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+        lbl.setStyleSheet("color: #ecf4ff;")
+        hl.addWidget(ico)
+        hl.addSpacing(8)
+        hl.addWidget(lbl)
+        hl.addStretch()
+
+        body = QFrame()
+        body.setObjectName("CRBody")
+        bl = QVBoxLayout(body)
+        bl.setContentsMargins(20, 14, 20, 16)
+        bl.setSpacing(12)
+
+        ct = "sobrescrevendo existentes" if conflict == "overwrite" else "pulando existentes"
+        msg = QLabel(f"Restaurar {label} para o sistema,\n{ct}?")
+        msg.setFont(QFont("DejaVu Sans Mono", 9))
+        msg.setStyleSheet("color: #c8d4e0;")
+
+        btn_row = QHBoxLayout()
+        btn_cancel = QPushButton("Cancelar")
+        btn_cancel.setObjectName("CRBtnCancel")
+        btn_cancel.setFixedWidth(100)
+        btn_cancel.clicked.connect(self.reject)
+        btn_ok = QPushButton("Restaurar")
+        btn_ok.setObjectName("CRBtnOk")
+        btn_ok.setFixedWidth(100)
+        btn_ok.clicked.connect(self.accept)
+        btn_row.addStretch()
+        btn_row.addWidget(btn_cancel)
+        btn_row.addWidget(btn_ok)
+
+        bl.addWidget(msg)
+        bl.addLayout(btn_row)
+        root.addWidget(header)
+        root.addWidget(body, 1)
+
+        self.setStyleSheet("""
+            QFrame#CRHeader {
+                background: rgba(8,20,14,255);
+                border-bottom: 1px solid rgba(74,222,128,80);
+                border-top-left-radius: 10px; border-top-right-radius: 10px;
+            }
+            QFrame#CRBody {
+                background: #080c14;
+                border-bottom-left-radius: 10px; border-bottom-right-radius: 10px;
+            }
+            QPushButton#CRBtnCancel {
+                background: rgba(10,15,25,230); border: 1px solid rgba(31,92,255,120);
+                border-radius: 7px; color: #ecf4ff;
+                font-family: "DejaVu Sans Mono"; font-size: 10px; padding: 5px 0;
+            }
+            QPushButton#CRBtnCancel:hover { background: rgba(23,147,209,70); }
+            QPushButton#CRBtnOk {
+                background: rgba(74,222,128,180); border: 1px solid rgba(74,222,128,220);
+                border-radius: 7px; color: #08111d;
+                font-family: "DejaVu Sans Mono"; font-size: 10px;
+                font-weight: 700; padding: 5px 0;
+            }
+            QPushButton#CRBtnOk:hover { background: rgba(94,234,149,220); }
+        """)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.LeftButton and hasattr(self, "_drag"):
+            self.move(event.globalPosition().toPoint() - self._drag)
+
+
+class _FileBrowserRestoreWorker(QThread):
+    log_line = Signal(str)
+    finished_ok = Signal()
+    failed = Signal(str)
+
+    def __init__(self, python_bin, project_root, script, parent=None):
+        super().__init__(parent)
+        self._python_bin = python_bin
+        self._project_root = project_root
+        self._script = script
+
+    def run(self):
+        try:
+            result = subprocess.run(
+                [
+                    "pkexec", "env",
+                    f"DISPLAY={os.environ.get('DISPLAY', '')}",
+                    f"XAUTHORITY={os.environ.get('XAUTHORITY', '')}",
+                    f"PYTHONPATH={self._project_root}",
+                    self._python_bin, "-c", self._script,
+                ],
+                capture_output=True, text=True,
+            )
+            for line in result.stdout.splitlines():
+                if line.strip():
+                    self.log_line.emit(line)
+            if result.returncode != 0:
+                err = result.stderr.strip() or f"exit code {result.returncode}"
+                self.failed.emit(err)
+            else:
+                self.finished_ok.emit()
+        except Exception as exc:
+            self.failed.emit(str(exc))
 
 # ── Sync helpers ─────────────────────────────────────────────────────────────
 
