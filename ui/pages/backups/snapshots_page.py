@@ -1311,7 +1311,7 @@ class _RestoreDialog(QDialog):
         self.entry = entry
         self.setWindowTitle("Restore Snapshot")
         self.setModal(True)
-        self.setFixedSize(580, 360)
+        self.setFixedSize(860, 400)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
         self._build_ui()
         self._apply_styles()
@@ -1323,27 +1323,27 @@ class _RestoreDialog(QDialog):
 
         header = QFrame()
         header.setObjectName("RstHeader")
-        header.setFixedHeight(48)
+        header.setFixedHeight(54)
         h_layout = QHBoxLayout(header)
-        h_layout.setContentsMargins(18, 0, 16, 0)
+        h_layout.setContentsMargins(20, 0, 18, 0)
 
         icon = QLabel()
-        icon.setFixedSize(28, 28)
+        icon.setFixedSize(34, 34)
         icon.setAlignment(Qt.AlignCenter)
-        icon.setPixmap(qta.icon("mdi6.file-restore-outline", color="#23a6ff").pixmap(18, 18))
-        icon.setStyleSheet("QLabel { background: rgba(35,166,255,40); border-radius: 8px; }")
+        icon.setPixmap(qta.icon("mdi6.file-restore-outline", color="#23a6ff").pixmap(22, 22))
+        icon.setStyleSheet("QLabel { background: rgba(35,166,255,40); border-radius: 10px; }")
 
         lbl = QLabel("Restore Snapshot")
-        lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+        lbl.setFont(QFont("DejaVu Sans Mono", 13, QFont.Bold))
         lbl.setStyleSheet("color: #ecf4ff;")
 
         btn_x = QPushButton("✕")
         btn_x.setObjectName("RstClose")
-        btn_x.setFixedSize(26, 26)
+        btn_x.setFixedSize(28, 28)
         btn_x.clicked.connect(self.reject)
 
         h_layout.addWidget(icon)
-        h_layout.addSpacing(10)
+        h_layout.addSpacing(12)
         h_layout.addWidget(lbl)
         h_layout.addStretch()
         h_layout.addWidget(btn_x)
@@ -1351,18 +1351,18 @@ class _RestoreDialog(QDialog):
         body = QFrame()
         body.setObjectName("RstBody")
         b_layout = QVBoxLayout(body)
-        b_layout.setContentsMargins(24, 18, 24, 20)
-        b_layout.setSpacing(10)
+        b_layout.setContentsMargins(28, 12, 28, 16)
+        b_layout.setSpacing(6)
 
         snap_label = QLabel(self.entry.path.name)
-        snap_label.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
+        snap_label.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
         snap_label.setStyleSheet(
             "color: #23a6ff; background: rgba(35,166,255,20); "
-            "border: 1px solid rgba(35,166,255,60); border-radius: 6px; padding: 3px 10px;"
+            "border: 1px solid rgba(35,166,255,60); border-radius: 6px; padding: 5px 12px;"
         )
 
         lbl_choose = QLabel("Escolha o tipo de restore:")
-        lbl_choose.setFont(QFont("DejaVu Sans Mono", 9))
+        lbl_choose.setFont(QFont("DejaVu Sans Mono", 10))
         lbl_choose.setStyleSheet("color: #9aa6b2;")
 
         btn1 = _RestoreOptionButton(
@@ -1393,7 +1393,9 @@ class _RestoreDialog(QDialog):
         btn3.clicked.connect(self._on_alt_restore)
 
         b_layout.addWidget(snap_label)
+        b_layout.addSpacing(8)
         b_layout.addWidget(lbl_choose)
+        b_layout.addSpacing(6)
         b_layout.addWidget(btn1)
         b_layout.addWidget(btn2)
         b_layout.addWidget(btn3)
@@ -1404,20 +1406,24 @@ class _RestoreDialog(QDialog):
 
     def _apply_styles(self) -> None:
         self.setStyleSheet("""
+            QDialog {
+                background: #080c14;
+                border-radius: 14px;
+            }
             QFrame#RstHeader {
                 background: rgba(8, 20, 40, 255);
-                border-bottom: 1px solid rgba(35, 166, 255, 100);
-                border-top-left-radius: 12px;
-                border-top-right-radius: 12px;
+                border-bottom: 1px solid rgba(35, 166, 255, 80);
+                border-top-left-radius: 13px;
+                border-top-right-radius: 13px;
             }
             QFrame#RstBody {
                 background: #080c14;
-                border-bottom-left-radius: 12px;
-                border-bottom-right-radius: 12px;
+                border-bottom-left-radius: 13px;
+                border-bottom-right-radius: 13px;
             }
             QPushButton#RstClose {
                 background: transparent; border: none;
-                color: #4a5a6a; font-size: 12px; border-radius: 6px;
+                color: #4a5a6a; font-size: 13px; border-radius: 6px;
             }
             QPushButton#RstClose:hover {
                 background: rgba(200,60,60,60); color: #ff8888;
@@ -1446,6 +1452,16 @@ class _RestoreDialog(QDialog):
         if event.buttons() == Qt.LeftButton and hasattr(self, '_drag'):
             self.move(event.globalPosition().toPoint() - self._drag)
 
+    def paintEvent(self, event):
+        from PySide6.QtGui import QPainter, QPen, QColor
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        pen = QPen(QColor(35, 166, 255, 200))
+        pen.setWidth(1)
+        painter.setPen(pen)
+        painter.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 14, 14)
+
 
 class _RestoreOptionButton(QFrame):
     clicked = Signal()
@@ -1454,11 +1470,12 @@ class _RestoreOptionButton(QFrame):
         super().__init__(parent)
         self.setCursor(Qt.PointingHandCursor)
         self.setObjectName("RstOptionBtn")
-        self.setFixedHeight(62)
+        self.setFixedHeight(68)
+        self._color = color
         self.setStyleSheet(f"""
             QFrame#RstOptionBtn {{
                 background: rgba(10, 15, 25, 200);
-                border: 1px solid rgba(31, 92, 255, 80);
+                border: 1px solid rgba(31, 92, 255, 50);
                 border-radius: 10px;
             }}
             QFrame#RstOptionBtn:hover {{
@@ -1468,25 +1485,27 @@ class _RestoreOptionButton(QFrame):
         """)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(14, 0, 14, 0)
-        layout.setSpacing(14)
+        layout.setContentsMargins(18, 0, 18, 0)
+        layout.setSpacing(16)
 
         ico = QLabel()
-        ico.setFixedSize(32, 32)
+        ico.setFixedSize(44, 44)
         ico.setAlignment(Qt.AlignCenter)
-        ico.setPixmap(qta.icon(glyph, color=color).pixmap(20, 20))
+        ico.setPixmap(qta.icon(glyph, color=color).pixmap(30, 30))
         ico.setStyleSheet("QLabel { background: transparent; border: none; }")
 
         text = QVBoxLayout()
-        text.setSpacing(2)
+        text.setSpacing(0)
+        text.setContentsMargins(0, 0, 0, 0)
 
         t = QLabel(title)
-        t.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+        t.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
         t.setStyleSheet(f"color: {color}; background: transparent; border: none;")
 
         d = QLabel(desc)
-        d.setFont(QFont("DejaVu Sans Mono", 8))
-        d.setStyleSheet("color: #6b7a8d; background: transparent; border: none;")
+        d.setFont(QFont("DejaVu Sans Mono", 9))
+        d.setWordWrap(False)
+        d.setStyleSheet("color: #9aa6b2; background: transparent; border: none;")
 
         text.addWidget(t)
         text.addWidget(d)
@@ -1516,18 +1535,71 @@ def _do_full_restore(entry: SnapshotEntry, parent=None) -> None:
             home_path = str(entry.path)
 
         output = Path(destination_mountpoint) / "carbonara-restore.sh"
+        output_instr = Path(destination_mountpoint) / "carbonara-restore-INSTRUCOES.txt"
         project_root = Path(__file__).resolve().parents[3]
         python_bin = str(Path.home() / "venvs" / "pyside" / "bin" / "python3")
+
+        # Detecta ISO sugerida para incluir nas instruções
+        ventoy = Path("/mnt/VENTOY")
+        suggested_iso = "sua-iso-arch.iso"
+        try:
+            isos = sorted(
+                [p for p in ventoy.iterdir() if p.suffix.lower() == ".iso"],
+                key=lambda p: p.stat().st_mtime, reverse=True,
+            )
+            arch_isos = [p.name for p in isos if "arch" in p.name.lower()]
+            suggested_iso = arch_isos[0] if arch_isos else (isos[0].name if isos else suggested_iso)
+        except Exception:
+            pass
 
         script = f"""
 import sys
 sys.path.insert(0, {str(project_root)!r})
 from core.snapshots.restore import generate_restore_script
-generate_restore_script(
+from pathlib import Path
+from datetime import datetime
+
+script_path = generate_restore_script(
     snapshot_root_path={repr(root_path)},
     snapshot_home_path={repr(home_path)},
     output_path={str(output)!r},
 )
+
+# Gera arquivo de instruções junto
+out_instr = Path({str(output_instr)!r})
+content = f\"\"\"
+================================================================================
+  CARBONARA — INSTRUCOES DE RESTORE COMPLETO DO SISTEMA
+  Gerado em: {{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}}
+================================================================================
+
+PASSO 1 — Boot pelo Ventoy
+  Reinicie o computador e selecione pelo Ventoy:
+  -> {suggested_iso}
+
+PASSO 2 — Execute no shell do live ISO
+  Cole o comando abaixo e pressione Enter:
+
+  bash <(mount /dev/sdc3 /mnt/bk 2>/dev/null; cat /mnt/bk/carbonara-restore.sh)
+
+  O script ira:
+  OK Montar o disco de backup automaticamente
+  OK Montar o array RAID0 (/dev/md127)
+  OK Restaurar ROOT e HOME via rsync
+  OK Reinstalar o GRUB (legacy BIOS)
+  OK Desmontar tudo ao finalizar
+
+PASSO 3 — Confirmacao
+  Quando solicitado, digite exatamente:  RESTAURAR
+  (qualquer outra entrada cancela a operacao)
+
+================================================================================
+  ARQUIVOS GERADOS
+  Script:      {str(output)}
+  Instrucoes:  {str(output_instr)}
+================================================================================
+\"\"\".strip()
+out_instr.write_text(content, encoding="utf-8")
 """
         result = subprocess.run(
             [
@@ -1545,7 +1617,7 @@ generate_restore_script(
             _show_error("Restore", f"Erro ao gerar script:\n\n{err}", parent=parent)
             return
 
-        dlg = _RestoreInstructionsDialog(str(output), parent=parent)
+        dlg = _RestoreInstructionsDialog(str(output), str(output_instr), parent=parent)
         dlg.exec()
 
     except Exception as e:
@@ -1553,14 +1625,63 @@ generate_restore_script(
 
 
 class _RestoreInstructionsDialog(QDialog):
-    def __init__(self, script_path: str, parent=None):
+    def __init__(self, script_path: str, instructions_path: str = "", parent=None):
         super().__init__(parent)
         self.setWindowTitle("Script de Restore Gerado")
         self.setModal(True)
-        self.setFixedSize(620, 360)
+        self.setFixedSize(820, 520)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self._instructions_path = instructions_path
         self._build_ui(script_path)
         self._apply_styles()
+
+    def _generate_instructions(self, script_path: str) -> str:
+        """Gera arquivo de instruções legível salvo junto ao script."""
+        import re
+        script_dir = Path(script_path).parent
+        out = script_dir / "carbonara-restore-INSTRUCOES.txt"
+        iso_names = [p.name for p in self._find_ventoy_isos()]
+        arch_isos = [n for n in iso_names if "arch" in n.lower()]
+        suggested_iso = arch_isos[0] if arch_isos else (iso_names[0] if iso_names else "sua-iso-arch.iso")
+
+        content = f"""
+================================================================================
+  CARBONARA — INSTRUÇÕES DE RESTORE COMPLETO DO SISTEMA
+  Gerado em: {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+================================================================================
+
+PASSO 1 — Boot pelo Ventoy
+  Reinicie o computador e selecione pelo Ventoy:
+  → {suggested_iso}
+
+PASSO 2 — Execute no shell do live ISO
+  Cole o comando abaixo e pressione Enter:
+
+  bash <(mount /dev/sdc3 /mnt/bk 2>/dev/null; cat /mnt/bk/carbonara-restore.sh)
+
+  O script irá:
+  ✓ Montar o disco de backup automaticamente
+  ✓ Montar o array RAID0 (/dev/md127)
+  ✓ Restaurar ROOT e HOME via rsync
+  ✓ Reinstalar o GRUB (legacy BIOS)
+  ✓ Desmontar tudo ao finalizar
+
+PASSO 3 — Confirmação
+  Quando solicitado, digite exatamente:  RESTAURAR
+  (qualquer outra entrada cancela a operação)
+
+================================================================================
+  ARQUIVOS GERADOS
+  Script:      {script_path}
+  Instruções:  {str(out)}
+================================================================================
+""".strip()
+
+        try:
+            out.write_text(content, encoding="utf-8")
+        except Exception:
+            pass
+        return str(out)
 
     def _build_ui(self, script_path: str) -> None:
         root = QVBoxLayout(self)
@@ -1581,7 +1702,7 @@ class _RestoreInstructionsDialog(QDialog):
 
         lbl = QLabel("Script de Restore Gerado")
         lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
-        lbl.setStyleSheet("color: #ecf4ff;")
+        lbl.setStyleSheet("color: #4ade80;")
 
         h_layout.addWidget(icon)
         h_layout.addSpacing(10)
@@ -1591,34 +1712,103 @@ class _RestoreInstructionsDialog(QDialog):
         body = QFrame()
         body.setObjectName("RIBody")
         b_layout = QVBoxLayout(body)
-        b_layout.setContentsMargins(24, 16, 24, 20)
-        b_layout.setSpacing(8)
+        b_layout.setContentsMargins(28, 20, 28, 20)
+        b_layout.setSpacing(6)
 
-        for line in [
-            "1.  Reinicie o computador pelo Ventoy",
-            "2.  Selecione  ARCHLINUX_2026-04-27.iso",
-            "3.  Aguarde o shell do live ISO",
-            "4.  Execute o script:",
-        ]:
-            lbl_i = QLabel(line)
-            lbl_i.setFont(QFont("DejaVu Sans Mono", 9))
-            lbl_i.setStyleSheet("color: #c8d4e0;")
-            b_layout.addWidget(lbl_i)
+        # ── Passo 1: ISO disponível no Ventoy ────────────────────────────────
+        lbl1 = QLabel("1.  Boot pelo Ventoy → selecione uma ISO Arch:")
+        lbl1.setFont(QFont("DejaVu Sans Mono", 10))
+        lbl1.setStyleSheet("color: #c8d4e0;")
+        b_layout.addWidget(lbl1)
 
-        cmd_lbl = QLabel(f"bash {script_path}")
-        cmd_lbl.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
+        isos = self._find_ventoy_isos()
+        if isos:
+            self.cmb_iso = QComboBox()
+            self.cmb_iso.setFont(QFont("DejaVu Sans Mono", 10))
+            for iso in isos:
+                self.cmb_iso.addItem(iso.name)
+            for i, iso in enumerate(isos):
+                if "arch" in iso.name.lower():
+                    self.cmb_iso.setCurrentIndex(i)
+                    break
+            self.cmb_iso.setStyleSheet("""
+                QComboBox {
+                    background: rgba(10,15,25,230);
+                    border: 1px solid rgba(31,92,255,120);
+                    border-radius: 6px; color: #ecf4ff;
+                    font-family: "DejaVu Sans Mono"; font-size: 10px;
+                    padding: 6px 12px;
+                }
+                QComboBox::drop-down { border: none; width: 20px; }
+                QComboBox QAbstractItemView {
+                    background: #0a0f19; color: #ecf4ff;
+                    border: 1px solid rgba(31,92,255,140);
+                }
+            """)
+            b_layout.addWidget(self.cmb_iso)
+        else:
+            lbl_no_iso = QLabel("⚠  Nenhuma ISO encontrada em /mnt/VENTOY")
+            lbl_no_iso.setFont(QFont("DejaVu Sans Mono", 10))
+            lbl_no_iso.setStyleSheet("color: #ff9966;")
+            b_layout.addWidget(lbl_no_iso)
+
+        b_layout.addSpacing(10)
+
+        # ── Passo 2: Executar script ──────────────────────────────────────────
+        lbl2 = QLabel("2.  No shell do live ISO, execute:")
+        lbl2.setFont(QFont("DejaVu Sans Mono", 10))
+        lbl2.setStyleSheet("color: #c8d4e0;")
+        b_layout.addWidget(lbl2)
+
+        cmd_lbl = QLabel("bash <(mount /dev/sdc3 /mnt/bk 2>/dev/null; cat /mnt/bk/carbonara-restore.sh)")
+        cmd_lbl.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+        cmd_lbl.setWordWrap(True)
         cmd_lbl.setStyleSheet(
             "color: #4ade80; background: rgba(74,222,128,15); "
-            "border: 1px solid rgba(74,222,128,60); border-radius: 6px; padding: 6px 12px;"
+            "border: 1px solid rgba(74,222,128,60); border-radius: 6px; padding: 10px 14px;"
         )
         cmd_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
         b_layout.addWidget(cmd_lbl)
 
-        warn = QLabel("⚠  O script sobrescreve o sistema. Confirme digitando RESTAURAR quando solicitado.")
-        warn.setFont(QFont("DejaVu Sans Mono", 8))
+        b_layout.addSpacing(4)
+
+        lbl3 = QLabel("O script monta os discos, restaura e reinstala o GRUB automaticamente.")
+        lbl3.setFont(QFont("DejaVu Sans Mono", 9))
+        lbl3.setStyleSheet("color: #6b7a8d;")
+        lbl3.setWordWrap(True)
+        b_layout.addWidget(lbl3)
+
+        warn = QLabel("⚠  Confirme digitando RESTAURAR quando solicitado.")
+        warn.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
         warn.setStyleSheet("color: #ff9966;")
-        warn.setWordWrap(True)
         b_layout.addWidget(warn)
+
+        b_layout.addSpacing(14)
+
+        # ── Arquivos gerados ──────────────────────────────────────────────────
+        sep = QFrame()
+        sep.setFrameShape(QFrame.HLine)
+        sep.setStyleSheet("border: none; border-top: 1px solid rgba(31,92,255,40);")
+        b_layout.addWidget(sep)
+
+        b_layout.addSpacing(6)
+
+        lbl_files = QLabel("Arquivos gerados em:")
+        lbl_files.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
+        lbl_files.setStyleSheet("color: #c8d4e0;")
+        b_layout.addWidget(lbl_files)
+
+        lbl_script = QLabel(f"  Script:       {script_path}")
+        lbl_script.setFont(QFont("DejaVu Sans Mono", 9))
+        lbl_script.setStyleSheet("color: #9aa6b2;")
+        lbl_script.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        b_layout.addWidget(lbl_script)
+
+        lbl_instr = QLabel(f"  Instruções:   {self._instructions_path}")
+        lbl_instr.setFont(QFont("DejaVu Sans Mono", 9))
+        lbl_instr.setStyleSheet("color: #9aa6b2;")
+        lbl_instr.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        b_layout.addWidget(lbl_instr)
 
         b_layout.addStretch()
 
@@ -1635,8 +1825,27 @@ class _RestoreInstructionsDialog(QDialog):
         root.addWidget(header)
         root.addWidget(body, stretch=1)
 
+    def _find_ventoy_isos(self) -> list:
+        """Lista ISOs em /mnt/VENTOY ordenadas por data (mais recente primeiro)."""
+        ventoy = Path("/mnt/VENTOY")
+        if not ventoy.exists():
+            return []
+        try:
+            return sorted(
+                [p for p in ventoy.iterdir() if p.suffix.lower() == ".iso"],
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
+        except Exception:
+            return []
+
     def _apply_styles(self) -> None:
         self.setStyleSheet("""
+            QDialog {
+                background: #080c14;
+                border: 1px solid rgba(70, 188, 255, 220);
+                border-radius: 14px;
+            }
             QFrame#RIHeader {
                 background: rgba(8, 20, 14, 255);
                 border-bottom: 1px solid rgba(74, 222, 128, 80);
