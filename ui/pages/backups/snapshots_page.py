@@ -1218,10 +1218,10 @@ class _ErrorDialog(QDialog):
         lbl.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
         lbl.setStyleSheet("color: #ecf4ff;")
 
-        btn_x = QPushButton("✕")
-        btn_x.setObjectName("ErrClose")
+        btn_x = _CloseLabel(self)
         btn_x.setFixedSize(24, 24)
-        btn_x.clicked.connect(self.accept)
+        btn_x.mousePressEvent = lambda e: self.accept()
+
 
         h_layout.addWidget(icon)
         h_layout.addSpacing(8)
@@ -1334,6 +1334,60 @@ class _CloseLabel(QLabel):
         super().leaveEvent(event)
 
 
+class _NavLabel(QLabel):
+    """Botão de navegação (←) com hover real."""
+    clicked = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(28, 28)
+        self.setAlignment(Qt.AlignCenter)
+        self.setCursor(Qt.PointingHandCursor)
+        self._pixmap_normal = qta.icon("mdi6.arrow-left", color="#c8d4e0").pixmap(16, 16)
+        self._pixmap_hover = qta.icon("mdi6.arrow-left", color="#23a6ff").pixmap(16, 16)
+        self._set_normal()
+
+    def _set_normal(self):
+        self.setPixmap(self._pixmap_normal)
+        self.setStyleSheet(
+            "QLabel { background: rgba(10,15,25,200); border-radius: 6px; "
+            "border: 1px solid rgba(31,92,255,80); }"
+        )
+
+    def _set_hover(self):
+        self.setPixmap(self._pixmap_hover)
+        self.setStyleSheet(
+            "QLabel { background: rgba(23,147,209,70); border-radius: 6px; "
+            "border: 1px solid rgba(35,166,255,180); }"
+        )
+
+    def setEnabled(self, enabled: bool):
+        super().setEnabled(enabled)
+        if enabled:
+            self._set_normal()
+        else:
+            self.setPixmap(qta.icon("mdi6.arrow-left", color="#3a4a5a").pixmap(16, 16))
+            self.setStyleSheet(
+                "QLabel { background: rgba(10,15,25,100); border-radius: 6px; "
+                "border: 1px solid rgba(31,92,255,30); }"
+            )
+
+    def enterEvent(self, event):
+        if self.isEnabled():
+            self._set_hover()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        if self.isEnabled():
+            self._set_normal()
+        super().leaveEvent(event)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and self.isEnabled():
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
+
 class _RestoreDialog(QDialog):
     """Dialog de restore com 3 opções."""
 
@@ -1381,20 +1435,18 @@ class _RestoreDialog(QDialog):
         body = QFrame()
         body.setObjectName("RstBody")
         b_layout = QVBoxLayout(body)
-        b_layout.setContentsMargins(28, 12, 28, 16)
-        b_layout.setSpacing(6)
-
+        b_layout.setContentsMargins(24, 10, 24, 14)
+        b_layout.setSpacing(5)
         snap_label = QLabel(self.entry.path.name)
-        snap_label.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+        snap_label.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
         snap_label.setStyleSheet(
             "color: #23a6ff; background: rgba(35,166,255,20); "
-            "border: 1px solid rgba(35,166,255,60); border-radius: 6px; padding: 5px 12px;"
+            "border: 1px solid rgba(35,166,255,60); border-radius: 6px; padding: 3px 10px;"
         )
-
         lbl_choose = QLabel("Escolha o tipo de restore:")
-        lbl_choose.setFont(QFont("DejaVu Sans Mono", 10))
+        lbl_choose = QLabel("Escolha o tipo de restore:")
+        lbl_choose.setFont(QFont("DejaVu Sans Mono", 9))
         lbl_choose.setStyleSheet("color: #9aa6b2;")
-
         btn1 = _RestoreOptionButton(
             glyph="mdi6.harddisk",
             title="Full System Restore",
@@ -1427,7 +1479,21 @@ class _RestoreDialog(QDialog):
         b_layout.addWidget(lbl_choose)
         b_layout.addSpacing(6)
         b_layout.addWidget(btn1)
+
+        sep1 = QFrame()
+        sep1.setFrameShape(QFrame.HLine)
+        sep1.setStyleSheet("border: none; border-top: 1px solid rgba(31,92,255,30);")
+        sep1.setFixedHeight(1)
+        b_layout.addWidget(sep1)
+
         b_layout.addWidget(btn2)
+
+        sep2 = QFrame()
+        sep2.setFrameShape(QFrame.HLine)
+        sep2.setStyleSheet("border: none; border-top: 1px solid rgba(31,92,255,30);")
+        sep2.setFixedHeight(1)
+        b_layout.addWidget(sep2)
+
         b_layout.addWidget(btn3)
         b_layout.addStretch()
 
@@ -1502,46 +1568,54 @@ class _RestoreOptionButton(QFrame):
         super().__init__(parent)
         self.setCursor(Qt.PointingHandCursor)
         self.setObjectName("RstOptionBtn")
-        self.setFixedHeight(68)
+        self.setFixedHeight(62)
         self._color = color
         self.setStyleSheet(f"""
             QFrame#RstOptionBtn {{
                 background: rgba(10, 15, 25, 200);
-                border: 1px solid rgba(31, 92, 255, 50);
-                border-radius: 10px;
+                border: 1px solid rgba(31, 92, 255, 40);
+                border-radius: 12px;
             }}
             QFrame#RstOptionBtn:hover {{
-                background: rgba(14, 22, 40, 240);
+                background: rgba(14, 22, 40, 255);
                 border: 1px solid {color};
             }}
         """)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(18, 0, 18, 0)
-        layout.setSpacing(16)
+        layout.setContentsMargins(16, 0, 16, 0)
+        layout.setSpacing(14)
+        layout.setAlignment(Qt.AlignVCenter)
 
-        ico = QLabel()
-        ico.setFixedSize(44, 44)
-        ico.setAlignment(Qt.AlignCenter)
-        ico.setPixmap(qta.icon(glyph, color=color).pixmap(30, 30))
-        ico.setStyleSheet("QLabel { background: transparent; border: none; }")
+        # Badge colorido via icon_badge
+        ico_lbl = QLabel()
+        ico_lbl.setFixedSize(36, 36)
+        ico_lbl.setAlignment(Qt.AlignCenter)
+        ico_lbl.setPixmap(qta.icon(glyph, color=color).pixmap(18, 18))
+        h = color.lstrip("#")
+        r, g, b = int(h[0:2],16), int(h[2:4],16), int(h[4:6],16)
+        ico_lbl.setStyleSheet(
+            f"QLabel {{ background: rgba({r},{g},{b},40); "
+            f"border-radius: 8px; border: 1px solid rgba({r},{g},{b},90); }}"
+        )
 
         text = QVBoxLayout()
-        text.setSpacing(0)
+        text.setSpacing(1)
         text.setContentsMargins(0, 0, 0, 0)
+        text.setAlignment(Qt.AlignVCenter)
 
         t = QLabel(title)
-        t.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+        t.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
         t.setStyleSheet(f"color: {color}; background: transparent; border: none;")
 
         d = QLabel(desc)
         d.setFont(QFont("DejaVu Sans Mono", 9))
         d.setWordWrap(False)
-        d.setStyleSheet("color: #9aa6b2; background: transparent; border: none;")
+        d.setStyleSheet("color: #6b7a8d; background: transparent; border: none;")
 
         text.addWidget(t)
         text.addWidget(d)
-        layout.addWidget(ico)
+        layout.addWidget(ico_lbl, 0, Qt.AlignVCenter)
         layout.addLayout(text)
         layout.addStretch()
 
@@ -1955,10 +2029,8 @@ class _FileBrowserDialog(QDialog):
         snap_lbl.setFont(QFont("DejaVu Sans Mono", 8))
         snap_lbl.setStyleSheet("color: #6b7a8d;")
 
-        btn_x = QPushButton("✕")
-        btn_x.setObjectName("FBClose")
-        btn_x.setFixedSize(26, 26)
-        btn_x.clicked.connect(self.reject)
+        btn_x = _CloseLabel(self)
+        btn_x.mousePressEvent = lambda e: self.reject()
 
         hl.addWidget(ico)
         hl.addWidget(lbl)
@@ -1974,18 +2046,18 @@ class _FileBrowserDialog(QDialog):
         bcl.setContentsMargins(14, 0, 14, 0)
         bcl.setSpacing(6)
 
-        btn_up = QPushButton()
-        btn_up.setIcon(qta.icon("mdi6.arrow-left", color="#c8d4e0"))
-        btn_up.setIconSize(QSize(16, 16))
-        btn_up.setObjectName("FBNavBtn")
-        btn_up.setFixedSize(28, 28)
-        btn_up.clicked.connect(self._go_up)
+        self.btn_up = _NavLabel(self)
+        self.btn_up.clicked.connect(self._go_up)
+        self.btn_up.setEnabled(False)
+        # Força reaplicação do estilo após o widget ser renderizado
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(0, lambda: self.btn_up.setEnabled(False))
 
         self.lbl_path = QLabel("/")
         self.lbl_path.setFont(QFont("DejaVu Sans Mono", 9))
         self.lbl_path.setStyleSheet("color: #9aa6b2;")
 
-        bcl.addWidget(btn_up)
+        bcl.addWidget(self.btn_up)
         bcl.addWidget(self.lbl_path, 1)
 
         # Corpo
@@ -2209,6 +2281,7 @@ class _FileBrowserDialog(QDialog):
         except ValueError:
             display = str(path)
         self.lbl_path.setText(display)
+        self.btn_up.setEnabled(path != self.snapshot_root)
 
         try:
             entries = sorted(path.iterdir(), key=lambda p: (p.is_file(), p.name.lower()))
@@ -2931,9 +3004,9 @@ class _SyncConfirmDialog(QDialog):
         lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
         lbl.setStyleSheet("color: #ecf4ff;")
 
-        btn_x = QPushButton("✕")
-        btn_x.setObjectName("SyncClose")
-        btn_x.setFixedSize(26, 26)
+        btn_x = _CloseLabel(self)
+        btn_x.mousePressEvent = lambda e: self.reject()
+
         btn_x.clicked.connect(self.reject)
 
         h_layout.addWidget(icon)
@@ -3084,10 +3157,10 @@ class _DeleteConfirmDialog(QDialog):
         lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
         lbl.setStyleSheet("color: #ecf4ff;")
 
-        btn_x = QPushButton("✕")
-        btn_x.setObjectName("DelClose")
-        btn_x.setFixedSize(26, 26)
-        btn_x.clicked.connect(self.reject)
+        btn_x = _CloseLabel(self)
+        btn_x.mousePressEvent = lambda e: self.reject()
+
+
 
         h_layout.addWidget(icon)
         h_layout.addSpacing(10)
