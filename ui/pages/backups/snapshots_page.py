@@ -1437,12 +1437,31 @@ class _RestoreDialog(QDialog):
         b_layout = QVBoxLayout(body)
         b_layout.setContentsMargins(24, 10, 24, 14)
         b_layout.setSpacing(5)
-        snap_label = QLabel(self.entry.path.name)
-        snap_label.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
-        snap_label.setStyleSheet(
-            "color: #23a6ff; background: rgba(35,166,255,20); "
-            "border: 1px solid rgba(35,166,255,60); border-radius: 6px; padding: 3px 10px;"
-        )
+        # Snapshot info com badge igual aos cards da lista
+        snap_row = QHBoxLayout()
+        snap_row.setSpacing(10)
+        snap_row.setContentsMargins(0, 0, 0, 0)
+
+        snap_icon = icon_badge(SNAPSHOT_GLYPH, 32)
+
+        snap_text = QVBoxLayout()
+        snap_text.setSpacing(2)
+        snap_text.setContentsMargins(0, 0, 0, 0)
+
+        snap_title = QLabel(self.entry.path.name)
+        snap_title.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+        snap_title.setStyleSheet("color: #ecf4ff;")
+
+        snap_meta = QLabel(self.entry.meta_text)
+        snap_meta.setFont(QFont("DejaVu Sans Mono", 8))
+        snap_meta.setStyleSheet("color: #6b7a8d;")
+
+        snap_text.addWidget(snap_title)
+        snap_text.addWidget(snap_meta)
+
+        snap_row.addWidget(snap_icon)
+        snap_row.addLayout(snap_text)
+        snap_row.addStretch()
         lbl_choose = QLabel("Escolha o tipo de restore:")
         lbl_choose = QLabel("Escolha o tipo de restore:")
         lbl_choose.setFont(QFont("DejaVu Sans Mono", 9))
@@ -1474,7 +1493,7 @@ class _RestoreDialog(QDialog):
         )
         btn3.clicked.connect(self._on_alt_restore)
 
-        b_layout.addWidget(snap_label)
+        b_layout.addLayout(snap_row)
         b_layout.addSpacing(8)
         b_layout.addWidget(lbl_choose)
         b_layout.addSpacing(6)
