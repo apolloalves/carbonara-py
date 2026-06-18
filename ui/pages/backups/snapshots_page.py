@@ -1303,6 +1303,36 @@ def _show_error(title: str, message: str, parent=None) -> None:
 
 # ── Restore helpers ───────────────────────────────────────────────────────────
 
+class _CloseLabel(QLabel):
+    """Label ✕ com hover real — QLabel:hover não funciona sem WA_Hover."""
+    def __init__(self, parent=None):
+        super().__init__("✕", parent)
+        self.setFixedSize(28, 28)
+        self.setAlignment(Qt.AlignCenter)
+        self.setCursor(Qt.PointingHandCursor)
+        self._set_normal()
+
+    def _set_normal(self):
+        self.setStyleSheet(
+            "QLabel { color: #c8d4e0; font-size: 14px; "
+            "border-radius: 6px; background: transparent; }"
+        )
+
+    def _set_hover(self):
+        self.setStyleSheet(
+            "QLabel { color: #ff8888; font-size: 14px; "
+            "border-radius: 6px; background: rgba(200,60,60,80); }"
+        )
+
+    def enterEvent(self, event):
+        self._set_hover()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._set_normal()
+        super().leaveEvent(event)
+
+
 class _RestoreDialog(QDialog):
     """Dialog de restore com 3 opções."""
 
@@ -1313,12 +1343,13 @@ class _RestoreDialog(QDialog):
         self.setModal(True)
         self.setFixedSize(860, 400)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_StyledBackground, True)
         self._build_ui()
         self._apply_styles()
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
+        root.setContentsMargins(1, 1, 1, 1)
         root.setSpacing(0)
 
         header = QFrame()
@@ -1337,10 +1368,8 @@ class _RestoreDialog(QDialog):
         lbl.setFont(QFont("DejaVu Sans Mono", 13, QFont.Bold))
         lbl.setStyleSheet("color: #ecf4ff;")
 
-        btn_x = QPushButton("✕")
-        btn_x.setObjectName("RstClose")
-        btn_x.setFixedSize(28, 28)
-        btn_x.clicked.connect(self.reject)
+        btn_x = _CloseLabel(self)
+        btn_x.mousePressEvent = lambda e: self.reject()
 
         h_layout.addWidget(icon)
         h_layout.addSpacing(12)
@@ -1408,22 +1437,23 @@ class _RestoreDialog(QDialog):
         self.setStyleSheet("""
             QDialog {
                 background: #080c14;
-                border-radius: 14px;
+                
+                border-radius: 16px;
             }
             QFrame#RstHeader {
                 background: rgba(8, 20, 40, 255);
                 border-bottom: 1px solid rgba(35, 166, 255, 80);
-                border-top-left-radius: 13px;
-                border-top-right-radius: 13px;
+                border-top-left-radius: 15px;
+                border-top-right-radius: 15px;
             }
             QFrame#RstBody {
                 background: #080c14;
-                border-bottom-left-radius: 13px;
-                border-bottom-right-radius: 13px;
+                border-bottom-left-radius: 15px;
+                border-bottom-right-radius: 15px;
             }
             QPushButton#RstClose {
                 background: transparent; border: none;
-                color: #4a5a6a; font-size: 13px; border-radius: 6px;
+                color: #6b7a8d; font-size: 13px; border-radius: 6px;
             }
             QPushButton#RstClose:hover {
                 background: rgba(200,60,60,60); color: #ff8888;
@@ -1441,8 +1471,8 @@ class _RestoreDialog(QDialog):
 
     def _on_alt_restore(self) -> None:
         self.accept()
-        QMessageBox.information(self.parent(), "Restore Alternativo",
-            "Restore para disco alternativo será implementado em breve.")
+        dlg = _AltRestoreDialog(self.entry, parent=self.parent())
+        dlg.exec()
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -1453,14 +1483,15 @@ class _RestoreDialog(QDialog):
             self.move(event.globalPosition().toPoint() - self._drag)
 
     def paintEvent(self, event):
-        from PySide6.QtGui import QPainter, QPen, QColor
+        from PySide6.QtGui import QPainter, QPen, QColor, QBrush
         super().paintEvent(event)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        pen = QPen(QColor(35, 166, 255, 200))
+        pen = QPen(QColor(31, 141, 218, 120))
         pen.setWidth(1)
         painter.setPen(pen)
-        painter.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 14, 14)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 16, 16)
 
 
 class _RestoreOptionButton(QFrame):
@@ -2526,6 +2557,343 @@ class _FileBrowserRestoreWorker(QThread):
                 self.finished_ok.emit()
         except Exception as exc:
             self.failed.emit(str(exc))
+
+
+
+# ── Alt Restore helpers ───────────────────────────────────────────────────────
+
+class _AltRestoreDialog(QDialog):
+    """Dialog para restaurar snapshot para um disco alternativo."""
+
+    def __init__(self, entry: SnapshotEntry, parent=None):
+        super().__init__(parent)
+        self.entry = entry
+        self.setWindowTitle("Restore para disco alternativo")
+        self.setModal(True)
+        self.setFixedSize(680, 420)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self._destinations = []
+        self._build_ui()
+        self._apply_styles()
+        self._load_destinations()
+
+    def _build_ui(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        # Header
+        header = QFrame()
+        header.setObjectName("ARHeader")
+        header.setFixedHeight(52)
+        hl = QHBoxLayout(header)
+        hl.setContentsMargins(18, 0, 16, 0)
+
+        ico = QLabel()
+        ico.setFixedSize(32, 32)
+        ico.setAlignment(Qt.AlignCenter)
+        ico.setPixmap(qta.icon("mdi6.content-copy", color="#23a6ff").pixmap(20, 20))
+        ico.setStyleSheet("QLabel { background: rgba(35,166,255,40); border-radius: 9px; }")
+
+        lbl = QLabel("Restore para disco alternativo")
+        lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+        lbl.setStyleSheet("color: #ecf4ff;")
+
+        btn_x = _CloseLabel(self)
+        btn_x.mousePressEvent = lambda e: self.reject()
+
+        hl.addWidget(ico)
+        hl.addSpacing(10)
+        hl.addWidget(lbl)
+        hl.addStretch()
+        hl.addWidget(btn_x)
+
+        # Body
+        body = QFrame()
+        body.setObjectName("ARBody")
+        bl = QVBoxLayout(body)
+        bl.setContentsMargins(24, 18, 24, 20)
+        bl.setSpacing(12)
+
+        # Snapshot info
+        snap_lbl = QLabel(self.entry.path.name)
+        snap_lbl.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
+        snap_lbl.setStyleSheet(
+            "color: #23a6ff; background: rgba(35,166,255,20); "
+            "border: 1px solid rgba(35,166,255,60); border-radius: 6px; padding: 4px 10px;"
+        )
+
+        # Destino
+        lbl_dest = QLabel("Selecione o disco de destino:")
+        lbl_dest.setFont(QFont("DejaVu Sans Mono", 10))
+        lbl_dest.setStyleSheet("color: #c8d4e0;")
+
+        self.cmb_dest = QComboBox()
+        self.cmb_dest.setFont(QFont("DejaVu Sans Mono", 10))
+        self.cmb_dest.setMinimumHeight(36)
+        style_combo_popup(self.cmb_dest)
+
+        # Opções de cópia
+        lbl_opts = QLabel("Opções:")
+        lbl_opts.setFont(QFont("DejaVu Sans Mono", 10))
+        lbl_opts.setStyleSheet("color: #c8d4e0;")
+
+        opts_row = QHBoxLayout()
+        opts_row.setSpacing(10)
+
+        self.chk_delete = QPushButton("Sincronizar (--delete)")
+        self.chk_delete.setCheckable(True)
+        self.chk_delete.setChecked(False)
+        self.chk_delete.setObjectName("AROptBtn")
+
+        self.chk_hardlinks = QPushButton("Preservar hard-links (-H)")
+        self.chk_hardlinks.setCheckable(True)
+        self.chk_hardlinks.setChecked(True)
+        self.chk_hardlinks.setObjectName("AROptBtn")
+
+        opts_row.addWidget(self.chk_delete)
+        opts_row.addWidget(self.chk_hardlinks)
+        opts_row.addStretch()
+
+        # Info destino
+        self.lbl_dest_info = QLabel("—")
+        self.lbl_dest_info.setFont(QFont("DejaVu Sans Mono", 9))
+        self.lbl_dest_info.setStyleSheet("color: #6b7a8d;")
+        self.cmb_dest.currentIndexChanged.connect(self._on_dest_changed)
+
+        # Warn
+        warn = QLabel("⚠  O conteúdo existente no destino pode ser alterado.")
+        warn.setFont(QFont("DejaVu Sans Mono", 8))
+        warn.setStyleSheet("color: #ff9966;")
+
+        # Botões
+        btn_row = QHBoxLayout()
+        btn_cancel = QPushButton("Cancelar")
+        btn_cancel.setObjectName("ARBtnCancel")
+        btn_cancel.setFixedWidth(110)
+        btn_cancel.clicked.connect(self.reject)
+
+        self.btn_start = QPushButton("Iniciar Restore")
+        self.btn_start.setObjectName("ARBtnStart")
+        self.btn_start.setFixedWidth(140)
+        self.btn_start.setEnabled(False)
+        self.btn_start.clicked.connect(self._on_start)
+
+        btn_row.addStretch()
+        btn_row.addWidget(btn_cancel)
+        btn_row.addWidget(self.btn_start)
+
+        bl.addWidget(snap_lbl)
+        bl.addWidget(lbl_dest)
+        bl.addWidget(self.cmb_dest)
+        bl.addWidget(self.lbl_dest_info)
+        bl.addWidget(lbl_opts)
+        bl.addLayout(opts_row)
+        bl.addStretch()
+        bl.addWidget(warn)
+        bl.addLayout(btn_row)
+
+        root.addWidget(header)
+        root.addWidget(body, stretch=1)
+
+    def _apply_styles(self):
+        self.setStyleSheet("""
+            QDialog {
+                background: #080c14;
+                border-radius: 14px;
+            }
+            QFrame#ARHeader {
+                background: rgba(8, 20, 40, 255);
+                border-bottom: 1px solid rgba(35, 166, 255, 80);
+                border-top-left-radius: 13px;
+                border-top-right-radius: 13px;
+            }
+            QFrame#ARBody {
+                background: #080c14;
+                border-bottom-left-radius: 13px;
+                border-bottom-right-radius: 13px;
+            }
+            QComboBox {
+                background: rgba(10,15,25,230);
+                border: 1px solid rgba(31,92,255,120);
+                border-radius: 8px; color: #ecf4ff;
+                font-family: "DejaVu Sans Mono"; padding: 6px 12px;
+            }
+            QComboBox:hover { border-color: rgba(35,166,255,200); }
+            QComboBox::drop-down { border: none; width: 24px; }
+            QPushButton#AROptBtn {
+                background: rgba(10,15,25,200);
+                border: 1px solid rgba(31,92,255,80);
+                border-radius: 8px; color: #9aa6b2;
+                font-family: "DejaVu Sans Mono"; font-size: 9px;
+                padding: 5px 12px;
+            }
+            QPushButton#AROptBtn:checked {
+                background: rgba(35,166,255,100);
+                border-color: rgba(35,166,255,200); color: #ecf4ff;
+            }
+            QPushButton#ARBtnCancel {
+                background: rgba(10,15,25,230);
+                border: 1px solid rgba(31,92,255,120);
+                border-radius: 8px; color: #ecf4ff;
+                font-family: "DejaVu Sans Mono"; font-size: 11px;
+                padding: 6px 0;
+            }
+            QPushButton#ARBtnCancel:hover {
+                background: rgba(23,147,209,70);
+                border-color: rgba(35,166,255,180);
+            }
+            QPushButton#ARBtnStart {
+                background: rgba(35,166,255,180);
+                border: 1px solid rgba(35,166,255,220);
+                border-radius: 8px; color: #08111d;
+                font-family: "DejaVu Sans Mono"; font-size: 11px;
+                font-weight: 700; padding: 6px 0;
+            }
+            QPushButton#ARBtnStart:hover { background: rgba(70,188,255,220); }
+            QPushButton#ARBtnStart:disabled {
+                background: rgba(10,15,25,100);
+                border-color: rgba(31,92,255,30); color: #3a4a5a;
+            }
+        """)
+
+    def _load_destinations(self):
+        """Lista discos montados excluindo o disco de origem do snapshot."""
+        snap_mount = None
+        try:
+            meta = json.loads((self.entry.path / "snapshot.json").read_text())
+            snap_mount = meta.get("destination_mountpoint", "")
+        except Exception:
+            pass
+
+        self.cmb_dest.clear()
+        self._destinations = []
+
+        for dest in list_backup_destinations():
+            if dest.mountpoint == snap_mount:
+                continue  # exclui o disco onde o snapshot está
+            self._destinations.append(dest)
+            label = f"{dest.label}  •  {format_gb(dest.free_gb)} livre  •  {dest.mountpoint}"
+            self.cmb_dest.addItem(label, dest)
+
+        self.btn_start.setEnabled(bool(self._destinations))
+        if not self._destinations:
+            self.lbl_dest_info.setText("Nenhum disco alternativo disponível.")
+        else:
+            self._on_dest_changed(0)
+
+    def _on_dest_changed(self, index: int):
+        if index < 0 or index >= len(self._destinations):
+            return
+        dest = self._destinations[index]
+        self.lbl_dest_info.setText(
+            f"{format_gb(dest.free_gb)} livre de {format_gb(dest.total_gb)} "
+            f"• {dest.fs_type}"
+        )
+
+    def _on_start(self):
+        idx = self.cmb_dest.currentIndex()
+        if idx < 0 or idx >= len(self._destinations):
+            return
+        dest = self._destinations[idx]
+
+        use_delete = self.chk_delete.isChecked()
+        use_hardlinks = self.chk_hardlinks.isChecked()
+
+        self.accept()
+
+        project_root = Path(__file__).resolve().parents[3]
+        python_bin = str(Path.home() / "venvs" / "pyside" / "bin" / "python3")
+        snap_path = str(self.entry.path)
+        dest_path = dest.mountpoint
+
+        script = f"""
+import sys, subprocess
+sys.path.insert(0, {str(project_root)!r})
+
+from PySide6.QtWidgets import QApplication
+from ui.widgets.backup_progress import BackupProgressDialog
+from core.workers.rsync_worker import RsyncWorker
+from pathlib import Path
+
+snap = Path({snap_path!r})
+dest_base = Path({dest_path!r}) / "CarbonaraSnapshots" / snap.parent.name
+dest_base.mkdir(parents=True, exist_ok=True)
+dest_dir = dest_base / snap.name
+
+cmd = [
+    "rsync", "-aAXHh",
+    "--numeric-ids",
+    "--info=progress2",
+    "--out-format=Copiando: %n",
+]
+{"""cmd.append("--delete")""" if use_delete else ""}
+{"""cmd.append("-H")""" if use_hardlinks else ""}
+cmd += [str(snap) + "/", str(dest_dir) + "/"]
+
+app = QApplication([])
+dialog = BackupProgressDialog("Restore para {dest.label}")
+dialog.set_running(True)
+dialog.set_status("Iniciando restore...")
+dialog.progress.setRange(0, 100)
+dialog.progress.setValue(0)
+
+worker = RsyncWorker(cmd, title="Copiando snapshot...", parent=dialog)
+dialog.register_worker(worker)
+worker.progress_changed.connect(dialog.progress.setValue)
+worker.status_changed.connect(dialog.set_status)
+worker.file_changed.connect(dialog.set_current_file)
+worker.log_line.connect(dialog.append_log)
+
+def on_ok():
+    dialog.set_status("Restore concluído com sucesso.")
+    dialog.progress.setValue(100)
+    dialog.set_running(False)
+    dialog.btn_close.setEnabled(True)
+
+def on_fail(msg):
+    dialog.set_status(f"Erro: {{msg}}")
+    dialog.set_running(False)
+    dialog.btn_close.setEnabled(True)
+
+worker.finished_ok.connect(on_ok)
+worker.failed.connect(on_fail)
+worker.start()
+dialog.exec()
+"""
+        cmd_pkexec = [
+            "pkexec", "env",
+            f"DISPLAY={os.environ.get('DISPLAY', '')}",
+            f"XAUTHORITY={os.environ.get('XAUTHORITY', '')}",
+            f"PYTHONPATH={project_root}",
+            python_bin, "-c", script,
+        ]
+
+        try:
+            subprocess.Popen(cmd_pkexec, cwd=str(project_root))
+        except Exception as e:
+            _show_error("Restore Alternativo", str(e), parent=self.parent())
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.LeftButton and hasattr(self, "_drag"):
+            self.move(event.globalPosition().toPoint() - self._drag)
+
+    def paintEvent(self, event):
+        from PySide6.QtGui import QPainter, QPen, QColor
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        pen = QPen(QColor(31, 141, 218, 120))
+        pen.setWidth(1)
+        painter.setPen(pen)
+        from PySide6.QtCore import Qt as _Qt
+        painter.setBrush(_Qt.NoBrush)
+        painter.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 14, 14)
 
 # ── Sync helpers ─────────────────────────────────────────────────────────────
 
