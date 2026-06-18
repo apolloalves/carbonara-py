@@ -1066,8 +1066,9 @@ dialog.exec()
 
         # rc=0 → sucesso silencioso
         # rc=2 → cancelamento intencional pelo usuário (BackupProgressDialog.done(2))
+        # rc=126 → pkexec cancelado pelo usuário (ESC ou Cancelar na autenticação)
         # rc=anything else → erro real
-        if rc not in (0, 2):
+        if rc not in (0, 2, 126):
             QMessageBox.warning(
                 self,
                 "Carbonara",
