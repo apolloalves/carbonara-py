@@ -1304,6 +1304,56 @@ def _show_error(title: str, message: str, parent=None) -> None:
 
 # ── Restore helpers ───────────────────────────────────────────────────────────
 
+class _MaxLabel(QLabel):
+    """Botão maximizar/restaurar com hover real."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(28, 28)
+        self.setAlignment(Qt.AlignCenter)
+        self.setCursor(Qt.PointingHandCursor)
+        self._set_normal()
+
+    def _set_normal(self):
+        self.setStyleSheet(
+            "QLabel { color: #c8d4e0; font-size: 14px; "
+            "border-radius: 6px; background: transparent; }"
+        )
+        self.setText("⬜")
+
+    def _set_hover(self):
+        self.setStyleSheet(
+            "QLabel { color: #23a6ff; font-size: 14px; "
+            "border-radius: 6px; background: rgba(35,166,255,30); }"
+        )
+
+    def enterEvent(self, event):
+        self._set_hover()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._set_normal()
+        super().leaveEvent(event)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            win = self.window()
+            if getattr(win, "_is_maximized", False):
+                win.resize(win._normal_size)
+                win.move(win._normal_pos)
+                win._is_maximized = False
+                self.setText("⬜")
+            else:
+                from PySide6.QtWidgets import QApplication
+                win._normal_size = win.size()
+                win._normal_pos = win.pos()
+                screen = QApplication.primaryScreen().availableGeometry()
+                win.resize(screen.width() - 40, screen.height() - 40)
+                win.move(20, 20)
+                win._is_maximized = True
+                self.setText("❐")
+        super().mousePressEvent(event)
+
+
 class _CloseLabel(QLabel):
     """Label ✕ com hover real — QLabel:hover não funciona sem WA_Hover."""
     def __init__(self, parent=None):
@@ -2012,8 +2062,9 @@ class _FileBrowserDialog(QDialog):
         self.snapshot_root = entry.path
         self.setWindowTitle("File Browser")
         self.setModal(True)
-        self.setFixedSize(900, 620)
-        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self.resize(1100, 700)
+        self.setMinimumSize(800, 500)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint | Qt.WindowMaximizeButtonHint)
         self._current_path = self.snapshot_root
         self._selected_items = []
         self._conflict_mode = "overwrite"
@@ -2035,9 +2086,9 @@ class _FileBrowserDialog(QDialog):
         hl.setSpacing(10)
 
         ico = QLabel()
-        ico.setFixedSize(28, 28)
+        ico.setFixedSize(32, 32)
         ico.setAlignment(Qt.AlignCenter)
-        ico.setPixmap(qta.icon("mdi6.folder-search", color="#4ade80").pixmap(18, 18))
+        ico.setPixmap(qta.icon("mdi6.folder-search", color="#4ade80").pixmap(22, 22))
         ico.setStyleSheet("QLabel { background: rgba(74,222,128,30); border-radius: 8px; }")
 
         lbl = QLabel("File Browser")
@@ -2051,10 +2102,14 @@ class _FileBrowserDialog(QDialog):
         btn_x = _CloseLabel(self)
         btn_x.mousePressEvent = lambda e: self.reject()
 
+        btn_max = _MaxLabel(self)
+
         hl.addWidget(ico)
         hl.addWidget(lbl)
         hl.addWidget(snap_lbl)
         hl.addStretch()
+        hl.addWidget(btn_max)
+        hl.addSpacing(4)
         hl.addWidget(btn_x)
 
         # Breadcrumb
@@ -2073,7 +2128,7 @@ class _FileBrowserDialog(QDialog):
         QTimer.singleShot(0, lambda: self.btn_up.setEnabled(False))
 
         self.lbl_path = QLabel("/")
-        self.lbl_path.setFont(QFont("DejaVu Sans Mono", 9))
+        self.lbl_path.setFont(QFont("DejaVu Sans Mono", 10))
         self.lbl_path.setStyleSheet("color: #9aa6b2;")
 
         bcl.addWidget(self.btn_up)
@@ -2095,7 +2150,7 @@ class _FileBrowserDialog(QDialog):
         self.tree.setHeaderHidden(True)
         self.tree.setObjectName("FBTree")
         self.tree.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        self.tree.setIconSize(QSize(18, 18))
+        self.tree.setIconSize(QSize(24, 24))
         self.tree.itemDoubleClicked.connect(self._on_double_click)
         self.tree.itemSelectionChanged.connect(self._on_selection_changed)
         self.tree.itemExpanded.connect(self._on_item_expanded)
@@ -2115,7 +2170,7 @@ class _FileBrowserDialog(QDialog):
         right_l.setSpacing(8)
 
         lbl_sel = QLabel("Selecionados para restore:")
-        lbl_sel.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
+        lbl_sel.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
         lbl_sel.setStyleSheet("color: #c8d4e0;")
 
         self.list_selected = QPlainTextEdit()
@@ -2131,7 +2186,7 @@ class _FileBrowserDialog(QDialog):
         cf_l.setSpacing(6)
 
         lbl_cf = QLabel("Se o arquivo já existir no sistema:")
-        lbl_cf.setFont(QFont("DejaVu Sans Mono", 8))
+        lbl_cf.setFont(QFont("DejaVu Sans Mono", 9))
         lbl_cf.setStyleSheet("color: #9aa6b2;")
 
         self.btn_overwrite = QPushButton("Sobrescrever")
@@ -2242,16 +2297,16 @@ class _FileBrowserDialog(QDialog):
                 background: rgba(6,9,16,240);
                 border: 1px solid rgba(31,92,255,55);
                 border-radius: 8px; color: #c8d4e0;
-                font-family: "DejaVu Sans Mono"; font-size: 10px; outline: none;
+                font-family: "DejaVu Sans Mono"; font-size: 12px; outline: none;
             }
-            QTreeWidget#FBTree::item { padding: 4px 6px; border-radius: 4px; }
+            QTreeWidget#FBTree::item { padding: 6px 8px; border-radius: 4px; }
             QTreeWidget#FBTree::item:hover { background: rgba(35,166,255,30); }
             QTreeWidget#FBTree::item:selected { background: rgba(35,166,255,80); color: #ecf4ff; }
             QPlainTextEdit#FBSelected {
                 background: rgba(6,9,16,200);
                 border: 1px solid rgba(31,92,255,55); border-radius: 8px;
                 color: #9aa6b2; font-family: "DejaVu Sans Mono";
-                font-size: 9px; padding: 6px;
+                font-size: 11px; padding: 6px;
             }
             QPlainTextEdit#FBLog {
                 background: rgba(6,9,16,200);
@@ -2263,7 +2318,7 @@ class _FileBrowserDialog(QDialog):
                 background: rgba(10,15,25,200);
                 border: 1px solid rgba(31,92,255,80); border-radius: 6px;
                 color: #9aa6b2; font-family: "DejaVu Sans Mono";
-                font-size: 9px; padding: 4px 8px;
+                font-size: 11px; padding: 7px 12px;
             }
             QPushButton#FBConflictBtn:checked {
                 background: rgba(35,166,255,100);
@@ -2273,8 +2328,8 @@ class _FileBrowserDialog(QDialog):
                 background: rgba(74,222,128,180);
                 border: 1px solid rgba(74,222,128,220);
                 border-radius: 8px; color: #08111d;
-                font-family: "DejaVu Sans Mono"; font-size: 11px;
-                font-weight: 700; padding: 7px 0;
+                font-family: "DejaVu Sans Mono"; font-size: 13px;
+                font-weight: 700; padding: 10px 0;
             }
             QPushButton#FBBtnRestore:hover { background: rgba(94,234,149,220); }
             QPushButton#FBBtnRestore:disabled {
@@ -2437,6 +2492,9 @@ class _FileBrowserDialog(QDialog):
         items_repr = repr([str(p) for p in self._selected_items])
         snap_root_repr = repr(str(self.snapshot_root))
         conflict_repr = repr(self._conflict_mode)
+        # Snapshot HOME armazena o conteúdo de /home/ sem o prefixo "home/"
+        # — precisa recolocar esse prefixo no destino real.
+        dest_prefix_repr = repr("home") if self.entry.kind.upper() == "HOME" else repr("")
 
         script = f"""
 import shutil
@@ -2445,6 +2503,12 @@ from pathlib import Path
 snapshot_root = Path({snap_root_repr})
 items = {items_repr}
 conflict = {conflict_repr}
+dest_prefix = {dest_prefix_repr}
+
+def to_dest(rel: Path) -> Path:
+    if dest_prefix:
+        return Path("/") / dest_prefix / rel
+    return Path("/") / rel
 
 for src_str in items:
     src = Path(src_str)
@@ -2452,13 +2516,13 @@ for src_str in items:
         rel = src.relative_to(snapshot_root)
     except ValueError:
         continue
-    dst = Path("/") / rel
+    dst = to_dest(rel)
     if src.is_dir():
         for f in src.rglob("*"):
             if f.is_file() or f.is_symlink():
                 try:
                     rel_f = f.relative_to(snapshot_root)
-                    dst_f = Path("/") / rel_f
+                    dst_f = to_dest(rel_f)
                     if dst_f.exists() and conflict == "skip":
                         print(f"SKIP: {{dst_f}}")
                         continue
@@ -3025,8 +3089,6 @@ class _SyncConfirmDialog(QDialog):
 
         btn_x = _CloseLabel(self)
         btn_x.mousePressEvent = lambda e: self.reject()
-
-        btn_x.clicked.connect(self.reject)
 
         h_layout.addWidget(icon)
         h_layout.addSpacing(10)
