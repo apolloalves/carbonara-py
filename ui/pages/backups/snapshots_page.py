@@ -1969,15 +1969,15 @@ PASSO 3 — Confirmação
 
         header = QFrame()
         header.setObjectName("RIHeader")
-        header.setFixedHeight(48)
+        header.setFixedHeight(58)
         h_layout = QHBoxLayout(header)
         h_layout.setContentsMargins(18, 0, 16, 0)
 
         icon = QLabel()
-        icon.setFixedSize(28, 28)
+        icon.setFixedSize(38, 38)
         icon.setAlignment(Qt.AlignCenter)
-        icon.setPixmap(qta.icon("mdi6.check-circle", color="#4ade80").pixmap(18, 18))
-        icon.setStyleSheet("QLabel { background: rgba(74,222,128,30); border-radius: 8px; }")
+        icon.setPixmap(qta.icon("mdi6.check-circle", color="#4ade80").pixmap(24, 24))
+        icon.setStyleSheet("QLabel { background: rgba(74,222,128,30); border-radius: 10px; }")
 
         lbl = QLabel("Script de Restore Gerado")
         lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
@@ -1991,8 +1991,8 @@ PASSO 3 — Confirmação
         body = QFrame()
         body.setObjectName("RIBody")
         b_layout = QVBoxLayout(body)
-        b_layout.setContentsMargins(28, 20, 28, 20)
-        b_layout.setSpacing(6)
+        b_layout.setContentsMargins(28, 24, 28, 22)
+        b_layout.setSpacing(8)
 
         # ── Passo 1: ISO disponível no Ventoy ────────────────────────────────
         lbl1 = QLabel("1.  Boot pelo Ventoy → selecione uma ISO Arch:")
@@ -2012,16 +2012,16 @@ PASSO 3 — Confirmação
                     break
             self.cmb_iso.setStyleSheet("""
                 QComboBox {
-                    background: rgba(10,15,25,230);
-                    border: 1px solid rgba(31,92,255,120);
-                    border-radius: 6px; color: #ecf4ff;
+                    background: rgba(255,255,255,6);
+                    border: 1px solid rgba(255,255,255,14);
+                    border-radius: 10px; color: #ecf4ff;
                     font-family: "DejaVu Sans Mono"; font-size: 10px;
-                    padding: 6px 12px;
+                    padding: 8px 12px;
                 }
                 QComboBox::drop-down { border: none; width: 20px; }
                 QComboBox QAbstractItemView {
                     background: #0a0f19; color: #ecf4ff;
-                    border: 1px solid rgba(31,92,255,140);
+                    border: 1px solid rgba(255,255,255,14);
                 }
             """)
             b_layout.addWidget(self.cmb_iso)
@@ -2031,7 +2031,7 @@ PASSO 3 — Confirmação
             lbl_no_iso.setStyleSheet("color: #ff9966;")
             b_layout.addWidget(lbl_no_iso)
 
-        b_layout.addSpacing(10)
+        b_layout.addSpacing(20)
 
         # ── Passo 2: Executar script ──────────────────────────────────────────
         lbl2 = QLabel("2.  No shell do live ISO, execute:")
@@ -2043,8 +2043,8 @@ PASSO 3 — Confirmação
         cmd_lbl.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
         cmd_lbl.setWordWrap(True)
         cmd_lbl.setStyleSheet(
-            "color: #4ade80; background: rgba(74,222,128,15); "
-            "border: 1px solid rgba(74,222,128,60); border-radius: 6px; padding: 10px 14px;"
+            "color: #8fd4ff; background: rgba(255,255,255,6); "
+            "border: 1px solid rgba(255,255,255,14); border-radius: 10px; padding: 10px 14px;"
         )
         cmd_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
         b_layout.addWidget(cmd_lbl)
@@ -2057,17 +2057,30 @@ PASSO 3 — Confirmação
         lbl3.setWordWrap(True)
         b_layout.addWidget(lbl3)
 
-        warn = QLabel("⚠  Confirme digitando RESTAURAR quando solicitado.")
+        warn_row = QHBoxLayout()
+        warn_row.setSpacing(8)
+        warn_row.setContentsMargins(0, 4, 0, 0)
+
+        warn_icon = QLabel()
+        warn_icon.setFixedSize(20, 20)
+        warn_icon.setAlignment(Qt.AlignCenter)
+        warn_icon.setPixmap(qta.icon("mdi6.alert", color="#ff9966").pixmap(18, 18))
+
+        warn = QLabel("Confirme digitando RESTAURAR quando solicitado.")
         warn.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
         warn.setStyleSheet("color: #ff9966;")
-        b_layout.addWidget(warn)
+
+        warn_row.addWidget(warn_icon)
+        warn_row.addWidget(warn)
+        warn_row.addStretch()
+        b_layout.addLayout(warn_row)
 
         b_layout.addSpacing(14)
 
         # ── Arquivos gerados ──────────────────────────────────────────────────
         sep = QFrame()
         sep.setFrameShape(QFrame.HLine)
-        sep.setStyleSheet("border: none; border-top: 1px solid rgba(31,92,255,40);")
+        sep.setStyleSheet("border: none; border-top: 1px solid rgba(255,255,255,12);")
         b_layout.addWidget(sep)
 
         b_layout.addSpacing(6)
@@ -2121,18 +2134,17 @@ PASSO 3 — Confirmação
     def _apply_styles(self) -> None:
         self.setStyleSheet("""
             QDialog {
-                background: #080c14;
-                border: 1px solid rgba(70, 188, 255, 220);
+                background: #131417;
                 border-radius: 14px;
             }
             QFrame#RIHeader {
                 background: rgba(8, 20, 14, 255);
-                border-bottom: 1px solid rgba(74, 222, 128, 80);
+                border-bottom: 1px solid rgba(74, 222, 128, 35);
                 border-top-left-radius: 12px;
                 border-top-right-radius: 12px;
             }
             QFrame#RIBody {
-                background: #080c14;
+                background: #131417;
                 border-bottom-left-radius: 12px;
                 border-bottom-right-radius: 12px;
             }
