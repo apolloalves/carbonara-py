@@ -1526,7 +1526,7 @@ class _RestoreDialog(QDialog):
 
         header = QFrame()
         header.setObjectName("RstHeader")
-        header.setFixedHeight(68)
+        header.setFixedHeight(60)
         h_layout = QHBoxLayout(header)
         h_layout.setContentsMargins(20, 0, 18, 0)
         h_layout.setSpacing(6)
@@ -1701,15 +1701,23 @@ class _RestoreDialog(QDialog):
         """)
 
     def _on_full_restore(self) -> None:
-        _do_full_restore(self.entry, parent=self.parent())
+        self.hide()
+        try:
+            _do_full_restore(self.entry, parent=self.parent())
+        finally:
+            self.show()
 
     def _on_file_browser(self) -> None:
+        self.hide()
         dlg = _FileBrowserDialog(self.entry, parent=self.parent())
         dlg.exec()
+        self.show()
 
     def _on_alt_restore(self) -> None:
+        self.hide()
         dlg = _AltRestoreDialog(self.entry, parent=self.parent())
         dlg.exec()
+        self.show()
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
