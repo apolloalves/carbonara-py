@@ -17,6 +17,7 @@ from PySide6.QtGui import (
 
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
     QFrame,
     QGraphicsDropShadowEffect,
     QGridLayout,
@@ -78,6 +79,12 @@ MENU_ENTRIES = [
 
 def clamp(value: int, low: int, high: int) -> int:
     return max(low, min(high, value))
+
+
+def _rgba(hex_color: str, alpha: int) -> str:
+    h = hex_color.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"{r}, {g}, {b}, {alpha}"
 
 
 class TitleBar(QWidget):
@@ -189,6 +196,57 @@ class TitleBar(QWidget):
         super().mouseDoubleClickEvent(event)
 
 
+class LogoBadge(QFrame):
+    """Badge do logo Carbonara: hexágono com átomo central sobre fundo gradiente."""
+
+    def __init__(self, size: int = 38, parent=None):
+        super().__init__(parent)
+        self._size = size
+        self.setFixedSize(size, size)
+        self.setStyleSheet(f"""
+            QFrame {{
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 {ACCENT_BLUE}, stop:1 {ACCENT_PURPLE}
+                );
+                border-radius: {int(size * 0.26)}px;
+                border: none;
+            }}
+        """)
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        from PySide6.QtGui import QPolygonF
+        from PySide6.QtCore import QPointF
+        import math
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        cx, cy = self._size / 2, self._size / 2
+        radius = self._size * 0.30
+
+        # Hexágono (contorno branco semi-transparente)
+        points = []
+        for i in range(6):
+            angle = math.radians(60 * i - 90)
+            x = cx + radius * math.cos(angle)
+            y = cy + radius * math.sin(angle)
+            points.append(QPointF(x, y))
+
+        pen = QPen(QColor(255, 255, 255, 235))
+        pen.setWidthF(self._size * 0.045)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawPolygon(QPolygonF(points))
+
+        # Átomo central (ponto sólido)
+        dot_r = self._size * 0.075
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(255, 255, 255, 255))
+        painter.drawEllipse(QPointF(cx, cy), dot_r, dot_r)
+
+
 class TopHeader(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -198,20 +256,7 @@ class TopHeader(QFrame):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(14)
 
-        logo_badge = QLabel("C")
-        logo_badge.setFixedSize(38, 38)
-        logo_badge.setAlignment(Qt.AlignCenter)
-        logo_badge.setFont(QFont(FONT_FAMILY, 16, QFont.Bold))
-        logo_badge.setStyleSheet(f"""
-            QLabel {{
-                background: qlineargradient(
-                    x1:0, y1:0, x2:1, y2:1,
-                    stop:0 {ACCENT_BLUE}, stop:1 {ACCENT_PURPLE}
-                );
-                border-radius: 10px;
-                color: white;
-            }}
-        """)
+        logo_badge = LogoBadge(38)
         root.addWidget(logo_badge)
 
         title_block = QVBoxLayout()
@@ -276,6 +321,7 @@ class GreetingBlock(QFrame):
         root.setSpacing(3)
 
         import datetime
+        import getpass
         hour = datetime.datetime.now().hour
         if hour < 12:
             greeting = "Good morning"
@@ -284,7 +330,10 @@ class GreetingBlock(QFrame):
         else:
             greeting = "Good evening"
 
-        user = APP_AUTHOR.split()[0]
+        try:
+            user = getpass.getuser()
+        except Exception:
+            user = "there"
 
         title = QLabel(f"{greeting}, {user}")
         title.setFont(QFont(FONT_FAMILY, 19, QFont.Bold))
@@ -603,10 +652,151 @@ class DisksHost(QWidget):
         root.addWidget(self.page, 1)
 
 
+class ExitConfirmDialog(QDialog):
+    """
+    Dialog modal de confirmação de saída.
+
+    Implementado como QDialog (não QFrame solto) porque QDialog é o
+    mecanismo nativo do Qt para janelas modais — ele garante que a
+    superfície de renderização seja alocada e pintada corretamente desde
+    a primeira chamada de exec()/show(), sem o problema de widgets soltos
+    fora de qualquer layout só renderizarem após um repaint global da
+    árvore (o que causava o overlay anterior "não aparecer" no primeiro
+    ESC pressionado após abrir o app).
+    """
+
+    confirmed = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self.setModal(True)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+
+        # Cobre a janela pai inteira com um overlay escuro
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setAlignment(Qt.AlignCenter)
+
+        self.card = QFrame(self)
+        self.card.setObjectName("ExitConfirmCard")
+        self.card.setFixedSize(400, 220)
+        self.card.setStyleSheet(f"""
+            QFrame#ExitConfirmCard {{
+                background: #14151c;
+                border: 1px solid rgba(248, 113, 113, 60);
+                border-radius: 18px;
+            }}
+            QLabel {{
+                background: transparent;
+                border: none;
+            }}
+        """)
+
+        card_layout = QVBoxLayout(self.card)
+        card_layout.setContentsMargins(28, 26, 28, 26)
+        card_layout.setSpacing(0)
+
+        icon_badge = QLabel()
+        icon_badge.setFixedSize(44, 44)
+        icon_badge.setAlignment(Qt.AlignCenter)
+        icon_badge.setStyleSheet(f"background: rgba({_rgba(ACCENT_RED, 18)}); border-radius: 13px;")
+        icon_badge.setPixmap(qta.icon("mdi6.power", color=ACCENT_RED).pixmap(22, 22))
+        card_layout.addWidget(icon_badge)
+        card_layout.addSpacing(18)
+
+        title = QLabel("Exit Carbonara?")
+        title.setFont(QFont(FONT_FAMILY, 15, QFont.Bold))
+        title.setStyleSheet(f"color: {TEXT};")
+        card_layout.addWidget(title)
+        card_layout.addSpacing(8)
+
+        subtitle = QLabel("Any unsaved progress in the current view will be lost.")
+        subtitle.setFont(QFont(FONT_FAMILY, 10))
+        subtitle.setStyleSheet(f"color: {MUTED}; line-height: 140%;")
+        subtitle.setWordWrap(True)
+        card_layout.addWidget(subtitle)
+        card_layout.addStretch()
+        card_layout.addSpacing(22)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(12)
+
+        btn_cancel = QPushButton("Cancel")
+        btn_cancel.setFixedHeight(40)
+        btn_cancel.setStyleSheet(f"""
+            QPushButton {{
+                background: rgba(255,255,255,8);
+                border: 1px solid rgba(255,255,255,14);
+                border-radius: 10px;
+                color: {TEXT};
+                font-family: "{FONT_FAMILY}";
+                font-size: 11px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background: rgba(255,255,255,14);
+            }}
+        """)
+        btn_cancel.clicked.connect(self.reject)
+
+        btn_exit = QPushButton("Exit")
+        btn_exit.setFixedHeight(40)
+        btn_exit.setStyleSheet(f"""
+            QPushButton {{
+                background: {ACCENT_RED};
+                border: none;
+                border-radius: 10px;
+                color: #1a0a0a;
+                font-family: "{FONT_FAMILY}";
+                font-size: 11px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background: #ff8a8a;
+            }}
+        """)
+        btn_exit.clicked.connect(self._on_confirm)
+
+        btn_row.addWidget(btn_cancel)
+        btn_row.addWidget(btn_exit)
+        card_layout.addLayout(btn_row)
+
+        outer.addWidget(self.card)
+
+    def _on_confirm(self):
+        self.confirmed.emit()
+        self.accept()
+
+    def paintEvent(self, event):
+        # Pinta o overlay escuro semi-transparente cobrindo toda a área
+        # do dialog (que por sua vez cobre a janela pai inteira).
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 150))
+
+    def keyPressEvent(self, event: QKeyEvent):
+        if event.key() == Qt.Key_Escape:
+            self.reject()
+            return
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            self._on_confirm()
+            return
+        super().keyPressEvent(event)
+
+    def mousePressEvent(self, event):
+        # Clique fora do card (na área do overlay) cancela
+        if not self.card.geometry().contains(event.pos()):
+            self.reject()
+            return
+        super().mousePressEvent(event)
+
+
 class MenuPage(QWidget):
     backups_requested = Signal()
     disks_requested = Signal()
     exit_requested = Signal()
+    exit_requested_confirm = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -723,6 +913,9 @@ class MenuPage(QWidget):
         self.input_box.setFocus()
         self._refresh_selection()
 
+    def _request_exit(self):
+        self.exit_requested_confirm.emit()
+
     def _go_to(self, number: int):
         self._on_card_clicked(number)
 
@@ -807,7 +1000,7 @@ class MenuPage(QWidget):
                 self._accept_typed_choice()
                 return True
             if key == Qt.Key_Escape:
-                self.window().close()
+                self._request_exit()
                 return True
         return super().eventFilter(obj, event)
 
@@ -823,7 +1016,7 @@ class MenuPage(QWidget):
             self._confirm_current()
             return
         if key == Qt.Key_Escape:
-            self.window().close()
+            self._request_exit()
             return
         super().keyPressEvent(event)
 
@@ -862,10 +1055,19 @@ class MainWindow(QMainWindow):
         self.menu_page.backups_requested.connect(self.show_backups)
         self.menu_page.disks_requested.connect(self.show_disks)
         self.menu_page.exit_requested.connect(self.close)
+        self.menu_page.exit_requested_confirm.connect(self._show_exit_dialog)
         self.backups_host.page.back_requested.connect(self.show_menu)
         self.disks_host.page.back_requested.connect(self.show_menu)
 
         self.stack.setCurrentWidget(self.menu_page)
+
+    def _show_exit_dialog(self):
+        dialog = ExitConfirmDialog(self)
+        dialog.setGeometry(self.geometry())
+        dialog.confirmed.connect(self.close)
+        dialog.exec()
+        if self.stack.currentWidget() is self.menu_page:
+            self.menu_page.input_box.setFocus()
 
     def show_menu(self):
         self.stack.setCurrentWidget(self.menu_page)
@@ -891,6 +1093,10 @@ def main():
 
     win = MainWindow()
     win.show()
+    win.raise_()
+    win.activateWindow()
+    win.menu_page.input_box.setFocus()
+
     sys.exit(app.exec())
 
 

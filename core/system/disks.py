@@ -38,12 +38,18 @@ def run(cmd: list[str]) -> str:
 
 
 def list_disks() -> list[DiskInfo]:
-    """Equivalente a 'lsblkd' do .bashrc — lsblk com colunas customizadas."""
+    """Equivalente a 'lsblkd' do .bashrc — lsblk com colunas customizadas.
+
+    lsblk pode listar a mesma partição mais de uma vez quando ela aparece
+    em hierarquias diferentes (ex: membro de RAID + ponto de montagem).
+    Deduplicamos por 'path' para garantir que cada volume apareça uma vez.
+    """
     out = run([
         "lsblk", "--output=NAME,MODEL,PATH,FSSIZE,FSUSED,FSAVAIL,FSUSE%,FSTYPE,MOUNTPOINTS",
         "--json",
     ])
     disks: list[DiskInfo] = []
+    seen_paths: set[str] = set()
     if not out:
         return disks
 
@@ -56,11 +62,13 @@ def list_disks() -> list[DiskInfo]:
         for dev in devices:
             mounts = dev.get("mountpoints") or []
             mount = mounts[0] if mounts and mounts[0] else ""
-            if dev.get("fstype") and mount:
+            path = dev.get("path", "")
+            if dev.get("fstype") and mount and path not in seen_paths:
+                seen_paths.add(path)
                 disks.append(DiskInfo(
                     name=dev.get("name", ""),
                     model=dev.get("model") or "",
-                    path=dev.get("path", ""),
+                    path=path,
                     fstype=dev.get("fstype") or "",
                     mountpoint=mount,
                     size=dev.get("fssize") or "",
@@ -76,7 +84,17 @@ def list_disks() -> list[DiskInfo]:
 
 
 def get_raid_info() -> RaidInfo | None:
-    """Lê /proc/mdstat para detectar arrays RAID ativos."""
+    """Lê /proc/mdstat para detectar arrays RAID ativos.
+
+    Formato típico do /proc/mdstat:
+        md127 : active raid0 sda2[0] sdb2[1]
+              234207232 blocks super 1.2 512k chunks
+              [state info opcional aqui, ex: [UU] para mirror]
+
+    O estado de degradação é indicado por colchetes como [_U] ou [U_]
+    na linha seguinte ao cabeçalho, não pela palavra 'active' em si
+    (que sempre aparece em arrays ativos, saudáveis ou não).
+    """
     mdstat = Path("/proc/mdstat")
     if not mdstat.exists():
         return None
@@ -96,7 +114,18 @@ def get_raid_info() -> RaidInfo | None:
         gb = blocks / (1024 ** 2)
         array_size = f"{gb:.1f} GB"
 
-    state = "clean" if "active" in rest else "degraded"
+    # Procura indicador de saúde [UU], [U_], [_U] etc. nas linhas do array
+    # RAID0 não tem redundância e por isso não exibe esse indicador —
+    # nesse caso, "active" já significa "clean" (não há estado degradado
+    # possível para RAID0: ou o array está montado, ou um disco falhou
+    # e o array inteiro desaparece do mdstat).
+    health_match = re.search(r"\[([U_]+)\]", text)
+    if level == "raid0":
+        state = "clean"
+    elif health_match:
+        state = "clean" if "_" not in health_match.group(1) else "degraded"
+    else:
+        state = "clean"
 
     return RaidInfo(
         device=f"/dev/{device}",

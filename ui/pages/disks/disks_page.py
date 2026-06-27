@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
+    QGridLayout,
     QLabel,
     QPushButton,
     QFrame,
@@ -27,148 +28,240 @@ from core.system.disks import (
 )
 
 DISK_GLYPH = "mdi6.harddisk"
-RAID_GLYPH = "mdi6.layers-triple-outline"
+RAID_GLYPH = "mdi6.view-grid-outline"
 TEMP_GLYPH = "mdi6.thermometer"
-SCAN_GLYPH = "mdi6.file-find-outline"
+SCAN_GLYPH = "mdi6.magnify"
 REFRESH_GLYPH = "mdi6.refresh"
 WARN_GLYPH = "mdi6.alert-circle-outline"
 
+# Paleta alinhada ao main_window.py (estilo SaaS)
+BG = "#0a0b0f"
+TEXT = "#e4e7ec"
+MUTED = "#8b92a3"
+FAINT = "#6b7280"
 
-def icon_badge(icon_name: str, size: int = 34, color: str = "#FFFFFF", bg: str = "rgba(35, 166, 255, 34)") -> QLabel:
+ACCENT_BLUE = "#3b82f6"
+ACCENT_BLUE_LIGHT = "#60a5fa"
+ACCENT_PURPLE = "#8b5cf6"
+ACCENT_GREEN = "#34d399"
+ACCENT_AMBER = "#fbbf24"
+ACCENT_RED = "#f87171"
+
+FONT_FAMILY = "DejaVu Sans Mono"
+
+
+def _rgba(hex_color: str, alpha: int) -> str:
+    h = hex_color.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"{r}, {g}, {b}, {alpha}"
+
+
+def icon_badge(icon_name: str, size: int = 34, color: str = TEXT, bg: str = "rgba(255,255,255,8)") -> QLabel:
     label = QLabel()
     label.setAlignment(Qt.AlignCenter)
     label.setFixedSize(size, size)
-    label.setPixmap(qta.icon(icon_name, color=color).pixmap(size - 2, size - 2))
-    label.setStyleSheet(f"QLabel {{ background: {bg}; border-radius: 10px; }}")
+    label.setPixmap(qta.icon(icon_name, color=color).pixmap(int(size * 0.5)))
+    label.setStyleSheet(f"QLabel {{ background: {bg}; border-radius: {int(size * 0.28)}px; }}")
     return label
 
 
 class DiskRow(QFrame):
-    """Linha de disco no estilo card do Carbonara, com barra de uso."""
+    """Linha de disco no estilo card SaaS, com barra de uso e cor semântica."""
 
     def __init__(self, disk: DiskInfo, parent=None):
         super().__init__(parent)
         self.setObjectName("DiskRow")
+        self.setFixedHeight(108)
+        self.setFocusPolicy(Qt.NoFocus)
 
+        has_data = bool(disk.use_pct)
         try:
             pct = int(disk.use_pct.rstrip("%")) if disk.use_pct else 0
         except ValueError:
             pct = 0
+            has_data = False
 
-        if pct >= 90:
-            bar_color = "#ff6666"
+        if not has_data:
+            bar_color = FAINT
+            border_tint = "255, 255, 255, 14"
+            bg_tint = "rgba(255, 255, 255, 5)"
+        elif pct >= 90:
+            bar_color = ACCENT_RED
+            border_tint = _rgba(ACCENT_RED, 45)
+            bg_tint = f"rgba({_rgba(ACCENT_RED, 10)})"
         elif pct >= 75:
-            bar_color = "#ffaa66"
+            bar_color = ACCENT_AMBER
+            border_tint = _rgba(ACCENT_AMBER, 45)
+            bg_tint = f"rgba({_rgba(ACCENT_AMBER, 10)})"
         else:
-            bar_color = "#4ade80"
+            bar_color = ACCENT_GREEN
+            border_tint = "255, 255, 255, 20"
+            bg_tint = "rgba(255, 255, 255, 10)"
 
         self.setStyleSheet(f"""
             QFrame#DiskRow {{
-                border: 1px solid rgba(31, 92, 255, 80);
-                border-radius: 12px;
-                background: rgba(10, 14, 22, 240);
+                border: 1px solid rgba({border_tint});
+                border-radius: 14px;
+                background: {bg_tint};
             }}
             QFrame#DiskRow:hover {{
-                border: 1px solid rgba(31, 141, 218, 200);
-                background: rgba(14, 20, 32, 255);
+                border: 1px solid rgba({_rgba(ACCENT_BLUE_LIGHT, 90)});
+            }}
+            QLabel {{
+                background: transparent;
+                border: none;
             }}
         """)
 
-        root = QHBoxLayout(self)
-        root.setContentsMargins(16, 12, 16, 12)
-        root.setSpacing(14)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(16, 14, 16, 12)
+        root.setSpacing(0)
 
-        icon = icon_badge(DISK_GLYPH, 32)
+        top_row = QHBoxLayout()
+        top_row.setSpacing(12)
+
+        icon_bg = f"rgba({_rgba(bar_color, 28)})" if has_data and pct >= 75 else "rgba(255,255,255,8)"
+        icon = icon_badge(DISK_GLYPH, 32, color=TEXT, bg=icon_bg)
 
         text_block = QVBoxLayout()
-        text_block.setSpacing(2)
+        text_block.setSpacing(1)
+        text_block.setContentsMargins(0, 0, 0, 0)
 
-        title = QLabel(f"{disk.mountpoint}")
-        title.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
-        title.setStyleSheet("color: #ecf4ff;")
+        title = QLabel(disk.mountpoint)
+        title.setFont(QFont(FONT_FAMILY, 11, QFont.Bold))
+        title.setStyleSheet(f"color: {TEXT};")
 
-        meta = QLabel(f"{disk.path}  •  {disk.fstype}  •  {disk.model or 'sem modelo'}")
-        meta.setFont(QFont("DejaVu Sans Mono", 8))
-        meta.setStyleSheet("color: #6b7a8d;")
+        meta = QLabel(f"{disk.path} · {disk.fstype}")
+        meta.setFont(QFont(FONT_FAMILY, 9))
+        meta.setStyleSheet(f"color: {FAINT};")
 
         text_block.addWidget(title)
         text_block.addWidget(meta)
 
-        bar_block = QVBoxLayout()
-        bar_block.setSpacing(3)
+        top_row.addWidget(icon)
+        top_row.addLayout(text_block, 1)
 
-        bar_bg = QFrame()
-        bar_bg.setFixedSize(180, 6)
-        bar_bg.setStyleSheet("QFrame { border-radius: 3px; background: rgba(255,255,255,18); }")
-        bar_fill = QFrame(bar_bg)
-        fill_width = max(2, int(180 * pct / 100))
-        bar_fill.setGeometry(0, 0, fill_width, 6)
-        bar_fill.setStyleSheet(f"QFrame {{ border-radius: 3px; background: {bar_color}; }}")
+        if has_data:
+            avail_lbl = QLabel(f"{disk.avail} free")
+            avail_lbl.setFont(QFont(FONT_FAMILY, 11, QFont.Bold))
+            avail_lbl.setStyleSheet(f"color: {bar_color};")
+            avail_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            top_row.addWidget(avail_lbl, 0, Qt.AlignVCenter)
 
-        usage_lbl = QLabel(f"{disk.used} / {disk.size}  ({disk.use_pct})")
-        usage_lbl.setFont(QFont("DejaVu Sans Mono", 8, QFont.Bold))
-        usage_lbl.setStyleSheet(f"color: {bar_color};")
-        usage_lbl.setAlignment(Qt.AlignRight)
+        root.addLayout(top_row)
+        root.addStretch()
 
-        bar_block.addWidget(bar_bg)
-        bar_block.addWidget(usage_lbl)
+        if has_data:
+            bar_bg = QFrame()
+            bar_bg.setFixedHeight(5)
+            bar_bg.setStyleSheet("QFrame { border-radius: 3px; background: rgba(255,255,255,10); border: none; }")
+            self._bar_bg = bar_bg
+            bar_fill = QFrame(bar_bg)
+            bar_fill.setStyleSheet(f"""
+                QFrame {{
+                    border-radius: 3px;
+                    border: none;
+                    background: {bar_color};
+                }}
+            """)
+            self._bar_fill = bar_fill
+            self._pct = pct
 
-        avail_lbl = QLabel(f"{disk.avail} livre")
-        avail_lbl.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
-        avail_lbl.setStyleSheet("color: #4ade80;")
-        avail_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        avail_lbl.setFixedWidth(90)
+            usage_lbl = QLabel(f"{disk.used} / {disk.size} · {disk.use_pct}")
+            usage_lbl.setFont(QFont(FONT_FAMILY, 9))
+            usage_lbl.setStyleSheet(f"color: {MUTED};")
 
-        root.addWidget(icon)
-        root.addLayout(text_block, 1)
-        root.addLayout(bar_block)
-        root.addWidget(avail_lbl)
+            root.addWidget(bar_bg)
+            root.addSpacing(5)
+            root.addWidget(usage_lbl)
+        else:
+            no_data_lbl = QLabel("no usage data")
+            no_data_lbl.setFont(QFont(FONT_FAMILY, 9))
+            no_data_lbl.setStyleSheet(f"color: {FAINT};")
+            root.addWidget(no_data_lbl)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "_bar_bg") and hasattr(self, "_bar_fill"):
+            w = max(2, int(self._bar_bg.width() * self._pct / 100))
+            self._bar_fill.setGeometry(0, 0, w, self._bar_bg.height())
 
 
 class RaidCard(QFrame):
-    """Card de status do array RAID."""
+    """Card de status do array RAID — alinhado ao HeroCard do menu principal."""
 
     def __init__(self, raid: RaidInfo | None, parent=None):
         super().__init__(parent)
         self.setObjectName("RaidCard")
-        self.setStyleSheet("""
-            QFrame#RaidCard {
-                border: 1px solid rgba(31, 141, 218, 255);
+
+        is_healthy = raid is not None and raid.state == "clean"
+
+        if raid is None:
+            bg = "rgba(255,255,255,6)"
+            border = "1px solid rgba(255,255,255,12)"
+        elif is_healthy:
+            bg = f"rgba({_rgba(ACCENT_GREEN, 15)})"
+            border = f"1px solid rgba({_rgba(ACCENT_GREEN, 60)})"
+        else:
+            bg = f"rgba({_rgba(ACCENT_RED, 15)})"
+            border = f"1px solid rgba({_rgba(ACCENT_RED, 60)})"
+
+        self.setStyleSheet(f"""
+            QFrame#RaidCard {{
+                border: {border};
                 border-radius: 16px;
-                background: rgba(8, 12, 20, 120);
-            }
+                background: {bg};
+            }}
+            QLabel {{
+                background: transparent;
+                border: none;
+            }}
         """)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(16, 14, 16, 14)
-        layout.setSpacing(14)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(16)
 
-        icon = icon_badge(RAID_GLYPH, 36)
+        badge_color = ACCENT_GREEN if is_healthy else (ACCENT_RED if raid else MUTED)
+        icon_bg = f"rgba({_rgba(badge_color, 22)})"
+        icon = icon_badge(RAID_GLYPH, 40, color=badge_color, bg=icon_bg)
 
         text_block = QVBoxLayout()
-        text_block.setSpacing(2)
+        text_block.setSpacing(3)
 
         if raid:
-            title = QLabel(f"{raid.device}  •  RAID {raid.level.replace('raid', '')}")
-            title.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
-            title.setStyleSheet("color: #ecf4ff;")
+            title_row = QHBoxLayout()
+            title_row.setSpacing(10)
 
-            state_color = "#4ade80" if raid.state == "clean" else "#ff9966"
-            meta = QLabel(f"{raid.array_size}  •  {len(raid.members)} membros  •  {raid.state}")
-            meta.setFont(QFont("DejaVu Sans Mono", 9))
-            meta.setStyleSheet(f"color: {state_color};")
+            title = QLabel(raid.device)
+            title.setFont(QFont(FONT_FAMILY, 13, QFont.Bold))
+            title.setStyleSheet(f"color: {TEXT};")
 
-            members = QLabel("  ".join(raid.members))
-            members.setFont(QFont("DejaVu Sans Mono", 8))
-            members.setStyleSheet("color: #6b7a8d;")
+            level_label = raid.level.replace("raid", "RAID ")
+            status_text = "CLEAN" if is_healthy else "DEGRADED"
+            badge = QLabel(f"{level_label.upper()} · {status_text}")
+            badge.setFont(QFont(FONT_FAMILY, 8, QFont.Bold))
+            badge.setStyleSheet(f"""
+                color: {badge_color};
+                background: rgba({_rgba(badge_color, 28)});
+                border-radius: 7px;
+                padding: 3px 9px;
+            """)
 
-            text_block.addWidget(title)
+            title_row.addWidget(title)
+            title_row.addWidget(badge, 0, Qt.AlignVCenter)
+            title_row.addStretch()
+
+            meta = QLabel(f"{raid.array_size} · {len(raid.members)} members · {' + '.join(raid.members)}")
+            meta.setFont(QFont(FONT_FAMILY, 9))
+            meta.setStyleSheet(f"color: {MUTED};")
+
+            text_block.addLayout(title_row)
             text_block.addWidget(meta)
-            text_block.addWidget(members)
         else:
-            title = QLabel("Nenhum array RAID detectado")
-            title.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
-            title.setStyleSheet("color: #9aa6b2;")
+            title = QLabel("No RAID array detected")
+            title.setFont(QFont(FONT_FAMILY, 12, QFont.Bold))
+            title.setStyleSheet(f"color: {MUTED};")
             text_block.addWidget(title)
 
         layout.addWidget(icon)
@@ -186,45 +279,42 @@ class TempBadge(QFrame):
             value = 0
 
         if value >= 55:
-            color = "#ff6666"
+            color = ACCENT_RED
         elif value >= 45:
-            color = "#ffaa66"
+            color = ACCENT_AMBER
         else:
-            color = "#4ade80"
+            color = ACCENT_GREEN
 
         self.setStyleSheet(f"""
             QFrame {{
-                border: 1px solid rgba({self._rgba(color)});
+                border: 1px solid rgba({_rgba(color, 60)});
                 border-radius: 10px;
-                background: rgba({self._rgba(color, 20)});
+                background: rgba({_rgba(color, 14)});
+            }}
+            QLabel {{
+                background: transparent;
+                border: none;
             }}
         """)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setContentsMargins(12, 7, 12, 7)
         layout.setSpacing(8)
 
         icon = QLabel()
-        icon.setPixmap(qta.icon(TEMP_GLYPH, color=color).pixmap(16, 16))
-        icon.setStyleSheet("background: transparent;")
+        icon.setPixmap(qta.icon(TEMP_GLYPH, color=color).pixmap(14, 14))
 
         dev_lbl = QLabel(device)
-        dev_lbl.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
-        dev_lbl.setStyleSheet(f"color: {color}; background: transparent;")
+        dev_lbl.setFont(QFont(FONT_FAMILY, 9, QFont.Bold))
+        dev_lbl.setStyleSheet(f"color: {color};")
 
         temp_lbl = QLabel(temp)
-        temp_lbl.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
-        temp_lbl.setStyleSheet(f"color: {color}; background: transparent;")
+        temp_lbl.setFont(QFont(FONT_FAMILY, 9, QFont.Bold))
+        temp_lbl.setStyleSheet(f"color: {color};")
 
         layout.addWidget(icon)
         layout.addWidget(dev_lbl)
         layout.addWidget(temp_lbl)
-
-    @staticmethod
-    def _rgba(hex_color: str, alpha: int = 120) -> str:
-        h = hex_color.lstrip("#")
-        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
-        return f"{r}, {g}, {b}, {alpha}"
 
 
 class ScanWorker(QThread):
@@ -247,49 +337,68 @@ class DisksPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        self.setStyleSheet("""
-            QWidget { background: transparent; }
-            QPushButton {
-                padding: 8px 14px;
+        self.setStyleSheet(f"""
+            QWidget {{ background: transparent; }}
+            QPushButton {{
+                padding: 9px 16px;
                 border-radius: 10px;
-                border: 1px solid rgba(31, 92, 255, 120);
-                background: rgba(10, 15, 25, 230);
-                color: #ecf4ff;
-                font-family: "DejaVu Sans Mono";
-            }
-            QPushButton:hover {
-                background: rgba(23, 147, 209, 70);
-                border: 1px solid rgba(35, 166, 255, 180);
-            }
-            QPushButton#PrimaryButton {
-                background: rgba(74, 222, 128, 0.88);
-                border: 1px solid rgba(74, 222, 128, 1);
-                color: #08111d;
-                font-weight: bold;
-            }
-            QPushButton#PrimaryButton:hover {
-                background: rgba(94, 234, 149, 1);
-            }
-            QScrollArea { border: none; background: transparent; }
-            QScrollArea > QWidget > QWidget { background: transparent; }
-            QPlainTextEdit {
-                background: rgba(6, 9, 16, 200);
-                border: 1px solid rgba(31, 92, 255, 55);
-                border-radius: 8px;
-                color: #c8d4e0;
-                font-family: "DejaVu Sans Mono";
+                border: 1px solid rgba(255, 255, 255, 14);
+                background: rgba(255, 255, 255, 6);
+                color: {TEXT};
+                font-family: "{FONT_FAMILY}";
                 font-size: 10px;
-                padding: 8px;
-            }
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background: rgba(255, 255, 255, 10);
+                border: 1px solid rgba(255, 255, 255, 24);
+            }}
+            QPushButton#PrimaryButton {{
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 {ACCENT_BLUE}, stop:1 {ACCENT_PURPLE}
+                );
+                border: none;
+                color: white;
+            }}
+            QPushButton#PrimaryButton:hover {{
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 {ACCENT_BLUE_LIGHT}, stop:1 {ACCENT_PURPLE}
+                );
+            }}
+            QPushButton#BackButton {{
+                background: transparent;
+                border: none;
+                color: {MUTED};
+                font-weight: normal;
+                padding: 4px 0px;
+            }}
+            QPushButton#BackButton:hover {{
+                color: {TEXT};
+                background: transparent;
+            }}
+            QScrollArea {{ border: none; background: transparent; }}
+            QScrollArea > QWidget > QWidget {{ background: transparent; }}
+            QPlainTextEdit {{
+                background: rgba(255, 255, 255, 4);
+                border: 1px solid rgba(255, 255, 255, 10);
+                border-radius: 10px;
+                color: {TEXT};
+                font-family: "{FONT_FAMILY}";
+                font-size: 10px;
+                padding: 10px;
+            }}
         """)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(14)
+        root.setSpacing(16)
 
         # ── Botão voltar ─────────────────────────────────────────────────
         self.btn_back = QPushButton("←  Back to menu")
-        self.btn_back.setFixedWidth(160)
+        self.btn_back.setObjectName("BackButton")
+        self.btn_back.setFixedWidth(140)
         self.btn_back.clicked.connect(self.back_requested.emit)
         root.addWidget(self.btn_back)
 
@@ -299,22 +408,18 @@ class DisksPage(QWidget):
         title_block = QVBoxLayout()
         title_block.setSpacing(2)
         page_title = QLabel("Disks")
-        page_title.setFont(QFont("DejaVu Sans Mono", 18, QFont.Bold))
-        page_title.setStyleSheet("color: #23a6ff;")
-        page_sub = QLabel("Espaço, RAID, temperatura e arquivos grandes")
-        page_sub.setFont(QFont("DejaVu Sans Mono", 9))
-        page_sub.setStyleSheet("color: #6b7a8d;")
+        page_title.setFont(QFont(FONT_FAMILY, 20, QFont.Bold))
+        page_title.setStyleSheet(f"color: {TEXT};")
+        page_sub = QLabel("Space, RAID, temperature & large files")
+        page_sub.setFont(QFont(FONT_FAMILY, 9))
+        page_sub.setStyleSheet(f"color: {MUTED};")
         title_block.addWidget(page_title)
         title_block.addWidget(page_sub)
 
-        self.btn_refresh = QPushButton("REFRESH")
-        self.btn_refresh.setIcon(qta.icon(REFRESH_GLYPH, color="#FFFFFF"))
-        self.btn_refresh.setIconSize(QSize(16, 16))
+        self.btn_refresh = QPushButton("↻  Refresh")
         self.btn_refresh.clicked.connect(self.refresh_all)
 
-        self.btn_scan = QPushButton("SCAN LARGE FILES")
-        self.btn_scan.setIcon(qta.icon(SCAN_GLYPH, color="#08111d"))
-        self.btn_scan.setIconSize(QSize(16, 16))
+        self.btn_scan = QPushButton("⌕  Scan large files")
         self.btn_scan.setObjectName("PrimaryButton")
         self.btn_scan.clicked.connect(self.run_scan)
 
@@ -329,35 +434,35 @@ class DisksPage(QWidget):
         self.raid_container = QVBoxLayout()
         root.addLayout(self.raid_container)
 
-        # ── Temperaturas ─────────────────────────────────────────────────
-        self.temp_row = QHBoxLayout()
-        self.temp_row.setSpacing(10)
-        root.addLayout(self.temp_row)
-
         # ── Lista de discos ──────────────────────────────────────────────
-        lbl_disks = QLabel("Volumes montados")
-        lbl_disks.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
-        lbl_disks.setStyleSheet("color: #ecf4ff;")
+        lbl_disks = QLabel("MOUNTED VOLUMES")
+        lbl_disks.setFont(QFont(FONT_FAMILY, 9, QFont.Bold))
+        lbl_disks.setStyleSheet(f"color: {FAINT}; letter-spacing: 0.5px;")
         root.addWidget(lbl_disks)
 
-        self.disks_container = QVBoxLayout()
-        self.disks_container.setSpacing(8)
+        self.disks_container = QGridLayout()
+        self.disks_container.setSpacing(10)
         root.addLayout(self.disks_container)
+
+        # ── Temperaturas (rodapé discreto) ──────────────────────────────
+        self.temp_row = QHBoxLayout()
+        self.temp_row.setSpacing(8)
+        root.addLayout(self.temp_row)
 
         # ── Resultado do scan (oculto por padrão) ───────────────────────
         self.scan_frame = QFrame()
         self.scan_frame.setVisible(False)
         scan_layout = QVBoxLayout(self.scan_frame)
         scan_layout.setContentsMargins(0, 8, 0, 0)
-        scan_layout.setSpacing(6)
+        scan_layout.setSpacing(8)
 
         scan_header = QHBoxLayout()
-        lbl_scan = QLabel("Arquivos grandes (>500 MB)")
-        lbl_scan.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
-        lbl_scan.setStyleSheet("color: #ecf4ff;")
+        lbl_scan = QLabel("LARGE FILES (>500 MB)")
+        lbl_scan.setFont(QFont(FONT_FAMILY, 9, QFont.Bold))
+        lbl_scan.setStyleSheet(f"color: {FAINT}; letter-spacing: 0.5px;")
         self.lbl_scan_status = QLabel("")
-        self.lbl_scan_status.setFont(QFont("DejaVu Sans Mono", 9))
-        self.lbl_scan_status.setStyleSheet("color: #6b7a8d;")
+        self.lbl_scan_status.setFont(QFont(FONT_FAMILY, 9))
+        self.lbl_scan_status.setStyleSheet(f"color: {MUTED};")
         scan_header.addWidget(lbl_scan)
         scan_header.addStretch()
         scan_header.addWidget(self.lbl_scan_status)
@@ -381,8 +486,8 @@ class DisksPage(QWidget):
 
     def refresh_all(self) -> None:
         self._refresh_raid()
-        self._refresh_temps()
         self._refresh_disks()
+        self._refresh_temps()
 
     def _clear_layout(self, layout) -> None:
         while layout.count():
@@ -400,9 +505,9 @@ class DisksPage(QWidget):
         self._clear_layout(self.temp_row)
         temps = get_disk_temps()
         if not temps:
-            lbl = QLabel("Temperaturas indisponíveis (requer sudo/hddtemp)")
-            lbl.setFont(QFont("DejaVu Sans Mono", 8))
-            lbl.setStyleSheet("color: #6b7a8d;")
+            lbl = QLabel("⚠  Temperatures unavailable — requires sudo/hddtemp")
+            lbl.setFont(QFont(FONT_FAMILY, 9))
+            lbl.setStyleSheet(f"color: {FAINT};")
             self.temp_row.addWidget(lbl)
         else:
             for device, temp in temps.items():
@@ -413,13 +518,14 @@ class DisksPage(QWidget):
         self._clear_layout(self.disks_container)
         disks = list_disks()
         if not disks:
-            lbl = QLabel("Nenhum disco montado encontrado.")
-            lbl.setFont(QFont("DejaVu Sans Mono", 9))
-            lbl.setStyleSheet("color: #9aa6b2;")
-            self.disks_container.addWidget(lbl)
+            lbl = QLabel("No mounted disks found.")
+            lbl.setFont(QFont(FONT_FAMILY, 9))
+            lbl.setStyleSheet(f"color: {MUTED};")
+            self.disks_container.addWidget(lbl, 0, 0)
             return
-        for disk in disks:
-            self.disks_container.addWidget(DiskRow(disk))
+        for i, disk in enumerate(disks):
+            row, col = divmod(i, 2)
+            self.disks_container.addWidget(DiskRow(disk), row, col)
 
     def run_scan(self) -> None:
         if self._scan_worker is not None and self._scan_worker.isRunning():
@@ -427,7 +533,7 @@ class DisksPage(QWidget):
 
         self.scan_frame.setVisible(True)
         self.scan_output.clear()
-        self.lbl_scan_status.setText("Buscando...")
+        self.lbl_scan_status.setText("Searching...")
         self.btn_scan.setEnabled(False)
 
         worker = ScanWorker(path="/", min_size_mb=500, parent=self)
@@ -438,9 +544,9 @@ class DisksPage(QWidget):
     def _on_scan_done(self, results: list) -> None:
         self.btn_scan.setEnabled(True)
         if not results:
-            self.lbl_scan_status.setText("Nenhum arquivo grande encontrado.")
+            self.lbl_scan_status.setText("No large files found.")
             return
 
-        self.lbl_scan_status.setText(f"{len(results)} arquivo(s) encontrado(s)")
+        self.lbl_scan_status.setText(f"{len(results)} file(s) found")
         for size, path in results:
             self.scan_output.appendPlainText(f"{size:>10}   {path}")
