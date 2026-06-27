@@ -458,7 +458,7 @@ class SnapshotCard(QFrame):
 
         self.btn_restore = QPushButton("RESTORE")
         self.btn_restore.setIcon(qta.icon(RESTORE_GLYPH, color="#8fd4ff"))
-        self.btn_restore.setIconSize(QSize(18, 18))
+        self.btn_restore.setIconSize(QSize(22, 22))
         self.btn_restore.setObjectName("RestoreButton")
 
         self.btn_sync = QPushButton("SYNC")
@@ -1513,7 +1513,7 @@ class _RestoreDialog(QDialog):
         self.entry = entry
         self.setWindowTitle("Restore Snapshot")
         self.setModal(True)
-        self.setFixedSize(880, 500)
+        self.setFixedSize(880, 514)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_StyledBackground, True)
         self._build_ui()
@@ -1526,25 +1526,25 @@ class _RestoreDialog(QDialog):
 
         header = QFrame()
         header.setObjectName("RstHeader")
-        header.setFixedHeight(54)
+        header.setFixedHeight(68)
         h_layout = QHBoxLayout(header)
         h_layout.setContentsMargins(20, 0, 18, 0)
+        h_layout.setSpacing(6)
 
         icon = QLabel()
-        icon.setFixedSize(34, 34)
+        icon.setFixedSize(42, 42)
         icon.setAlignment(Qt.AlignCenter)
-        icon.setPixmap(qta.icon("mdi6.file-restore-outline", color="#c8d4e0").pixmap(20, 20))
-        icon.setStyleSheet("QLabel { background: rgba(255,255,255,8); border-radius: 10px; }")
+        icon.setPixmap(qta.icon("mdi6.file-restore-outline", color="#8fd4ff").pixmap(34, 34))
+        icon.setStyleSheet("QLabel { background: transparent; }")
 
         lbl = QLabel("Restore Snapshot")
         lbl.setFont(QFont("DejaVu Sans Mono", 13, QFont.Bold))
-        lbl.setStyleSheet("color: #ecf4ff;")
+        lbl.setStyleSheet("color: #ffffff; background: transparent;")
 
         btn_x = _CloseLabel(self)
         btn_x.mousePressEvent = lambda e: self.reject()
 
         h_layout.addWidget(icon)
-        h_layout.addSpacing(12)
         h_layout.addWidget(lbl)
         h_layout.addStretch()
         h_layout.addWidget(btn_x)
@@ -1681,8 +1681,8 @@ class _RestoreDialog(QDialog):
                 border-radius: 16px;
             }
             QFrame#RstHeader {
-                background: rgba(255, 255, 255, 5);
-                border-bottom: 1px solid rgba(255, 255, 255, 10);
+                background: rgba(35, 166, 255, 35);
+                border-bottom: 1px solid rgba(35, 166, 255, 25);
                 border-top-left-radius: 15px;
                 border-top-right-radius: 15px;
             }
