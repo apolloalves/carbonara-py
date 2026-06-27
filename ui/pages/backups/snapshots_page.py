@@ -1513,7 +1513,7 @@ class _RestoreDialog(QDialog):
         self.entry = entry
         self.setWindowTitle("Restore Snapshot")
         self.setModal(True)
-        self.setFixedSize(860, 400)
+        self.setFixedSize(880, 500)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_StyledBackground, True)
         self._build_ui()
@@ -1533,8 +1533,8 @@ class _RestoreDialog(QDialog):
         icon = QLabel()
         icon.setFixedSize(34, 34)
         icon.setAlignment(Qt.AlignCenter)
-        icon.setPixmap(qta.icon("mdi6.file-restore-outline", color="#23a6ff").pixmap(22, 22))
-        icon.setStyleSheet("QLabel { background: rgba(35,166,255,40); border-radius: 10px; }")
+        icon.setPixmap(qta.icon("mdi6.file-restore-outline", color="#c8d4e0").pixmap(20, 20))
+        icon.setStyleSheet("QLabel { background: rgba(255,255,255,8); border-radius: 10px; }")
 
         lbl = QLabel("Restore Snapshot")
         lbl.setFont(QFont("DejaVu Sans Mono", 13, QFont.Bold))
@@ -1552,29 +1552,67 @@ class _RestoreDialog(QDialog):
         body = QFrame()
         body.setObjectName("RstBody")
         b_layout = QVBoxLayout(body)
-        b_layout.setContentsMargins(24, 10, 24, 14)
-        b_layout.setSpacing(5)
-        # Snapshot info com badge igual aos cards da lista
+        b_layout.setContentsMargins(28, 20, 28, 22)
+        b_layout.setSpacing(10)
+        # Snapshot info — réplica completa do SnapshotCard (título, meta+size, last sync)
         snap_row = QHBoxLayout()
-        snap_row.setSpacing(10)
+        snap_row.setSpacing(14)
         snap_row.setContentsMargins(0, 0, 0, 0)
 
-        snap_icon = icon_badge(SNAPSHOT_GLYPH, 32)
+        snap_icon = icon_badge(SNAPSHOT_GLYPH, 38)
 
         snap_text = QVBoxLayout()
-        snap_text.setSpacing(2)
+        snap_text.setSpacing(4)
         snap_text.setContentsMargins(0, 0, 0, 0)
 
         snap_title = QLabel(self.entry.path.name)
-        snap_title.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+        snap_title_font = QFont("DejaVu Sans Mono")
+        snap_title_font.setPointSizeF(10.5)
+        snap_title_font.setBold(True)
+        snap_title.setFont(snap_title_font)
         snap_title.setStyleSheet("color: #ecf4ff;")
 
+        snap_meta_row = QHBoxLayout()
+        snap_meta_row.setSpacing(8)
+        snap_meta_row.setContentsMargins(0, 0, 0, 0)
+
         snap_meta = QLabel(self.entry.meta_text)
-        snap_meta.setFont(QFont("DejaVu Sans Mono", 8))
+        snap_meta.setFont(QFont("DejaVu Sans Mono", 10))
         snap_meta.setStyleSheet("color: #6b7a8d;")
+        snap_meta_row.addWidget(snap_meta)
+
+        if self.entry.size_str:
+            snap_size_prefix = QLabel("snapshot size")
+            snap_size_prefix.setFont(QFont("DejaVu Sans Mono", 9))
+            snap_size_prefix.setStyleSheet("color: #6b7a8d;")
+            snap_meta_row.addWidget(snap_size_prefix)
+
+            snap_size_val = QLabel(self.entry.size_str)
+            snap_size_val.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
+            snap_size_val.setStyleSheet("color: #4ade80;")
+            snap_meta_row.addWidget(snap_size_val)
+
+        snap_meta_row.addStretch()
 
         snap_text.addWidget(snap_title)
-        snap_text.addWidget(snap_meta)
+        snap_text.addLayout(snap_meta_row)
+
+        if self.entry.synced_at:
+            snap_sync_row = QHBoxLayout()
+            snap_sync_row.setSpacing(6)
+            snap_sync_row.setContentsMargins(0, 0, 0, 0)
+
+            snap_sync_icon = QLabel()
+            snap_sync_icon.setPixmap(qta.icon(SYNC_GLYPH, color="#23a6ff").pixmap(14, 14))
+
+            snap_sync_lbl = QLabel(f"last sync  {self.entry.synced_at}")
+            snap_sync_lbl.setFont(QFont("DejaVu Sans Mono", 9))
+            snap_sync_lbl.setStyleSheet("color: #23a6ff;")
+
+            snap_sync_row.addWidget(snap_sync_icon)
+            snap_sync_row.addWidget(snap_sync_lbl)
+            snap_sync_row.addStretch()
+            snap_text.addLayout(snap_sync_row)
 
         snap_row.addWidget(snap_icon)
         snap_row.addLayout(snap_text)
@@ -1611,14 +1649,14 @@ class _RestoreDialog(QDialog):
         btn3.clicked.connect(self._on_alt_restore)
 
         b_layout.addLayout(snap_row)
-        b_layout.addSpacing(8)
+        b_layout.addSpacing(16)
         b_layout.addWidget(lbl_choose)
-        b_layout.addSpacing(6)
+        b_layout.addSpacing(10)
         b_layout.addWidget(btn1)
 
         sep1 = QFrame()
         sep1.setFrameShape(QFrame.HLine)
-        sep1.setStyleSheet("border: none; border-top: 1px solid rgba(31,92,255,30);")
+        sep1.setStyleSheet("border: none; border-top: 1px solid rgba(255,255,255,10);")
         sep1.setFixedHeight(1)
         b_layout.addWidget(sep1)
 
@@ -1626,7 +1664,7 @@ class _RestoreDialog(QDialog):
 
         sep2 = QFrame()
         sep2.setFrameShape(QFrame.HLine)
-        sep2.setStyleSheet("border: none; border-top: 1px solid rgba(31,92,255,30);")
+        sep2.setStyleSheet("border: none; border-top: 1px solid rgba(255,255,255,10);")
         sep2.setFixedHeight(1)
         b_layout.addWidget(sep2)
 
@@ -1639,18 +1677,17 @@ class _RestoreDialog(QDialog):
     def _apply_styles(self) -> None:
         self.setStyleSheet("""
             QDialog {
-                background: #080c14;
-                
+                background: #0d0f14;
                 border-radius: 16px;
             }
             QFrame#RstHeader {
-                background: rgba(8, 20, 40, 255);
-                border-bottom: 1px solid rgba(35, 166, 255, 80);
+                background: rgba(255, 255, 255, 5);
+                border-bottom: 1px solid rgba(255, 255, 255, 10);
                 border-top-left-radius: 15px;
                 border-top-right-radius: 15px;
             }
             QFrame#RstBody {
-                background: #080c14;
+                background: #0d0f14;
                 border-bottom-left-radius: 15px;
                 border-bottom-right-radius: 15px;
             }
@@ -1690,7 +1727,7 @@ class _RestoreDialog(QDialog):
         super().paintEvent(event)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        pen = QPen(QColor(31, 141, 218, 120))
+        pen = QPen(QColor(255, 255, 255, 22))
         pen.setWidth(1)
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
@@ -1704,16 +1741,16 @@ class _RestoreOptionButton(QFrame):
         super().__init__(parent)
         self.setCursor(Qt.PointingHandCursor)
         self.setObjectName("RstOptionBtn")
-        self.setFixedHeight(62)
+        self.setFixedHeight(72)
         self._color = color
         self.setStyleSheet(f"""
             QFrame#RstOptionBtn {{
-                background: rgba(10, 15, 25, 200);
-                border: 1px solid rgba(31, 92, 255, 40);
+                background: rgba(255, 255, 255, 5);
+                border: 1px solid rgba(255, 255, 255, 10);
                 border-radius: 12px;
             }}
             QFrame#RstOptionBtn:hover {{
-                background: rgba(14, 22, 40, 255);
+                background: rgba(255, 255, 255, 9);
                 border: 1px solid {color};
             }}
         """)
