@@ -919,23 +919,78 @@ class SnapshotsPage(QWidget):
 
         if not entries:
             empty = QFrame()
+            empty.setObjectName("EmptyState")
             empty.setStyleSheet(
                 """
-                QFrame {
+                QFrame#EmptyState {
                     border: 1px solid rgba(31, 92, 255, 55);
                     border-radius: 16px;
                     background: rgba(8, 12, 20, 120);
                 }
+                QFrame#EmptyState QLabel {
+                    border: none;
+                    background: transparent;
+                }
                 """
             )
             empty_layout = QVBoxLayout(empty)
-            empty_layout.setContentsMargins(22, 22, 22, 22)
+            empty_layout.setContentsMargins(32, 36, 32, 36)
+            empty_layout.setSpacing(4)
+            empty_layout.setAlignment(Qt.AlignCenter)
 
-            label = QLabel("No snapshots found for this destination.")
+            icon_label = QLabel()
+            icon_label.setAlignment(Qt.AlignCenter)
+            icon_label.setFixedSize(48, 48)
+            icon_label.setPixmap(qta.icon(SNAPSHOT_GLYPH, color="#3a6a9a").pixmap(28, 28))
+            icon_label.setStyleSheet(
+                "background: rgba(35, 166, 255, 18); border-radius: 14px;"
+            )
+
+            icon_row = QHBoxLayout()
+            icon_row.addStretch()
+            icon_row.addWidget(icon_label)
+            icon_row.addStretch()
+            empty_layout.addLayout(icon_row)
+            empty_layout.addSpacing(14)
+
+            title = QLabel("No snapshots yet")
+            title.setAlignment(Qt.AlignCenter)
+            title.setStyleSheet("color: #ecf4ff;")
+            title.setFont(QFont("DejaVu Sans Mono", 12, QFont.Bold))
+            empty_layout.addWidget(title)
+
+            label = QLabel("Snapshots created for this destination will appear here.")
             label.setAlignment(Qt.AlignCenter)
             label.setStyleSheet("color: #9aa6b2;")
-            label.setFont(QFont("DejaVu Sans Mono", 10))
+            label.setFont(QFont("DejaVu Sans Mono", 9))
             empty_layout.addWidget(label)
+            empty_layout.addSpacing(18)
+
+            btn_create_now = QPushButton("Create Snapshot")
+            btn_create_now.setIcon(qta.icon("mdi6.plus-circle-outline", color="#08111d"))
+            btn_create_now.setFixedWidth(180)
+            btn_create_now.setStyleSheet(
+                """
+                QPushButton {
+                    background: rgba(74, 222, 128, 0.88);
+                    border: 1px solid rgba(74, 222, 128, 1);
+                    border-radius: 10px;
+                    color: #08111d;
+                    font-weight: bold;
+                    padding: 9px 0;
+                }
+                QPushButton:hover {
+                    background: rgba(94, 234, 149, 1);
+                }
+                """
+            )
+            btn_create_now.clicked.connect(self.create_snapshot)
+
+            btn_row = QHBoxLayout()
+            btn_row.addStretch()
+            btn_row.addWidget(btn_create_now)
+            btn_row.addStretch()
+            empty_layout.addLayout(btn_row)
 
             self.scroll_layout.addWidget(empty)
             self.scroll_layout.addStretch(1)
@@ -1064,15 +1119,18 @@ dialog.exec()
         # ── PATCH 2: sempre atualiza a lista, depois decide se mostra aviso ──
         self.refresh_list()
 
-        # rc=0 → sucesso silencioso
-        # rc=2 → cancelamento intencional pelo usuário (BackupProgressDialog.done(2))
+        # rc=0   → sucesso silencioso
+        # rc=2   → cancelamento intencional pelo usuário (BackupProgressDialog.done(2))
         # rc=126 → pkexec cancelado pelo usuário (ESC ou Cancelar na autenticação)
-        # rc=anything else → erro real
-        if rc not in (0, 2, 126):
-            QMessageBox.warning(
-                self,
-                "Carbonara",
+        # rc<0   → processo terminado por sinal (ex: -6/SIGABRT, -9/SIGKILL),
+        #          o que ocorre normalmente ao cancelar/matar o subprocesso
+        #          durante um backup em andamento — não é um erro real.
+        # rc=outro → erro real
+        if rc not in (0, 2, 126) and rc >= 0:
+            _show_error(
+                "Carbonara Backup",
                 f"Backup process exited with code {rc}.",
+                parent=self,
             )
 
     def restore_snapshot(self, entry: SnapshotEntry):
