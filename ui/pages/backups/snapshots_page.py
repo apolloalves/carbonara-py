@@ -720,7 +720,7 @@ class SnapshotsPage(QWidget):
         top_summary.setSpacing(8)
         top_summary.setAlignment(Qt.AlignVCenter)
 
-        self.destination_badge = icon_badge(DEST_GLYPH, 36)
+        self.destination_badge = icon_badge(DEST_GLYPH, 52)
 
         summary_text = QVBoxLayout()
         summary_text.setSpacing(0)
@@ -782,6 +782,7 @@ class SnapshotsPage(QWidget):
         self.btn_refresh.setIcon(qta.icon(REFRESH_GLYPH, color="#FFFFFF"))
         self.btn_refresh.setIconSize(QSize(16, 16))
         self.btn_refresh.setFixedWidth(140)
+        self.btn_refresh.setVisible(False)  # oculto: não faz mais sentido na UI atual
 
         self.btn_create = QPushButton("CREATE SNAPSHOT")
         self.btn_create.setIcon(qta.icon(CREATE_GLYPH))
