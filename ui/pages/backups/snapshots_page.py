@@ -1538,7 +1538,7 @@ class _RestoreDialog(QDialog):
         icon.setStyleSheet("QLabel { background: transparent; }")
 
         lbl = QLabel("Restore Snapshot")
-        lbl.setFont(QFont("DejaVu Sans Mono", 13, QFont.Bold))
+        lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
         lbl.setStyleSheet("color: #ffffff; background: transparent;")
 
         btn_x = _CloseLabel(self)
@@ -1762,9 +1762,9 @@ class _RestoreOptionButton(QFrame):
 
         # Badge colorido via icon_badge
         ico_lbl = QLabel()
-        ico_lbl.setFixedSize(36, 36)
+        ico_lbl.setFixedSize(42, 42)
         ico_lbl.setAlignment(Qt.AlignCenter)
-        ico_lbl.setPixmap(qta.icon(glyph, color=color).pixmap(18, 18))
+        ico_lbl.setPixmap(qta.icon(glyph, color=color).pixmap(22, 22))
         h = color.lstrip("#")
         r, g, b = int(h[0:2],16), int(h[2:4],16), int(h[4:6],16)
         ico_lbl.setStyleSheet(
