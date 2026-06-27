@@ -245,6 +245,7 @@ class ScopeCard(QFrame):
                 color: #ecf4ff;
                 font: 700 10pt "DejaVu Sans Mono";
                 padding: 0px 12px;
+                min-height: 34px;
             }
 
             QPushButton:hover {
@@ -334,12 +335,13 @@ class SnapshotCard(QFrame):
             }
 
             QPushButton {
-                padding: 6px 14px;
-                border-radius: 8px;
+                padding: 0px 18px;
+                border-radius: 9px;
                 border: 1px solid rgba(31, 92, 255, 100);
                 background: rgba(15, 20, 35, 220);
                 color: #c8d4e0;
-                font: 700 8pt "DejaVu Sans Mono";
+                font: 700 9pt "DejaVu Sans Mono";
+                min-height: 34px;
             }
 
             QPushButton:hover {
@@ -362,19 +364,22 @@ class SnapshotCard(QFrame):
         )
 
         root = QHBoxLayout(self)
-        root.setContentsMargins(16, 14, 16, 14)
-        root.setSpacing(16)
+        root.setContentsMargins(18, 16, 18, 16)
+        root.setSpacing(18)
 
         left = QHBoxLayout()
-        left.setSpacing(14)
+        left.setSpacing(16)
 
-        icon_label = icon_badge(SNAPSHOT_GLYPH, 32)
+        icon_label = icon_badge(SNAPSHOT_GLYPH, 38)
 
         text_block = QVBoxLayout()
-        text_block.setSpacing(3)
+        text_block.setSpacing(4)
 
         title = QLabel(entry.path.name)
-        title.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+        title_font = QFont("DejaVu Sans Mono")
+        title_font.setPointSizeF(10.5)
+        title_font.setBold(True)
+        title.setFont(title_font)
         title.setStyleSheet("color: #ecf4ff;")
 
         # Linha de meta + tamanho em destaque
@@ -383,18 +388,18 @@ class SnapshotCard(QFrame):
         meta_row.setContentsMargins(0, 0, 0, 0)
 
         meta = QLabel(entry.meta_text)
-        meta.setFont(QFont("DejaVu Sans Mono", 9))
+        meta.setFont(QFont("DejaVu Sans Mono", 10))
         meta.setStyleSheet("color: #6b7a8d;")
         meta_row.addWidget(meta)
 
         if entry.size_str:
             size_prefix = QLabel("snapshot size")
-            size_prefix.setFont(QFont("DejaVu Sans Mono", 8))
+            size_prefix.setFont(QFont("DejaVu Sans Mono", 9))
             size_prefix.setStyleSheet("color: #6b7a8d;")
             meta_row.addWidget(size_prefix)
 
             size_val = QLabel(entry.size_str)
-            size_val.setFont(QFont("DejaVu Sans Mono", 8, QFont.Bold))
+            size_val.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
             size_val.setStyleSheet("color: #4ade80;")
             meta_row.addWidget(size_val)
 
@@ -411,10 +416,10 @@ class SnapshotCard(QFrame):
 
             sync_icon = QLabel()
             sync_icon.setPixmap(
-                qta.icon(SYNC_GLYPH, color="#23a6ff").pixmap(12, 12)
+                qta.icon(SYNC_GLYPH, color="#23a6ff").pixmap(14, 14)
             )
             sync_lbl = QLabel(f"last sync  {entry.synced_at}")
-            sync_lbl.setFont(QFont("DejaVu Sans Mono", 8))
+            sync_lbl.setFont(QFont("DejaVu Sans Mono", 9))
             sync_lbl.setStyleSheet("color: #23a6ff;")
 
             sync_row.addWidget(sync_icon)
@@ -426,19 +431,19 @@ class SnapshotCard(QFrame):
         left.addLayout(text_block)
 
         btn_row = QHBoxLayout()
-        btn_row.setSpacing(8)
+        btn_row.setSpacing(10)
 
         self.btn_restore = QPushButton("RESTORE")
         self.btn_restore.setIcon(qta.icon(RESTORE_GLYPH, color="#FFFFFF"))
-        self.btn_restore.setIconSize(QSize(16, 16))
+        self.btn_restore.setIconSize(QSize(18, 18))
 
         self.btn_sync = QPushButton("SYNC")
         self.btn_sync.setIcon(qta.icon(SYNC_GLYPH, color="#FFFFFF"))
-        self.btn_sync.setIconSize(QSize(16, 16))
+        self.btn_sync.setIconSize(QSize(18, 18))
 
         self.btn_delete = QPushButton("DELETE")
         self.btn_delete.setIcon(qta.icon(DELETE_GLYPH, color="#ff8888"))
-        self.btn_delete.setIconSize(QSize(16, 16))
+        self.btn_delete.setIconSize(QSize(18, 18))
         self.btn_delete.setObjectName("DangerButton")
 
         btn_row.addWidget(self.btn_restore)
