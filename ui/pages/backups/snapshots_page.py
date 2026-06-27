@@ -959,38 +959,11 @@ class SnapshotsPage(QWidget):
             title.setFont(QFont("DejaVu Sans Mono", 12, QFont.Bold))
             empty_layout.addWidget(title)
 
-            label = QLabel("Snapshots created for this destination will appear here.")
+            label = QLabel("Use Create Snapshot above to get started.")
             label.setAlignment(Qt.AlignCenter)
             label.setStyleSheet("color: #9aa6b2;")
             label.setFont(QFont("DejaVu Sans Mono", 9))
             empty_layout.addWidget(label)
-            empty_layout.addSpacing(18)
-
-            btn_create_now = QPushButton("Create Snapshot")
-            btn_create_now.setIcon(qta.icon("mdi6.plus-circle-outline", color="#08111d"))
-            btn_create_now.setFixedWidth(180)
-            btn_create_now.setStyleSheet(
-                """
-                QPushButton {
-                    background: rgba(74, 222, 128, 0.88);
-                    border: 1px solid rgba(74, 222, 128, 1);
-                    border-radius: 10px;
-                    color: #08111d;
-                    font-weight: bold;
-                    padding: 9px 0;
-                }
-                QPushButton:hover {
-                    background: rgba(94, 234, 149, 1);
-                }
-                """
-            )
-            btn_create_now.clicked.connect(self.create_snapshot)
-
-            btn_row = QHBoxLayout()
-            btn_row.addStretch()
-            btn_row.addWidget(btn_create_now)
-            btn_row.addStretch()
-            empty_layout.addLayout(btn_row)
 
             self.scroll_layout.addWidget(empty)
             self.scroll_layout.addStretch(1)
