@@ -1701,16 +1701,13 @@ class _RestoreDialog(QDialog):
         """)
 
     def _on_full_restore(self) -> None:
-        self.accept()
         _do_full_restore(self.entry, parent=self.parent())
 
     def _on_file_browser(self) -> None:
-        self.accept()
         dlg = _FileBrowserDialog(self.entry, parent=self.parent())
         dlg.exec()
 
     def _on_alt_restore(self) -> None:
-        self.accept()
         dlg = _AltRestoreDialog(self.entry, parent=self.parent())
         dlg.exec()
 
@@ -1910,7 +1907,10 @@ out_instr.write_text(content, encoding="utf-8")
 
         if result.returncode != 0:
             err = result.stderr.strip() or result.stdout.strip() or f"exit code {result.returncode}"
-            _show_error("Restore", f"Erro ao gerar script:\n\n{err}", parent=parent)
+            if result.returncode == 126 or "dismissed" in err.lower():
+                _show_error("Restore", "Operação cancelada.", parent=parent)
+            else:
+                _show_error("Restore", f"Erro ao gerar script:\n\n{err}", parent=parent)
             return
 
         dlg = _RestoreInstructionsDialog(str(output), str(output_instr), parent=parent)
@@ -2842,6 +2842,8 @@ class _FileBrowserRestoreWorker(QThread):
                     self.log_line.emit(line)
             if result.returncode != 0:
                 err = result.stderr.strip() or f"exit code {result.returncode}"
+                if result.returncode == 126 or "dismissed" in err.lower():
+                    err = "Operação cancelada."
                 self.failed.emit(err)
             else:
                 self.finished_ok.emit()
@@ -3677,6 +3679,8 @@ if new_latest:
 
             if result.returncode != 0:
                 err = result.stderr.strip() or f"exit code {result.returncode}"
+                if result.returncode == 126 or "dismissed" in err.lower():
+                    err = "Operação cancelada."
                 self.failed.emit(err)
                 return
 
