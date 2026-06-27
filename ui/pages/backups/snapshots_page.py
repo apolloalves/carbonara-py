@@ -1617,16 +1617,16 @@ class _RestoreDialog(QDialog):
         snap_row.addWidget(snap_icon)
         snap_row.addLayout(snap_text)
         snap_row.addStretch()
-        lbl_choose = QLabel("Escolha o tipo de restore:")
-        lbl_choose = QLabel("Escolha o tipo de restore:")
-        lbl_choose.setFont(QFont("DejaVu Sans Mono", 9))
-        lbl_choose.setStyleSheet("color: #9aa6b2;")
+        lbl_choose = QLabel("ESCOLHA O TIPO DE RESTORE")
+        lbl_choose.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
+        lbl_choose.setStyleSheet("color: #c8d4e0; letter-spacing: 1px;")
         btn1 = _RestoreOptionButton(
             glyph="mdi6.harddisk",
             title="Full System Restore",
-            desc="Gera script bash para restaurar o sistema completo via live ISO (requer reboot).",
+            desc="Gera script bash para restaurar o sistema completo via live ISO.",
             color="#ff9966",
             parent=self,
+            badge="requer reboot",
         )
         btn1.clicked.connect(self._on_full_restore)
 
@@ -1649,7 +1649,7 @@ class _RestoreDialog(QDialog):
         btn3.clicked.connect(self._on_alt_restore)
 
         b_layout.addLayout(snap_row)
-        b_layout.addSpacing(16)
+        b_layout.addSpacing(24)
         b_layout.addWidget(lbl_choose)
         b_layout.addSpacing(10)
         b_layout.addWidget(btn1)
@@ -1737,7 +1737,7 @@ class _RestoreDialog(QDialog):
 class _RestoreOptionButton(QFrame):
     clicked = Signal()
 
-    def __init__(self, glyph: str, title: str, desc: str, color: str, parent=None):
+    def __init__(self, glyph: str, title: str, desc: str, color: str, parent=None, badge: str = ""):
         super().__init__(parent)
         self.setCursor(Qt.PointingHandCursor)
         self.setObjectName("RstOptionBtn")
@@ -1777,16 +1777,33 @@ class _RestoreOptionButton(QFrame):
         text.setContentsMargins(0, 0, 0, 0)
         text.setAlignment(Qt.AlignVCenter)
 
+        title_row = QHBoxLayout()
+        title_row.setSpacing(8)
+        title_row.setContentsMargins(0, 0, 0, 0)
+
         t = QLabel(title)
         t.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
         t.setStyleSheet(f"color: {color}; background: transparent; border: none;")
+        title_row.addWidget(t)
+
+        if badge:
+            badge_lbl = QLabel(badge.upper())
+            badge_lbl.setFont(QFont("DejaVu Sans Mono", 7, QFont.Bold))
+            badge_lbl.setStyleSheet(
+                "color: #ff9966; background: rgba(255,153,102,22); "
+                "border: 1px solid rgba(255,153,102,70); border-radius: 4px; "
+                "padding: 1px 6px;"
+            )
+            title_row.addWidget(badge_lbl)
+
+        title_row.addStretch()
 
         d = QLabel(desc)
         d.setFont(QFont("DejaVu Sans Mono", 9))
         d.setWordWrap(False)
         d.setStyleSheet("color: #6b7a8d; background: transparent; border: none;")
 
-        text.addWidget(t)
+        text.addLayout(title_row)
         text.addWidget(d)
         layout.addWidget(ico_lbl, 0, Qt.AlignVCenter)
         layout.addLayout(text)
