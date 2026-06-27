@@ -239,9 +239,9 @@ class ScopeCard(QFrame):
             }
 
             QPushButton {
-                background: rgba(255, 255, 255, 6);
-                border: 1px solid rgba(255, 255, 255, 12);
-                border-radius: 12px;
+                background: transparent;
+                border: none;
+                border-radius: 10px;
                 color: #8b92a3;
                 font: 700 10pt "DejaVu Sans Mono";
                 padding: 0px 12px;
@@ -249,14 +249,13 @@ class ScopeCard(QFrame):
             }
 
             QPushButton:hover {
-                background: rgba(255, 255, 255, 10);
-                border: 1px solid rgba(255, 255, 255, 22);
+                background: rgba(255, 255, 255, 8);
                 color: #c8d4e0;
             }
 
             QPushButton:checked {
-                background: rgba(59, 130, 246, 0.22);
-                border: 1px solid rgba(99, 140, 255, 130);
+                background: #1f6fd6;
+                border: none;
                 color: #ffffff;
             }
 
@@ -326,28 +325,28 @@ class SnapshotCard(QFrame):
         self.setStyleSheet(
             """
             QFrame#SnapshotCard {
-                border: 1px solid rgba(255, 255, 255, 12);
-                border-radius: 14px;
-                background: rgba(255, 255, 255, 6);
+                border: 1px solid rgba(31, 92, 255, 80);
+                border-radius: 12px;
+                background: rgba(10, 14, 22, 240);
             }
             QFrame#SnapshotCard:hover {
-                border: 1px solid rgba(255, 255, 255, 22);
-                background: rgba(255, 255, 255, 9);
+                border: 1px solid rgba(31, 141, 218, 200);
+                background: rgba(14, 20, 32, 255);
             }
 
             QPushButton {
                 padding: 0px 22px;
                 border-radius: 9px;
-                border: 1px solid rgba(255, 255, 255, 14);
-                background: rgba(255, 255, 255, 6);
+                border: 1px solid rgba(31, 92, 255, 100);
+                background: rgba(15, 20, 35, 220);
                 color: #c8d4e0;
                 font: 700 9pt "DejaVu Sans Mono";
                 min-height: 34px;
             }
 
             QPushButton:hover {
-                background: rgba(255, 255, 255, 12);
-                border: 1px solid rgba(255, 255, 255, 28);
+                background: rgba(31, 141, 218, 50);
+                border: 1px solid rgba(31, 141, 218, 200);
                 color: #ecf4ff;
             }
 
@@ -635,14 +634,14 @@ class SnapshotsPage(QWidget):
         self.control_card.setStyleSheet(
             """
             QFrame#ControlCard {
-                border: 1px solid rgba(255, 255, 255, 12);
-                border-radius: 18px;
-                background: rgba(255, 255, 255, 6);
+                border: none;
+                border-radius: 0px;
+                background: transparent;
             }
             """
         )
         control_layout = QHBoxLayout(self.control_card)
-        control_layout.setContentsMargins(20, 18, 20, 18)
+        control_layout.setContentsMargins(0, 0, 0, 8)
         control_layout.setSpacing(48)
         control_layout.setAlignment(Qt.AlignTop)
 
@@ -705,15 +704,15 @@ class SnapshotsPage(QWidget):
         self.right_frame.setStyleSheet(
             """
             QFrame#RightPanel {
-                border: 1px solid rgba(255, 255, 255, 12);
-                border-radius: 16px;
-                background: rgba(255, 255, 255, 6);
+                border: none;
+                border-radius: 0px;
+                background: transparent;
             }
             """
         )
 
         right_panel = QVBoxLayout(self.right_frame)
-        right_panel.setContentsMargins(16, 14, 16, 14)
+        right_panel.setContentsMargins(0, 0, 0, 12)
         right_panel.setSpacing(2)
 
         top_summary = QHBoxLayout()
@@ -767,7 +766,7 @@ class SnapshotsPage(QWidget):
 
         space_row = QHBoxLayout()
         space_row.setSpacing(10)
-        space_row.setContentsMargins(0, 8, 0, 0)
+        space_row.setContentsMargins(50, -18, 0, 0)
         space_row.addWidget(self.space_bar, 8)
         space_row.addWidget(self.lbl_space_percent, 1)
 

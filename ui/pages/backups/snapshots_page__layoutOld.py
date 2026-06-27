@@ -239,29 +239,28 @@ class ScopeCard(QFrame):
             }
 
             QPushButton {
-                background: rgba(255, 255, 255, 6);
-                border: 1px solid rgba(255, 255, 255, 12);
+                background: rgba(10, 15, 25, 230);
+                border: 1px solid rgba(31, 92, 255, 120);
                 border-radius: 12px;
-                color: #8b92a3;
+                color: #ecf4ff;
                 font: 700 10pt "DejaVu Sans Mono";
                 padding: 0px 12px;
                 min-height: 34px;
             }
 
             QPushButton:hover {
-                background: rgba(255, 255, 255, 10);
-                border: 1px solid rgba(255, 255, 255, 22);
-                color: #c8d4e0;
+                background: rgba(35, 166, 255, 160);
+                border: 1px solid rgba(70, 188, 255, 220);
             }
 
             QPushButton:checked {
-                background: rgba(59, 130, 246, 0.22);
-                border: 1px solid rgba(99, 140, 255, 130);
+                background: rgba(35, 166, 255, 215);
+                border: 1px solid rgba(255, 255, 255, 190);
                 color: #ffffff;
             }
 
             QLabel#ScopeSubtitle {
-                color: #5a6a7a;
+                color: #c8d4e0;
                 background: transparent;
                 border: none;
             }
@@ -326,28 +325,28 @@ class SnapshotCard(QFrame):
         self.setStyleSheet(
             """
             QFrame#SnapshotCard {
-                border: 1px solid rgba(255, 255, 255, 12);
-                border-radius: 14px;
-                background: rgba(255, 255, 255, 6);
+                border: 1px solid rgba(31, 92, 255, 80);
+                border-radius: 12px;
+                background: rgba(10, 14, 22, 240);
             }
             QFrame#SnapshotCard:hover {
-                border: 1px solid rgba(255, 255, 255, 22);
-                background: rgba(255, 255, 255, 9);
+                border: 1px solid rgba(31, 141, 218, 200);
+                background: rgba(14, 20, 32, 255);
             }
 
             QPushButton {
                 padding: 0px 22px;
                 border-radius: 9px;
-                border: 1px solid rgba(255, 255, 255, 14);
-                background: rgba(255, 255, 255, 6);
+                border: 1px solid rgba(31, 92, 255, 100);
+                background: rgba(15, 20, 35, 220);
                 color: #c8d4e0;
                 font: 700 9pt "DejaVu Sans Mono";
                 min-height: 34px;
             }
 
             QPushButton:hover {
-                background: rgba(255, 255, 255, 12);
-                border: 1px solid rgba(255, 255, 255, 28);
+                background: rgba(31, 141, 218, 50);
+                border: 1px solid rgba(31, 141, 218, 200);
                 color: #ecf4ff;
             }
 
@@ -635,14 +634,14 @@ class SnapshotsPage(QWidget):
         self.control_card.setStyleSheet(
             """
             QFrame#ControlCard {
-                border: 1px solid rgba(255, 255, 255, 12);
+                border: 1px solid rgba(31, 92, 255, 55);
                 border-radius: 18px;
-                background: rgba(255, 255, 255, 6);
+                background: rgba(8, 12, 20, 150);
             }
             """
         )
         control_layout = QHBoxLayout(self.control_card)
-        control_layout.setContentsMargins(20, 18, 20, 18)
+        control_layout.setContentsMargins(18, 16, 18, 16)
         control_layout.setSpacing(48)
         control_layout.setAlignment(Qt.AlignTop)
 
@@ -705,15 +704,15 @@ class SnapshotsPage(QWidget):
         self.right_frame.setStyleSheet(
             """
             QFrame#RightPanel {
-                border: 1px solid rgba(255, 255, 255, 12);
+                border: 1px solid rgba(31, 141, 218, 255);
                 border-radius: 16px;
-                background: rgba(255, 255, 255, 6);
+                background: rgba(8, 12, 20, 120);
             }
             """
         )
 
         right_panel = QVBoxLayout(self.right_frame)
-        right_panel.setContentsMargins(16, 14, 16, 14)
+        right_panel.setContentsMargins(16, 12, 16, 12)
         right_panel.setSpacing(2)
 
         top_summary = QHBoxLayout()
@@ -767,7 +766,7 @@ class SnapshotsPage(QWidget):
 
         space_row = QHBoxLayout()
         space_row.setSpacing(10)
-        space_row.setContentsMargins(0, 8, 0, 0)
+        space_row.setContentsMargins(50, -18, 0, 0)
         space_row.addWidget(self.space_bar, 8)
         space_row.addWidget(self.lbl_space_percent, 1)
 
@@ -819,12 +818,7 @@ class SnapshotsPage(QWidget):
         self.scroll_layout.addStretch(1)
 
         self.scroll.setWidget(self.scroll_content)
-        sep_line = QFrame()
-        sep_line.setFixedHeight(1)
-        sep_line.setStyleSheet("background: rgba(255,255,255,6); border: none;")
-
         root.addWidget(self.control_card)
-        root.addWidget(sep_line)
         root.addWidget(self.scroll, 1)
 
         self.refresh_destinations()
