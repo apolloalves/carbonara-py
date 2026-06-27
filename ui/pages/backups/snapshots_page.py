@@ -1532,9 +1532,9 @@ class _RestoreDialog(QDialog):
         h_layout.setSpacing(6)
 
         icon = QLabel()
-        icon.setFixedSize(42, 42)
+        icon.setFixedSize(50, 50)
         icon.setAlignment(Qt.AlignCenter)
-        icon.setPixmap(qta.icon("mdi6.file-restore-outline", color="#8fd4ff").pixmap(34, 34))
+        icon.setPixmap(qta.icon("mdi6.file-restore-outline", color="#8fd4ff").pixmap(40, 40))
         icon.setStyleSheet("QLabel { background: transparent; }")
 
         lbl = QLabel("Restore Snapshot")
