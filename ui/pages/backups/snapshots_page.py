@@ -1091,7 +1091,7 @@ from core.snapshots.backup import create_backup
 from ui.widgets.backup_progress import BackupProgressDialog
 
 app = QApplication([])
-dialog = BackupProgressDialog()
+dialog = BackupProgressDialog("Criando Snapshot")
 create_backup(dialog, destination_mountpoint={dest.mountpoint!r}, scope={self.current_scope()!r})
 dialog.exec()
 """
@@ -1185,7 +1185,7 @@ from core.snapshots.backup import sync_snapshot
 from ui.widgets.backup_progress import BackupProgressDialog
 
 app = QApplication([])
-dialog = BackupProgressDialog()
+dialog = BackupProgressDialog("Sincronizando Snapshot")
 sync_snapshot(dialog, snapshot_path={str(entry.path)!r})
 dialog.exec()
 """

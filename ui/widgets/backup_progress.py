@@ -14,7 +14,7 @@ class BackupProgressDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setModal(True)
-        self.setFixedSize(800, 560)
+        self.setFixedSize(880, 620)
 
         # Remove titlebar nativa — usamos header customizado
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
@@ -24,6 +24,13 @@ class BackupProgressDialog(QDialog):
         self._cancel_timer = QTimer(self)
         self._cancel_timer.setInterval(1000)
         self._cancel_timer.timeout.connect(self._countdown_tick)
+
+        self._had_failure = False
+        self._timer_active = False
+        self._elapsed_seconds = 0
+        self._elapsed_timer = QTimer(self)
+        self._elapsed_timer.setInterval(1000)
+        self._elapsed_timer.timeout.connect(self._tick_elapsed)
 
         # Para drag da janela sem titlebar
         self._drag_pos = None
@@ -41,20 +48,20 @@ class BackupProgressDialog(QDialog):
         # ── Header customizado ───────────────────────────────────────────────
         self.header = QFrame()
         self.header.setObjectName("DialogHeader")
-        self.header.setFixedHeight(52)
+        self.header.setFixedHeight(58)
         header_layout = QHBoxLayout(self.header)
         header_layout.setContentsMargins(20, 0, 16, 0)
         header_layout.setSpacing(0)
 
         lbl_icon = QLabel()
-        lbl_icon.setFixedSize(32, 32)
+        lbl_icon.setFixedSize(38, 38)
         lbl_icon.setAlignment(Qt.AlignCenter)
-        lbl_icon.setPixmap(qta.icon("mdi6.harddisk", color="#ffffff").pixmap(20, 20))
+        lbl_icon.setPixmap(qta.icon("mdi6.harddisk", color="#9bf0bd").pixmap(22, 22))
         lbl_icon.setStyleSheet(
-            "QLabel { background: rgba(35, 166, 255, 34); border-radius: 10px; }"
+            "QLabel { background: rgba(74, 222, 128, 40); border-radius: 10px; }"
         )
 
-        lbl_header = QLabel("Carbonara Backup")
+        lbl_header = QLabel(self.windowTitle())
         lbl_header.setObjectName("HeaderTitle")
         lbl_header.setFont(QFont("DejaVu Sans Mono", 12, QFont.Bold))
 
@@ -63,10 +70,31 @@ class BackupProgressDialog(QDialog):
         header_layout.addWidget(lbl_header)
         header_layout.addStretch(1)
 
+        # Badge de tempo decorrido — bem visível, no canto do header
+        self.elapsed_badge = QFrame()
+        self.elapsed_badge.setObjectName("ElapsedBadge")
+        eb_layout = QHBoxLayout(self.elapsed_badge)
+        eb_layout.setContentsMargins(10, 4, 12, 4)
+        eb_layout.setSpacing(6)
+
+        elapsed_icon = QLabel()
+        elapsed_icon.setPixmap(qta.icon("mdi6.clock-outline", color="#9bf0bd").pixmap(14, 14))
+        elapsed_icon.setStyleSheet("background: transparent;")
+
+        self.lbl_elapsed = QLabel("00:00")
+        self.lbl_elapsed.setObjectName("ElapsedTime")
+        self.lbl_elapsed.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+
+        eb_layout.addWidget(elapsed_icon)
+        eb_layout.addWidget(self.lbl_elapsed)
+
+        header_layout.addWidget(self.elapsed_badge)
+        header_layout.addSpacing(12)
+
         # Botão fechar no header (× apenas visual — só fecha se não estiver rodando)
         self._btn_header_close = QPushButton("✕")
         self._btn_header_close.setObjectName("HeaderClose")
-        self._btn_header_close.setFixedSize(28, 28)
+        self._btn_header_close.setFixedSize(32, 32)
         self._btn_header_close.clicked.connect(self._on_header_close)
         header_layout.addWidget(self._btn_header_close)
 
@@ -76,7 +104,7 @@ class BackupProgressDialog(QDialog):
         body = QFrame()
         body.setObjectName("DialogBody")
         body_layout = QVBoxLayout(body)
-        body_layout.setContentsMargins(24, 20, 24, 20)
+        body_layout.setContentsMargins(24, 26, 24, 20)
         body_layout.setSpacing(0)
 
         # Status principal
@@ -109,19 +137,13 @@ class BackupProgressDialog(QDialog):
         self.lbl_current.setAlignment(Qt.AlignCenter)
         self.lbl_current.setObjectName("ProgressCurrentFile")
         body_layout.addWidget(self.lbl_current)
-        body_layout.addSpacing(12)
-
-        # Separador
-        sep = QFrame()
-        sep.setFrameShape(QFrame.HLine)
-        sep.setObjectName("ProgressSep")
-        body_layout.addWidget(sep)
-        body_layout.addSpacing(8)
+        body_layout.addSpacing(16)
 
         # Log
         self.log_view = QPlainTextEdit()
         self.log_view.setReadOnly(True)
         self.log_view.setObjectName("BackupLog")
+        self.log_view.setLineWrapMode(QPlainTextEdit.NoWrap)
         body_layout.addWidget(self.log_view, stretch=1)
         body_layout.addSpacing(16)
 
@@ -132,12 +154,13 @@ class BackupProgressDialog(QDialog):
 
         self.btn_cancel = QPushButton("Cancelar")
         self.btn_cancel.setMinimumWidth(130)
+        self.btn_cancel.setFixedHeight(40)
         self.btn_cancel.setObjectName("BtnCancel")
         self.btn_cancel.clicked.connect(self._on_cancel_clicked)
 
         self.btn_close = QPushButton("Fechar")
         self.btn_close.setEnabled(False)
-        self.btn_close.setFixedWidth(110)
+        self.btn_close.setFixedSize(110, 40)
         self.btn_close.setObjectName("BtnClose")
         self.btn_close.clicked.connect(self.accept)
 
@@ -151,17 +174,14 @@ class BackupProgressDialog(QDialog):
     def _apply_styles(self) -> None:
         self.setStyleSheet("""
             BackupProgressDialog {
-                background: transparent;
+                background: #131417;
+                border-radius: 14px;
             }
 
             /* ── Header ── */
             QFrame#DialogHeader {
-                background: qlineargradient(
-                    x1:0, y1:0, x2:1, y2:0,
-                    stop:0 rgba(14, 22, 40, 255),
-                    stop:1 rgba(10, 16, 30, 255)
-                );
-                border-bottom: 1px solid rgba(31, 92, 255, 120);
+                background: rgba(74, 222, 128, 35);
+                border-bottom: 1px solid rgba(74, 222, 128, 25);
                 border-top-left-radius: 14px;
                 border-top-right-radius: 14px;
             }
@@ -180,8 +200,8 @@ class BackupProgressDialog(QDialog):
             QPushButton#HeaderClose {
                 background: transparent;
                 border: none;
-                color: #4a5a6a;
-                font-size: 13px;
+                color: #9aa6b2;
+                font-size: 15px;
                 border-radius: 6px;
             }
             QPushButton#HeaderClose:hover {
@@ -191,7 +211,7 @@ class BackupProgressDialog(QDialog):
 
             /* ── Body ── */
             QFrame#DialogBody {
-                background: #080c14;
+                background: #131417;
                 border-bottom-left-radius: 14px;
                 border-bottom-right-radius: 14px;
             }
@@ -216,14 +236,19 @@ class BackupProgressDialog(QDialog):
                 font-style: italic;
             }
 
-            QFrame#ProgressSep {
-                border: none;
-                border-top: 1px solid rgba(31, 92, 255, 55);
+            QFrame#ElapsedBadge {
+                background: rgba(74, 222, 128, 22);
+                border-radius: 8px;
+            }
+
+            QLabel#ElapsedTime {
+                color: #9bf0bd;
+                background: transparent;
             }
 
             QProgressBar#BackupProgress {
-                background-color: rgba(10, 15, 25, 230);
-                border: 1px solid rgba(31, 92, 255, 120);
+                background-color: rgba(255,255,255,8);
+                border: 1px solid rgba(255,255,255,18);
                 border-radius: 4px;
                 color: #ecf4ff;
                 font-family: "DejaVu Sans Mono";
@@ -234,31 +259,64 @@ class BackupProgressDialog(QDialog):
             QProgressBar#BackupProgress::chunk {
                 background-color: qlineargradient(
                     x1:0, y1:0, x2:1, y2:0,
-                    stop:0 rgba(31, 92, 255, 220),
-                    stop:1 rgba(35, 166, 255, 220)
+                    stop:0 rgba(35, 166, 80, 130),
+                    stop:1 rgba(94, 234, 149, 130)
                 );
                 border-radius: 3px;
             }
 
             QPlainTextEdit#BackupLog {
-                background-color: rgba(6, 9, 16, 240);
-                border: 1px solid rgba(31, 92, 255, 55);
+                background-color: rgba(255,255,255,5);
+                border: 1px solid rgba(255,255,255,16);
                 border-radius: 10px;
-                color: #c8d4e0;
+                color: #ffffff;
                 font-family: "DejaVu Sans Mono";
-                font-size: 10px;
+                font-size: 12px;
                 padding: 8px;
                 selection-background-color: rgba(35, 166, 255, 80);
             }
+            QPlainTextEdit#BackupLog QScrollBar:vertical {
+                background: transparent;
+                width: 10px;
+                margin: 2px;
+            }
+            QPlainTextEdit#BackupLog QScrollBar::handle:vertical {
+                background: rgba(255,255,255,30);
+                border-radius: 5px;
+                min-height: 24px;
+            }
+            QPlainTextEdit#BackupLog QScrollBar::handle:vertical:hover {
+                background: rgba(74,222,128,90);
+            }
+            QPlainTextEdit#BackupLog QScrollBar::add-line:vertical,
+            QPlainTextEdit#BackupLog QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+            QPlainTextEdit#BackupLog QScrollBar:horizontal {
+                background: transparent;
+                height: 10px;
+                margin: 2px;
+            }
+            QPlainTextEdit#BackupLog QScrollBar::handle:horizontal {
+                background: rgba(255,255,255,30);
+                border-radius: 5px;
+                min-width: 24px;
+            }
+            QPlainTextEdit#BackupLog QScrollBar::handle:horizontal:hover {
+                background: rgba(74,222,128,90);
+            }
+            QPlainTextEdit#BackupLog QScrollBar::add-line:horizontal,
+            QPlainTextEdit#BackupLog QScrollBar::sub-line:horizontal {
+                width: 0px;
+            }
 
             QPushButton#BtnCancel {
-                background: rgba(10, 15, 25, 230);
+                background: rgba(255,255,255,6);
                 border: 1px solid rgba(200, 60, 60, 100);
                 border-radius: 10px;
                 color: #c8d4e0;
                 font-family: "DejaVu Sans Mono";
                 font-size: 11px;
-                padding: 6px 18px;
             }
             QPushButton#BtnCancel:hover {
                 background: rgba(200, 60, 60, 40);
@@ -268,17 +326,16 @@ class BackupProgressDialog(QDialog):
             QPushButton#BtnCancel:disabled {
                 color: #3a4a5a;
                 border-color: rgba(200, 60, 60, 30);
-                background: rgba(10, 15, 25, 100);
+                background: rgba(255,255,255,3);
             }
 
             QPushButton#BtnClose {
-                background: rgba(10, 15, 25, 230);
-                border: 1px solid rgba(31, 92, 255, 120);
+                background: rgba(255,255,255,6);
+                border: 1px solid rgba(255,255,255,18);
                 border-radius: 10px;
                 color: #ecf4ff;
                 font-family: "DejaVu Sans Mono";
                 font-size: 11px;
-                padding: 6px 0;
             }
             QPushButton#BtnClose:hover {
                 background: rgba(23, 147, 209, 70);
@@ -286,8 +343,8 @@ class BackupProgressDialog(QDialog):
             }
             QPushButton#BtnClose:disabled {
                 color: #3a4a5a;
-                border-color: rgba(31, 92, 255, 30);
-                background: rgba(10, 15, 25, 100);
+                border-color: rgba(255,255,255,8);
+                background: rgba(255,255,255,3);
             }
         """)
 
@@ -415,7 +472,11 @@ class BackupProgressDialog(QDialog):
     def register_worker(self, worker) -> None:
         self._workers.append(worker)
         worker.finished_ok.connect(lambda: self._cleanup_worker(worker))
-        worker.failed.connect(lambda _: self._cleanup_worker(worker))
+        worker.failed.connect(lambda _: self._on_worker_failed(worker))
+
+    def _on_worker_failed(self, worker) -> None:
+        self._had_failure = True
+        self._cleanup_worker(worker)
 
     def _cleanup_worker(self, worker) -> None:
         if worker in self._workers:
@@ -432,9 +493,35 @@ class BackupProgressDialog(QDialog):
     def set_current_file(self, text: str) -> None:
         self.lbl_current.set_text(f"Arquivo atual: {text}")
 
+    def _tick_elapsed(self) -> None:
+        self._elapsed_seconds += 1
+        h, rem = divmod(self._elapsed_seconds, 3600)
+        m, s = divmod(rem, 60)
+        text = f"{m:02d}:{s:02d}" if h == 0 else f"{h:02d}:{m:02d}:{s:02d}"
+        self.lbl_elapsed.setText(text)
+
     def set_running(self, running: bool) -> None:
         self.btn_cancel.setEnabled(running)
         self.btn_close.setEnabled(not running)
+
+        if running and not self._timer_active:
+            self._timer_active = True
+            self._elapsed_seconds = 0
+            self.lbl_elapsed.setText("00:00")
+            self._elapsed_timer.start()
+        elif not running and self._timer_active:
+            self._timer_active = False
+            self._elapsed_timer.stop()
+            if not self._had_failure:
+                self._show_success_dialog()
+
+    def _show_success_dialog(self) -> None:
+        dlg = _SuccessDialog(
+            message=self.lbl_status.text() or "Operação concluída com sucesso.",
+            elapsed_text=f"Tempo decorrido: {self.lbl_elapsed.text()}",
+            parent=self,
+        )
+        dlg.exec()
 
     def closeEvent(self, event) -> None:
         if any(w.isRunning() for w in self._workers):
@@ -442,6 +529,113 @@ class BackupProgressDialog(QDialog):
             self.set_status("Backup em execução. Use Cancelar para interromper.")
             return
         super().closeEvent(event)
+
+
+# ── Dialog de sucesso ────────────────────────────────────────────────────────
+
+class _SuccessDialog(QDialog):
+    """Dialog exibido ao concluir uma operação de backup/sync com sucesso."""
+
+    def __init__(self, message: str, elapsed_text: str = "", parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Concluído")
+        self.setModal(True)
+        self.setFixedSize(440, 220)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self._build_ui(message, elapsed_text)
+        self._apply_styles()
+
+    def _build_ui(self, message: str, elapsed_text: str) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        header = QFrame()
+        header.setObjectName("SuccessHeader")
+        header.setFixedHeight(56)
+        h_layout = QHBoxLayout(header)
+        h_layout.setContentsMargins(20, 0, 18, 0)
+
+        icon = QLabel()
+        icon.setFixedSize(36, 36)
+        icon.setAlignment(Qt.AlignCenter)
+        icon.setPixmap(qta.icon("mdi6.check-circle", color="#9bf0bd").pixmap(22, 22))
+        icon.setStyleSheet(
+            "QLabel { background: rgba(74,222,128,40); border-radius: 9px; }"
+        )
+
+        lbl_title = QLabel("Concluído com sucesso")
+        lbl_title.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+        lbl_title.setStyleSheet("color: #ffffff; background: transparent;")
+
+        h_layout.addWidget(icon)
+        h_layout.addSpacing(10)
+        h_layout.addWidget(lbl_title)
+        h_layout.addStretch()
+
+        body = QFrame()
+        body.setObjectName("SuccessBody")
+        b_layout = QVBoxLayout(body)
+        b_layout.setContentsMargins(28, 22, 28, 22)
+        b_layout.setSpacing(10)
+
+        lbl_msg = QLabel(message)
+        lbl_msg.setWordWrap(True)
+        lbl_msg.setFont(QFont("DejaVu Sans Mono", 10))
+        lbl_msg.setStyleSheet("color: #c8d4e0;")
+
+        b_layout.addWidget(lbl_msg)
+
+        if elapsed_text:
+            lbl_elapsed = QLabel(elapsed_text)
+            lbl_elapsed.setFont(QFont("DejaVu Sans Mono", 9))
+            lbl_elapsed.setStyleSheet("color: #6b7a8d;")
+            b_layout.addWidget(lbl_elapsed)
+
+        b_layout.addStretch()
+
+        btn_row = QHBoxLayout()
+        btn_ok = QPushButton("OK")
+        btn_ok.setObjectName("SuccessBtnOk")
+        btn_ok.setFixedSize(100, 38)
+        btn_ok.clicked.connect(self.accept)
+        btn_row.addStretch()
+        btn_row.addWidget(btn_ok)
+        b_layout.addLayout(btn_row)
+
+        root.addWidget(header)
+        root.addWidget(body, stretch=1)
+
+    def _apply_styles(self) -> None:
+        self.setStyleSheet("""
+            QDialog {
+                background: #131417;
+                border-radius: 14px;
+            }
+            QFrame#SuccessHeader {
+                background: rgba(74, 222, 128, 35);
+                border-bottom: 1px solid rgba(74, 222, 128, 25);
+                border-top-left-radius: 14px;
+                border-top-right-radius: 14px;
+            }
+            QFrame#SuccessBody {
+                background: #131417;
+                border-bottom-left-radius: 14px;
+                border-bottom-right-radius: 14px;
+            }
+            QPushButton#SuccessBtnOk {
+                background: rgba(74, 222, 128, 180);
+                border: 1px solid rgba(74, 222, 128, 220);
+                border-radius: 10px;
+                color: #08111d;
+                font-family: "DejaVu Sans Mono";
+                font-size: 11px;
+                font-weight: 700;
+            }
+            QPushButton#SuccessBtnOk:hover {
+                background: rgba(94, 234, 149, 220);
+            }
+        """)
 
 
 # ── Helper ────────────────────────────────────────────────────────────────────
