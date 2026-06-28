@@ -65,6 +65,7 @@ class SnapshotEntry:
     meta_text: str
     modified_text: str
     size_str: str = ""
+    size_gb: float = 0.0
     synced_at: str = ""
 
 
@@ -111,10 +112,11 @@ def collect_snapshots(backup_root: Path) -> List[SnapshotEntry]:
                 source = meta.get("source", "")
                 size_bytes = meta.get("size_bytes", 0)
                 size_str = ""
+                size_gb = 0.0
                 if size_bytes and size_bytes > 0:
-                    gb = size_bytes / (1024 ** 3)
-                    if gb >= 1:
-                        size_str = f"{gb:.1f} GB"
+                    size_gb = size_bytes / (1024 ** 3)
+                    if size_gb >= 1:
+                        size_str = f"{size_gb:.1f} GB"
                     else:
                         size_str = f"{size_bytes / (1024 ** 2):.0f} MB"
 
@@ -133,6 +135,7 @@ def collect_snapshots(backup_root: Path) -> List[SnapshotEntry]:
                             stat.st_mtime
                         ).strftime("%Y-%m-%d %H:%M:%S"),
                         size_str=size_str,
+                        size_gb=size_gb,
                         synced_at=synced_at,
                     )
                 )
@@ -3022,6 +3025,7 @@ class _AltRestoreDialog(QDialog):
         self.lbl_dest_info = QLabel("—")
         self.lbl_dest_info.setFont(QFont("DejaVu Sans Mono", 9))
         self.lbl_dest_info.setStyleSheet("color: #6b7a8d;")
+        self.lbl_dest_info.setWordWrap(True)
         self.cmb_dest.currentIndexChanged.connect(self._on_dest_changed)
 
         # Warn
@@ -3165,10 +3169,23 @@ class _AltRestoreDialog(QDialog):
         if index < 0 or index >= len(self._destinations):
             return
         dest = self._destinations[index]
-        self.lbl_dest_info.setText(
+        base_info = (
             f"{format_gb(dest.free_gb)} livre de {format_gb(dest.total_gb)} "
             f"• {dest.fs_type}"
         )
+
+        if self.entry.size_gb > 0 and dest.free_gb < self.entry.size_gb:
+            self.lbl_dest_info.setText(
+                f"{base_info}  —  espaço insuficiente "
+                f"(snapshot tem {self.entry.size_str}, faltam "
+                f"{format_gb(self.entry.size_gb - dest.free_gb)})"
+            )
+            self.lbl_dest_info.setStyleSheet("color: #ff8888; font-weight: bold;")
+            self.btn_start.setEnabled(False)
+        else:
+            self.lbl_dest_info.setText(base_info)
+            self.lbl_dest_info.setStyleSheet("color: #6b7a8d;")
+            self.btn_start.setEnabled(True)
 
     def _on_start(self):
         idx = self.cmb_dest.currentIndex()
