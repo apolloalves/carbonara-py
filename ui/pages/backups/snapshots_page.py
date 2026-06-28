@@ -2870,7 +2870,7 @@ class _AltRestoreDialog(QDialog):
         self.entry = entry
         self.setWindowTitle("Restore para disco alternativo")
         self.setModal(True)
-        self.setFixedSize(680, 420)
+        self.setFixedSize(800, 480)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_StyledBackground, True)
         self._destinations = []
@@ -2886,15 +2886,15 @@ class _AltRestoreDialog(QDialog):
         # Header
         header = QFrame()
         header.setObjectName("ARHeader")
-        header.setFixedHeight(52)
+        header.setFixedHeight(60)
         hl = QHBoxLayout(header)
-        hl.setContentsMargins(18, 0, 16, 0)
+        hl.setContentsMargins(20, 0, 18, 0)
 
         ico = QLabel()
-        ico.setFixedSize(32, 32)
+        ico.setFixedSize(40, 40)
         ico.setAlignment(Qt.AlignCenter)
-        ico.setPixmap(qta.icon("mdi6.content-copy", color="#23a6ff").pixmap(20, 20))
-        ico.setStyleSheet("QLabel { background: rgba(35,166,255,40); border-radius: 9px; }")
+        ico.setPixmap(qta.icon("mdi6.content-copy", color="#23a6ff").pixmap(24, 24))
+        ico.setStyleSheet("QLabel { background: rgba(35,166,255,40); border-radius: 10px; }")
 
         lbl = QLabel("Restore para disco alternativo")
         lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
@@ -2913,16 +2913,72 @@ class _AltRestoreDialog(QDialog):
         body = QFrame()
         body.setObjectName("ARBody")
         bl = QVBoxLayout(body)
-        bl.setContentsMargins(24, 18, 24, 20)
-        bl.setSpacing(12)
+        bl.setContentsMargins(28, 24, 28, 24)
+        bl.setSpacing(14)
 
         # Snapshot info
-        snap_lbl = QLabel(self.entry.path.name)
-        snap_lbl.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
-        snap_lbl.setStyleSheet(
-            "color: #23a6ff; background: rgba(35,166,255,20); "
-            "border: 1px solid rgba(35,166,255,60); border-radius: 6px; padding: 4px 10px;"
-        )
+        snap_row = QHBoxLayout()
+        snap_row.setSpacing(14)
+        snap_row.setContentsMargins(0, 0, 0, 0)
+
+        snap_icon = icon_badge(SNAPSHOT_GLYPH, 38)
+
+        snap_text = QVBoxLayout()
+        snap_text.setSpacing(4)
+        snap_text.setContentsMargins(0, 0, 0, 0)
+
+        snap_title = QLabel(self.entry.path.name)
+        snap_title_font = QFont("DejaVu Sans Mono")
+        snap_title_font.setPointSizeF(10.5)
+        snap_title_font.setBold(True)
+        snap_title.setFont(snap_title_font)
+        snap_title.setStyleSheet("color: #ecf4ff;")
+
+        snap_meta_row = QHBoxLayout()
+        snap_meta_row.setSpacing(8)
+        snap_meta_row.setContentsMargins(0, 0, 0, 0)
+
+        snap_meta = QLabel(self.entry.meta_text)
+        snap_meta.setFont(QFont("DejaVu Sans Mono", 10))
+        snap_meta.setStyleSheet("color: #6b7a8d;")
+        snap_meta_row.addWidget(snap_meta)
+
+        if self.entry.size_str:
+            snap_size_prefix = QLabel("snapshot size")
+            snap_size_prefix.setFont(QFont("DejaVu Sans Mono", 9))
+            snap_size_prefix.setStyleSheet("color: #6b7a8d;")
+            snap_meta_row.addWidget(snap_size_prefix)
+
+            snap_size_val = QLabel(self.entry.size_str)
+            snap_size_val.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
+            snap_size_val.setStyleSheet("color: #4ade80;")
+            snap_meta_row.addWidget(snap_size_val)
+
+        snap_meta_row.addStretch()
+
+        snap_text.addWidget(snap_title)
+        snap_text.addLayout(snap_meta_row)
+
+        if self.entry.synced_at:
+            snap_sync_row = QHBoxLayout()
+            snap_sync_row.setSpacing(6)
+            snap_sync_row.setContentsMargins(0, 0, 0, 0)
+
+            snap_sync_icon = QLabel()
+            snap_sync_icon.setPixmap(qta.icon(SYNC_GLYPH, color="#23a6ff").pixmap(14, 14))
+
+            snap_sync_lbl = QLabel(f"last sync  {self.entry.synced_at}")
+            snap_sync_lbl.setFont(QFont("DejaVu Sans Mono", 9))
+            snap_sync_lbl.setStyleSheet("color: #23a6ff;")
+
+            snap_sync_row.addWidget(snap_sync_icon)
+            snap_sync_row.addWidget(snap_sync_lbl)
+            snap_sync_row.addStretch()
+            snap_text.addLayout(snap_sync_row)
+
+        snap_row.addWidget(snap_icon)
+        snap_row.addLayout(snap_text)
+        snap_row.addStretch()
 
         # Destino
         lbl_dest = QLabel("Selecione o disco de destino:")
@@ -2931,7 +2987,7 @@ class _AltRestoreDialog(QDialog):
 
         self.cmb_dest = QComboBox()
         self.cmb_dest.setFont(QFont("DejaVu Sans Mono", 10))
-        self.cmb_dest.setMinimumHeight(36)
+        self.cmb_dest.setMinimumHeight(40)
         style_combo_popup(self.cmb_dest)
 
         # Opções de cópia
@@ -2946,11 +3002,17 @@ class _AltRestoreDialog(QDialog):
         self.chk_delete.setCheckable(True)
         self.chk_delete.setChecked(False)
         self.chk_delete.setObjectName("AROptBtn")
+        self.chk_delete.setFixedHeight(38)
+        self.chk_delete.setMinimumWidth(200)
+        self.chk_delete.setCursor(Qt.PointingHandCursor)
 
         self.chk_hardlinks = QPushButton("Preservar hard-links (-H)")
         self.chk_hardlinks.setCheckable(True)
         self.chk_hardlinks.setChecked(True)
         self.chk_hardlinks.setObjectName("AROptBtn")
+        self.chk_hardlinks.setFixedHeight(38)
+        self.chk_hardlinks.setMinimumWidth(200)
+        self.chk_hardlinks.setCursor(Qt.PointingHandCursor)
 
         opts_row.addWidget(self.chk_delete)
         opts_row.addWidget(self.chk_hardlinks)
@@ -2963,20 +3025,34 @@ class _AltRestoreDialog(QDialog):
         self.cmb_dest.currentIndexChanged.connect(self._on_dest_changed)
 
         # Warn
-        warn = QLabel("⚠  O conteúdo existente no destino pode ser alterado.")
-        warn.setFont(QFont("DejaVu Sans Mono", 8))
+        warn_row = QHBoxLayout()
+        warn_row.setSpacing(8)
+        warn_row.setContentsMargins(0, 0, 0, 0)
+
+        warn_icon = QLabel()
+        warn_icon.setFixedSize(20, 20)
+        warn_icon.setAlignment(Qt.AlignCenter)
+        warn_icon.setPixmap(qta.icon("mdi6.alert", color="#ff9966").pixmap(18, 18))
+
+        warn = QLabel("O conteúdo existente no destino pode ser alterado.")
+        warn.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
         warn.setStyleSheet("color: #ff9966;")
+
+        warn_row.addWidget(warn_icon)
+        warn_row.addWidget(warn)
+        warn_row.addStretch()
 
         # Botões
         btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
         btn_cancel = QPushButton("Cancelar")
         btn_cancel.setObjectName("ARBtnCancel")
-        btn_cancel.setFixedWidth(110)
+        btn_cancel.setFixedSize(120, 40)
         btn_cancel.clicked.connect(self.reject)
 
         self.btn_start = QPushButton("Iniciar Restore")
         self.btn_start.setObjectName("ARBtnStart")
-        self.btn_start.setFixedWidth(140)
+        self.btn_start.setFixedSize(160, 40)
         self.btn_start.setEnabled(False)
         self.btn_start.clicked.connect(self._on_start)
 
@@ -2984,14 +3060,17 @@ class _AltRestoreDialog(QDialog):
         btn_row.addWidget(btn_cancel)
         btn_row.addWidget(self.btn_start)
 
-        bl.addWidget(snap_lbl)
+        bl.addLayout(snap_row)
+        bl.addSpacing(6)
         bl.addWidget(lbl_dest)
         bl.addWidget(self.cmb_dest)
         bl.addWidget(self.lbl_dest_info)
+        bl.addSpacing(4)
         bl.addWidget(lbl_opts)
         bl.addLayout(opts_row)
+        bl.addSpacing(20)
+        bl.addLayout(warn_row)
         bl.addStretch()
-        bl.addWidget(warn)
         bl.addLayout(btn_row)
 
         root.addWidget(header)
@@ -3000,45 +3079,44 @@ class _AltRestoreDialog(QDialog):
     def _apply_styles(self):
         self.setStyleSheet("""
             QDialog {
-                background: #080c14;
+                background: #131417;
                 border-radius: 14px;
             }
             QFrame#ARHeader {
-                background: rgba(8, 20, 40, 255);
-                border-bottom: 1px solid rgba(35, 166, 255, 80);
+                background: rgba(35, 166, 255, 35);
+                border-bottom: 1px solid rgba(35, 166, 255, 25);
                 border-top-left-radius: 13px;
                 border-top-right-radius: 13px;
             }
             QFrame#ARBody {
-                background: #080c14;
+                background: #131417;
                 border-bottom-left-radius: 13px;
                 border-bottom-right-radius: 13px;
             }
             QComboBox {
-                background: rgba(10,15,25,230);
-                border: 1px solid rgba(31,92,255,120);
-                border-radius: 8px; color: #ecf4ff;
-                font-family: "DejaVu Sans Mono"; padding: 6px 12px;
+                background: rgba(255,255,255,6);
+                border: 1px solid rgba(255,255,255,18);
+                border-radius: 10px; color: #ecf4ff;
+                font-family: "DejaVu Sans Mono"; padding: 8px 12px;
             }
             QComboBox:hover { border-color: rgba(35,166,255,200); }
             QComboBox::drop-down { border: none; width: 24px; }
             QPushButton#AROptBtn {
-                background: rgba(10,15,25,200);
-                border: 1px solid rgba(31,92,255,80);
-                border-radius: 8px; color: #9aa6b2;
-                font-family: "DejaVu Sans Mono"; font-size: 9px;
-                padding: 5px 12px;
+                background: rgba(255,255,255,8);
+                border: 1px solid rgba(255,255,255,18);
+                border-radius: 10px; color: #9aa6b2;
+                font-family: "DejaVu Sans Mono"; font-size: 10px;
+                padding: 0 14px;
             }
             QPushButton#AROptBtn:checked {
-                background: rgba(35,166,255,100);
-                border-color: rgba(35,166,255,200); color: #ecf4ff;
+                background: rgba(74,222,128,100);
+                border-color: rgba(74,222,128,200); color: #ffffff;
             }
             QPushButton#ARBtnCancel {
-                background: rgba(10,15,25,230);
-                border: 1px solid rgba(31,92,255,120);
-                border-radius: 8px; color: #ecf4ff;
+                background: rgba(255,255,255,6);
+                border: 1px solid rgba(255,255,255,18);
+                border-radius: 10px; color: #ecf4ff;
                 font-family: "DejaVu Sans Mono"; font-size: 11px;
-                padding: 6px 0;
             }
             QPushButton#ARBtnCancel:hover {
                 background: rgba(23,147,209,70);
@@ -3047,14 +3125,14 @@ class _AltRestoreDialog(QDialog):
             QPushButton#ARBtnStart {
                 background: rgba(35,166,255,180);
                 border: 1px solid rgba(35,166,255,220);
-                border-radius: 8px; color: #08111d;
+                border-radius: 10px; color: #08111d;
                 font-family: "DejaVu Sans Mono"; font-size: 11px;
-                font-weight: 700; padding: 6px 0;
+                font-weight: 700;
             }
             QPushButton#ARBtnStart:hover { background: rgba(70,188,255,220); }
             QPushButton#ARBtnStart:disabled {
-                background: rgba(10,15,25,100);
-                border-color: rgba(31,92,255,30); color: #3a4a5a;
+                background: rgba(255,255,255,6);
+                border-color: rgba(255,255,255,14); color: #3a4a5a;
             }
         """)
 
