@@ -3299,7 +3299,7 @@ class _SyncConfirmDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Confirmar sincronização")
         self.setModal(True)
-        self.setFixedSize(520, 220)
+        self.setFixedSize(540, 240)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
         self._build_ui(entry)
         self._apply_styles()
@@ -3311,15 +3311,15 @@ class _SyncConfirmDialog(QDialog):
 
         header = QFrame()
         header.setObjectName("SyncHeader")
-        header.setFixedHeight(48)
+        header.setFixedHeight(56)
         h_layout = QHBoxLayout(header)
-        h_layout.setContentsMargins(18, 0, 16, 0)
+        h_layout.setContentsMargins(20, 0, 18, 0)
 
         icon = QLabel()
-        icon.setFixedSize(28, 28)
+        icon.setFixedSize(36, 36)
         icon.setAlignment(Qt.AlignCenter)
-        icon.setPixmap(qta.icon("mdi6.sync", color="#23a6ff").pixmap(18, 18))
-        icon.setStyleSheet("QLabel { background: rgba(35,166,255,40); border-radius: 8px; }")
+        icon.setPixmap(qta.icon("mdi6.sync", color="#9bf0bd").pixmap(22, 22))
+        icon.setStyleSheet("QLabel { background: rgba(74,222,128,40); border-radius: 9px; }")
 
         lbl = QLabel("Sincronizar Snapshot")
         lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
@@ -3337,8 +3337,8 @@ class _SyncConfirmDialog(QDialog):
         body = QFrame()
         body.setObjectName("SyncBody")
         b_layout = QVBoxLayout(body)
-        b_layout.setContentsMargins(24, 18, 24, 20)
-        b_layout.setSpacing(10)
+        b_layout.setContentsMargins(28, 22, 28, 22)
+        b_layout.setSpacing(12)
 
         warn = QLabel("O snapshot será atualizado com o estado atual do sistema. Apenas arquivos modificados serão transferidos.")
         warn.setWordWrap(True)
@@ -3348,8 +3348,8 @@ class _SyncConfirmDialog(QDialog):
         snap_label = QLabel(entry.path.name)
         snap_label.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
         snap_label.setStyleSheet(
-            "color: #23a6ff; background: rgba(35,166,255,20); "
-            "border: 1px solid rgba(35,166,255,60); border-radius: 6px; padding: 4px 10px;"
+            "color: #23a6ff; background: #101115; "
+            "border-radius: 6px; padding: 10px 12px;"
         )
 
         btn_row = QHBoxLayout()
@@ -3357,12 +3357,12 @@ class _SyncConfirmDialog(QDialog):
 
         btn_cancel = QPushButton("Cancelar")
         btn_cancel.setObjectName("SyncBtnCancel")
-        btn_cancel.setFixedWidth(110)
+        btn_cancel.setFixedSize(110, 40)
         btn_cancel.clicked.connect(self.reject)
 
         btn_confirm = QPushButton("Sincronizar")
         btn_confirm.setObjectName("SyncBtnConfirm")
-        btn_confirm.setFixedWidth(120)
+        btn_confirm.setFixedSize(130, 40)
         btn_confirm.clicked.connect(self.accept)
 
         btn_row.addStretch()
@@ -3370,6 +3370,7 @@ class _SyncConfirmDialog(QDialog):
         btn_row.addWidget(btn_confirm)
 
         b_layout.addWidget(warn)
+        b_layout.addSpacing(6)
         b_layout.addWidget(snap_label)
         b_layout.addStretch()
         b_layout.addLayout(btn_row)
@@ -3379,16 +3380,20 @@ class _SyncConfirmDialog(QDialog):
 
     def _apply_styles(self) -> None:
         self.setStyleSheet("""
+            QDialog {
+                background: #131417;
+                border-radius: 14px;
+            }
             QFrame#SyncHeader {
-                background: rgba(8, 20, 40, 255);
-                border-bottom: 1px solid rgba(35, 166, 255, 100);
-                border-top-left-radius: 12px;
-                border-top-right-radius: 12px;
+                background: rgba(74, 222, 128, 35);
+                border-bottom: 1px solid rgba(74, 222, 128, 25);
+                border-top-left-radius: 14px;
+                border-top-right-radius: 14px;
             }
             QFrame#SyncBody {
-                background: #080c14;
-                border-bottom-left-radius: 12px;
-                border-bottom-right-radius: 12px;
+                background: #131417;
+                border-bottom-left-radius: 14px;
+                border-bottom-right-radius: 14px;
             }
             QPushButton#SyncClose {
                 background: transparent;
@@ -3402,31 +3407,29 @@ class _SyncConfirmDialog(QDialog):
                 color: #ff8888;
             }
             QPushButton#SyncBtnCancel {
-                background: rgba(10, 15, 25, 230);
-                border: 1px solid rgba(31, 92, 255, 120);
-                border-radius: 8px;
+                background: rgba(255,255,255,6);
+                border: 1px solid rgba(255,255,255,18);
+                border-radius: 10px;
                 color: #ecf4ff;
                 font-family: "DejaVu Sans Mono";
                 font-size: 11px;
-                padding: 6px 0;
             }
             QPushButton#SyncBtnCancel:hover {
                 background: rgba(23, 147, 209, 70);
                 border-color: rgba(35, 166, 255, 180);
             }
             QPushButton#SyncBtnConfirm {
-                background: rgba(31, 92, 255, 180);
-                border: 1px solid rgba(35, 166, 255, 200);
-                border-radius: 8px;
-                color: #ffffff;
+                background: rgba(74, 222, 128, 180);
+                border: 1px solid rgba(74, 222, 128, 220);
+                border-radius: 10px;
+                color: #08111d;
                 font-family: "DejaVu Sans Mono";
                 font-size: 11px;
                 font-weight: 700;
-                padding: 6px 0;
             }
             QPushButton#SyncBtnConfirm:hover {
-                background: rgba(35, 166, 255, 220);
-                border-color: rgba(70, 188, 255, 255);
+                background: rgba(94, 234, 149, 220);
+                border-color: rgba(94, 234, 149, 255);
             }
         """)
 
