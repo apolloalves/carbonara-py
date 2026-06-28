@@ -1385,7 +1385,7 @@ class _MaxLabel(QLabel):
             "QLabel { color: #c8d4e0; font-size: 14px; "
             "border-radius: 6px; background: transparent; }"
         )
-        self.setText("⬜")
+        self.setText("□")
 
     def _set_hover(self):
         self.setStyleSheet(
@@ -1408,7 +1408,7 @@ class _MaxLabel(QLabel):
                 win.resize(win._normal_size)
                 win.move(win._normal_pos)
                 win._is_maximized = False
-                self.setText("⬜")
+                self.setText("□")
             else:
                 from PySide6.QtWidgets import QApplication
                 win._normal_size = win.size()
@@ -2284,7 +2284,7 @@ class _FileBrowserDialog(QDialog):
 
         splitter = QSplitter(Qt.Horizontal)
         splitter.setHandleWidth(2)
-        splitter.setStyleSheet("QSplitter::handle { background: rgba(31,92,255,40); }")
+        splitter.setStyleSheet("QSplitter::handle { background: rgba(255,255,255,18); }")
 
         # Árvore
         self.tree = QTreeWidget()
@@ -2343,6 +2343,7 @@ class _FileBrowserDialog(QDialog):
 
         cf_l.addWidget(lbl_cf)
         cf_row = QHBoxLayout()
+        cf_row.setSpacing(8)
         cf_row.addWidget(self.btn_overwrite)
         cf_row.addWidget(self.btn_skip)
         cf_l.addLayout(cf_row)
@@ -2395,30 +2396,29 @@ class _FileBrowserDialog(QDialog):
     def _apply_styles(self):
         self.setStyleSheet("""
             QDialog {
-                background: #080c14;
-                border: 1px solid rgba(31,92,255,80);
+                background: #131417;
                 border-radius: 14px;
             }
             QFrame#FBHeader {
                 background: rgba(8,20,14,255);
-                border-bottom: 1px solid rgba(74,222,128,80);
+                border-bottom: 1px solid rgba(74,222,128,35);
                 border-top-left-radius: 14px;
                 border-top-right-radius: 14px;
             }
             QFrame#FBBreadcrumb {
                 background: rgba(6,9,16,200);
-                border-bottom: 1px solid rgba(31,92,255,40);
+                border-bottom: 1px solid rgba(255,255,255,16);
             }
             QFrame#FBBody {
-                background: #080c14;
+                background: #131417;
                 border-bottom-left-radius: 14px;
                 border-bottom-right-radius: 14px;
             }
             QFrame#FBRight { background: transparent; }
             QFrame#FBConflict {
-                background: rgba(10,15,25,180);
-                border: 1px solid rgba(31,92,255,50);
-                border-radius: 8px;
+                background: rgba(255,255,255,8);
+                border: 1px solid rgba(255,255,255,18);
+                border-radius: 10px;
             }
             QFrame#FBLogFrame { background: transparent; }
             QPushButton#FBClose {
@@ -2427,39 +2427,39 @@ class _FileBrowserDialog(QDialog):
             }
             QPushButton#FBClose:hover { background: rgba(200,60,60,60); color: #ff8888; }
             QPushButton#FBNavBtn {
-                background: rgba(10,15,25,200);
-                border: 1px solid rgba(31,92,255,80); border-radius: 6px;
+                background: rgba(255,255,255,8);
+                border: 1px solid rgba(255,255,255,18); border-radius: 8px;
             }
             QPushButton#FBNavBtn:hover {
                 background: rgba(23,147,209,70);
                 border-color: rgba(35,166,255,180);
             }
             QTreeWidget#FBTree {
-                background: rgba(6,9,16,240);
-                border: 1px solid rgba(31,92,255,55);
-                border-radius: 8px; color: #c8d4e0;
+                background: rgba(255,255,255,5);
+                border: 1px solid rgba(255,255,255,18);
+                border-radius: 10px; color: #c8d4e0;
                 font-family: "DejaVu Sans Mono"; font-size: 12px; outline: none;
             }
             QTreeWidget#FBTree::item { padding: 6px 8px; border-radius: 4px; }
             QTreeWidget#FBTree::item:hover { background: rgba(35,166,255,30); }
             QTreeWidget#FBTree::item:selected { background: rgba(35,166,255,80); color: #ecf4ff; }
             QPlainTextEdit#FBSelected {
-                background: rgba(6,9,16,200);
-                border: 1px solid rgba(31,92,255,55); border-radius: 8px;
+                background: rgba(255,255,255,5);
+                border: 1px solid rgba(255,255,255,18); border-radius: 10px;
                 color: #9aa6b2; font-family: "DejaVu Sans Mono";
                 font-size: 11px; padding: 6px;
             }
             QPlainTextEdit#FBLog {
-                background: rgba(6,9,16,200);
-                border: 1px solid rgba(31,92,255,40); border-radius: 6px;
+                background: rgba(255,255,255,5);
+                border: 1px solid rgba(255,255,255,16); border-radius: 8px;
                 color: #6b7a8d; font-family: "DejaVu Sans Mono";
                 font-size: 9px; padding: 4px;
             }
             QPushButton#FBConflictBtn {
-                background: rgba(10,15,25,200);
-                border: 1px solid rgba(31,92,255,80); border-radius: 6px;
+                background: rgba(255,255,255,8);
+                border: 1px solid rgba(255,255,255,18); border-radius: 10px;
                 color: #9aa6b2; font-family: "DejaVu Sans Mono";
-                font-size: 11px; padding: 7px 12px;
+                font-size: 11px; padding: 8px 12px;
             }
             QPushButton#FBConflictBtn:checked {
                 background: rgba(35,166,255,100);
@@ -2468,9 +2468,9 @@ class _FileBrowserDialog(QDialog):
             QPushButton#FBBtnRestore {
                 background: rgba(74,222,128,180);
                 border: 1px solid rgba(74,222,128,220);
-                border-radius: 8px; color: #08111d;
+                border-radius: 10px; color: #08111d;
                 font-family: "DejaVu Sans Mono"; font-size: 13px;
-                font-weight: 700; padding: 10px 0;
+                font-weight: 700; padding: 11px 0;
             }
             QPushButton#FBBtnRestore:hover { background: rgba(94,234,149,220); }
             QPushButton#FBBtnRestore:disabled {
@@ -2478,7 +2478,7 @@ class _FileBrowserDialog(QDialog):
                 border-color: rgba(74,222,128,40); color: #3a4a3a;
             }
             QProgressBar#FBProgressBar {
-                background: rgba(31,92,255,20); border: none; border-radius: 2px;
+                background: rgba(255,255,255,10); border: none; border-radius: 2px;
             }
             QProgressBar#FBProgressBar::chunk {
                 background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
