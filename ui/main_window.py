@@ -405,7 +405,7 @@ class HeroCard(QFrame):
         status_row.addStretch()
         left_col.addLayout(status_row)
 
-        title = QLabel("Backups")
+        title = QLabel("Timeshift")
         title.setFont(QFont(FONT_FAMILY, 18, QFont.Bold))
         title.setStyleSheet(f"color: {TEXT};")
         left_col.addWidget(title)

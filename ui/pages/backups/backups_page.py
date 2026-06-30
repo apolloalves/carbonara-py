@@ -59,7 +59,7 @@ class BackupsPage(QWidget):
         header_layout.setContentsMargins(0, 0, 0, 0)
         header_layout.setSpacing(2)
 
-        title = QLabel("Backups")
+        title = QLabel("Timeshift")
         title.setFont(QFont("DejaVu Sans Mono", 22, QFont.Bold))
         title.setStyleSheet("color: #23a6ff;")
 
