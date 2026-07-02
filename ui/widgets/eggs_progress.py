@@ -9,15 +9,15 @@ from PySide6.QtWidgets import (
 )
 
 
-class BackupProgressDialog(QDialog):
-    def __init__(self, title: str = "Carbonara Backup", preparing_text: str = "Preparando snapshot...", icon_glyph: str = "mdi6.harddisk", parent=None):
+class EggsProgressDialog(QDialog):
+    def __init__(self, title: str = "Penguin's Eggs", preparing_text: str = "Iniciando...", icon_glyph: str = "mdi6.egg-outline", parent=None):
         super().__init__(parent)
         self.setWindowTitle(title)
         self._preparing_text = preparing_text
         self._icon_glyph = icon_glyph
         self.setModal(True)
-        self.setMinimumSize(900, 640)
-        self.resize(960, 700)
+        self.setMinimumSize(1000, 700)
+        self.resize(1060, 760)
 
         # Remove titlebar nativa — usamos header customizado
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
@@ -35,6 +35,13 @@ class BackupProgressDialog(QDialog):
         self._elapsed_timer.setInterval(1000)
         self._elapsed_timer.timeout.connect(self._tick_elapsed)
 
+        # Buffer de log — descarrega no widget a cada 300ms para não afogar o event loop
+        self._log_buffer: list[str] = []
+        self._log_flush_timer = QTimer(self)
+        self._log_flush_timer.setInterval(300)
+        self._log_flush_timer.timeout.connect(self._flush_log_buffer)
+        self._log_flush_timer.start()
+
         # Para drag da janela sem titlebar
         self._drag_pos = None
 
@@ -44,7 +51,7 @@ class BackupProgressDialog(QDialog):
         # Transparência do log — aplicada APÓS o stylesheet para não ser sobrescrita
         from PySide6.QtGui import QPalette, QColor
         palette = self.log_view.palette()
-        palette.setColor(QPalette.Base, QColor(0, 0, 0, 50))
+        palette.setColor(QPalette.Base, QColor(0, 0, 0, 40))
         self.log_view.setPalette(palette)
 
     def showEvent(self, event):
@@ -194,7 +201,7 @@ class BackupProgressDialog(QDialog):
 
     def _apply_styles(self) -> None:
         self.setStyleSheet("""
-            BackupProgressDialog {
+            EggsProgressDialog {
                 background: #131417;
                 border-radius: 14px;
             }
@@ -221,7 +228,7 @@ class BackupProgressDialog(QDialog):
             QPushButton#HeaderClose {
                 background: transparent;
                 border: none;
-                color: #9aa6b2;
+                color: #dce6f0;
                 font-size: 15px;
                 border-radius: 6px;
             }
@@ -251,7 +258,7 @@ class BackupProgressDialog(QDialog):
             }
 
             QLabel#ProgressCurrentFile {
-                color: #9aa6b2;
+                color: #dce6f0;
                 font-family: "DejaVu Sans Mono";
                 font-size: 10px;
                 font-style: italic;
@@ -289,7 +296,7 @@ class BackupProgressDialog(QDialog):
             QPlainTextEdit#BackupLog {
                 border: 1px solid rgba(255,255,255,16);
                 border-radius: 10px;
-                color: #9aa6b2;
+                color: #dce6f0;
                 font-family: "DejaVu Sans Mono";
                 font-size: 12px;
                 line-height: 180%;
@@ -396,44 +403,39 @@ class BackupProgressDialog(QDialog):
             self.btn_cancel.setText(f"Cancelar ({self._cancel_countdown}s) — clique p/ confirmar")
 
     def _do_cancel(self) -> None:
-        """Mata os processos rsync via PID e remove snapshots incompletos em background."""
+        """Mata o processo eggs produce via PID e limpa /home/eggs com segurança."""
         self.btn_cancel.setEnabled(False)
         self.btn_cancel.setText("Cancelando...")
-        self.set_status("Interrompendo backup...")
+        self.set_status("Interrompendo eggs produce...")
         self.set_current_file("—")
+        self._had_failure = True
 
-        # Animação de pontos enquanto limpa
-        self._cancel_dots = 0
-        self._cancel_anim = QTimer(self)
-        self._cancel_anim.setInterval(400)
-        self._cancel_anim.timeout.connect(self._cancel_anim_tick)
-        self._cancel_anim.start()
-
-        # Mata os processos rsync via SIGKILL — não bloqueia, não usa wait()
+        # Cancela todos os ShellWorkers ativos
         for worker in list(self._workers):
-            worker.kill()
+            try:
+                worker.cancel()
+            except Exception:
+                pass
         self._workers.clear()
 
-        # Limpeza de disco em thread separada — rmtree pode demorar
+        # Limpeza em thread separada (umount + rmtree pode demorar)
         from PySide6.QtCore import QThread, Signal as QSignal
+        from core.eggs.eggs import _safe_remove_eggs_dir
 
-        class _CleanupThread(QThread):
-            log_msg = QSignal(str)
-
-            def __init__(self, dialog):
-                super().__init__(dialog)
-                self._dialog = dialog
-                self._removed: list[str] = []
+        class _EggsCleanup(QThread):
+            done_sig = QSignal()
 
             def run(self):
-                self._removed = self._dialog._cleanup_incomplete_snapshots()
-                for path in self._removed:
-                    self.log_msg.emit(f"Removido snapshot incompleto: {path}")
+                _safe_remove_eggs_dir()
+                self.done_sig.emit()
 
-        self._cleanup_thread = _CleanupThread(self)
-        self._cleanup_thread.log_msg.connect(self.append_log)
-        self._cleanup_thread.finished.connect(self._on_cleanup_done)
+        self._cleanup_thread = _EggsCleanup(self)
+        self._cleanup_thread.done_sig.connect(self._on_eggs_cleanup_done)
         self._cleanup_thread.start()
+
+    def _on_eggs_cleanup_done(self) -> None:
+        self.append_log("— Operação cancelada. Diretório /home/eggs removido. —")
+        self.set_running(False)
 
     def _cancel_anim_tick(self) -> None:
         self._cancel_dots = (self._cancel_dots + 1) % 4
@@ -504,34 +506,49 @@ class BackupProgressDialog(QDialog):
             self._workers.remove(worker)
 
     def append_log(self, text: str) -> None:
+        """Enfileira a linha no buffer — o flush acontece a cada 300ms via QTimer."""
+        self._log_buffer.append(text)
+
+    def _flush_log_buffer(self) -> None:
+        """Descarrega o buffer no QPlainTextEdit de uma vez — chamado pelo QTimer."""
+        if not self._log_buffer:
+            return
+
         from PySide6.QtGui import QTextCharFormat, QColor, QTextCursor
 
-        # Paleta por tipo de linha
-        if any(text.startswith(p) for p in ("ERRO:", "ERRO ", "✗")):
-            color = "#ff8888"
-        elif any(text.startswith(p) for p in ("✓", "--- ", "=== ")):
-            color = "#9bf0bd"
-        elif any(text.startswith(p) for p in ("AVISO:", "AVISO ", "  ✗")):
-            color = "#ffb86b"
-        elif text.startswith("$"):
-            color = "#8fd4ff"
-        elif text.startswith("Copiando:"):
-            color = "#c8d4e0"       # branco suave — legível mas não dominante
-        elif text.startswith("Tempo decorrido:"):
-            color = "#6b7a8d"
-        elif not text.strip():
-            color = "#000000"
-        else:
-            color = "#9aa6b2"
-
-        char_fmt = QTextCharFormat()
-        char_fmt.setForeground(QColor(color))
+        lines = self._log_buffer[:]
+        self._log_buffer.clear()
 
         cursor = self.log_view.textCursor()
         cursor.movePosition(QTextCursor.End)
-        cursor.insertText(("\n" if cursor.position() > 0 else "") + text, char_fmt)
-        self.log_view.setTextCursor(cursor)
 
+        for text in lines:
+            if any(text.startswith(p) for p in ("ERRO:", "ERRO ", "✗")):
+                color = "#ff8888"
+            elif any(text.startswith(p) for p in ("✓", "--- ", "=== ")):
+                color = "#9bf0bd"
+            elif text.startswith("INFO:"):
+                color = "#8fd4ff"
+            elif text.startswith("INICIANDO:"):
+                color = "#ffda6b"
+            elif any(text.startswith(p) for p in ("AVISO:", "AVISO ", "  ✗")):
+                color = "#ffb86b"
+            elif text.startswith("$"):
+                color = "#8fd4ff"
+            elif text.startswith("Copiando:"):
+                color = "#c8d4e0"
+            elif text.startswith("Tempo decorrido:"):
+                color = "#6b7a8d"
+            elif not text.strip():
+                color = "#000000"
+            else:
+                color = "#dce6f0"
+
+            fmt = QTextCharFormat()
+            fmt.setForeground(QColor(color))
+            cursor.insertText(("\n" if cursor.position() > 0 else "") + text, fmt)
+
+        self.log_view.setTextCursor(cursor)
         sb = self.log_view.verticalScrollBar()
         sb.setValue(sb.maximum())
 

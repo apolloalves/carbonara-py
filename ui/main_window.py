@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui.pages.backups.backups_page import BackupsPage
+from ui.pages.eggs.eggs_page import EggsPage
 from ui.pages.disks.disks_page import DisksPage
 from core.system.sysinfo import get_system_info
 
@@ -70,6 +71,7 @@ MENU_ENTRIES = [
     MenuEntry(2, "Network", "Diagnose and configure network settings", "Wifi & links", "mdi6.wifi"),
     MenuEntry(3, "Packages", "Manage packages, mirrors and updates", "Mirrors & updates", "mdi6.package-variant"),
     MenuEntry(4, "Backups", "Create, restore and verify snapshots", "Create & restore snapshots", "mdi6.harddisk"),
+    MenuEntry(9, "Penguin's Eggs", "Create, check and install live ISOs", "ISO wizard", "mdi6.egg-outline"),
     MenuEntry(5, "Maintenance", "Clean caches, logs and system junk", "Clean caches & junk", "mdi6.broom"),
     MenuEntry(6, "Performance", "Optimize boot, swap and system responsiveness", "Boot & swap tuning", "mdi6.speedometer"),
     MenuEntry(7, "Services", "Inspect, enable and disable system services", "Systemd units", "mdi6.cog-outline"),
@@ -641,6 +643,17 @@ class BackupsHost(QWidget):
         root.addWidget(self.page, 1)
 
 
+class EggsHost(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setStyleSheet("QWidget { background: transparent; }")
+        root = QVBoxLayout(self)
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(0)
+        self.page = EggsPage(self)
+        root.addWidget(self.page, 1)
+
+
 class DisksHost(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -794,6 +807,7 @@ class ExitConfirmDialog(QDialog):
 
 class MenuPage(QWidget):
     backups_requested = Signal()
+    eggs_requested = Signal()
     disks_requested = Signal()
     exit_requested = Signal()
     exit_requested_confirm = Signal()
@@ -963,6 +977,9 @@ class MenuPage(QWidget):
         if entry.number == 4:
             self.backups_requested.emit()
             return
+        if entry.number == 9:
+            self.eggs_requested.emit()
+            return
         if entry.title == "Exit":
             self.exit_requested.emit()
 
@@ -1043,20 +1060,24 @@ class MainWindow(QMainWindow):
 
         self.menu_page = MenuPage(self)
         self.backups_host = BackupsHost(self)
+        self.eggs_host = EggsHost(self)
         self.disks_host = DisksHost(self)
 
         self.stack.addWidget(self.menu_page)
         self.stack.addWidget(self.backups_host)
+        self.stack.addWidget(self.eggs_host)
         self.stack.addWidget(self.disks_host)
 
         root.addWidget(self.titlebar)
         root.addWidget(self.stack, 1)
 
         self.menu_page.backups_requested.connect(self.show_backups)
+        self.menu_page.eggs_requested.connect(self.show_eggs)
         self.menu_page.disks_requested.connect(self.show_disks)
         self.menu_page.exit_requested.connect(self.close)
         self.menu_page.exit_requested_confirm.connect(self._show_exit_dialog)
         self.backups_host.page.back_requested.connect(self.show_menu)
+        self.eggs_host.page.back_requested.connect(self.show_menu)
         self.disks_host.page.back_requested.connect(self.show_menu)
 
         self.stack.setCurrentWidget(self.menu_page)
@@ -1076,11 +1097,16 @@ class MainWindow(QMainWindow):
     def show_backups(self):
         self.stack.setCurrentWidget(self.backups_host)
 
+    def show_eggs(self):
+        self.stack.setCurrentWidget(self.eggs_host)
+
     def show_disks(self):
         self.stack.setCurrentWidget(self.disks_host)
 
     def keyPressEvent(self, event: QKeyEvent):
-        if event.key() == Qt.Key_Escape and self.stack.currentWidget() in (self.backups_host, self.disks_host):
+        if event.key() == Qt.Key_Escape and self.stack.currentWidget() in (
+            self.backups_host, self.eggs_host, self.disks_host
+        ):
             self.show_menu()
             return
         super().keyPressEvent(event)
