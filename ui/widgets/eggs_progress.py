@@ -48,12 +48,6 @@ class EggsProgressDialog(QDialog):
         self._build_ui()
         self._apply_styles()
 
-        # Transparência do log — aplicada APÓS o stylesheet para não ser sobrescrita
-        from PySide6.QtGui import QPalette, QColor
-        palette = self.log_view.palette()
-        palette.setColor(QPalette.Base, QColor(0, 0, 0, 40))
-        self.log_view.setPalette(palette)
-
     def showEvent(self, event):
         """Centraliza na tela primária ao exibir — evita aparecer no monitor errado."""
         super().showEvent(event)
@@ -294,6 +288,7 @@ class EggsProgressDialog(QDialog):
             }
 
             QPlainTextEdit#BackupLog {
+                background: rgba(255, 255, 255, 8);
                 border: 1px solid rgba(255,255,255,16);
                 border-radius: 10px;
                 color: #dce6f0;
@@ -345,6 +340,7 @@ class EggsProgressDialog(QDialog):
                 color: #c8d4e0;
                 font-family: "DejaVu Sans Mono";
                 font-size: 11px;
+                padding: 8px 24px;
             }
             QPushButton#BtnCancel:hover {
                 background: rgba(200, 60, 60, 40);
@@ -406,7 +402,7 @@ class EggsProgressDialog(QDialog):
         """Mata o processo eggs produce via PID e limpa /home/eggs com segurança."""
         self.btn_cancel.setEnabled(False)
         self.btn_cancel.setText("Cancelando...")
-        self.set_status("Interrompendo eggs produce...")
+        self.set_status("Cancelando operação...")
         self.set_current_file("—")
         self._had_failure = True
 
@@ -434,7 +430,9 @@ class EggsProgressDialog(QDialog):
         self._cleanup_thread.start()
 
     def _on_eggs_cleanup_done(self) -> None:
-        self.append_log("— Operação cancelada. Diretório /home/eggs removido. —")
+        self.append_log("--- Operação cancelada. Diretório /home/eggs removido. ---")
+        self.lbl_status.setStyleSheet("color: #ffb86b; font-weight: bold;")
+        self.lbl_status.setText("Operação cancelada pelo usuário.")
         self.set_running(False)
 
     def _cancel_anim_tick(self) -> None:
@@ -580,15 +578,15 @@ class EggsProgressDialog(QDialog):
             self._show_result_inline()
 
     def _show_result_inline(self) -> None:
-        """Exibe o resultado (sucesso ou falha) diretamente no dialog, sem abrir nova janela."""
         elapsed = self.lbl_elapsed.text()
-        status = self.lbl_status.text() or ("Operação concluída com sucesso." if not self._had_failure else "Operação concluída com erros.")
+        status = self.lbl_status.text()
 
-        self.append_log("")
         if self._had_failure:
-            self.lbl_status.setStyleSheet("color: #ff8888; font-weight: bold;")
-            self.append_log(f"ERRO: {status}")
-            self.append_log(f"Tempo decorrido: {elapsed}")
+            # Só exibe ERRO se não foi cancelamento intencional (status já foi setado no cancel)
+            if "cancelada" not in status.lower():
+                self.lbl_status.setStyleSheet("color: #ff8888; font-weight: bold;")
+                self.append_log(f"ERRO: {status}")
+                self.append_log(f"Tempo decorrido: {elapsed}")
         else:
             self.lbl_status.setStyleSheet("color: #9bf0bd; font-weight: bold;")
             self.append_log(f"✓ {status}")
