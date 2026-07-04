@@ -17,6 +17,42 @@ from PySide6.QtWidgets import (
 )
 
 
+class _StatCard(QFrame):
+    """Card de resumo (somente leitura) para a faixa de status do topo."""
+
+    def __init__(self, label: str, value: str, color: str = "#dce6f0", parent=None):
+        super().__init__(parent)
+        self.setObjectName("EggsStatCard")
+        self.setMinimumHeight(64)
+        self.setStyleSheet("""
+            QFrame#EggsStatCard {
+                background: rgba(255, 255, 255, 5);
+                border: 1px solid rgba(255, 255, 255, 8);
+                border-radius: 10px;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(4)
+
+        lbl = QLabel(label)
+        lbl.setFont(QFont("DejaVu Sans Mono", 8))
+        lbl.setStyleSheet("color: #6b7a8d; background: transparent; border: none;")
+
+        self.value_lbl = QLabel(value)
+        self.value_lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+        self.value_lbl.setStyleSheet(f"color: {color}; background: transparent; border: none;")
+
+        layout.addWidget(lbl)
+        layout.addWidget(self.value_lbl)
+
+    def set_value(self, value: str, color: str | None = None) -> None:
+        self.value_lbl.setText(value)
+        if color:
+            self.value_lbl.setStyleSheet(f"color: {color}; background: transparent; border: none;")
+
+
 class _EggsOptionButton(QFrame):
     """Card de ação clicável, no mesmo padrão visual dos cards de Restore."""
 
@@ -26,7 +62,7 @@ class _EggsOptionButton(QFrame):
         super().__init__(parent)
         self.setCursor(Qt.PointingHandCursor)
         self.setObjectName("EggsOptionBtn")
-        self.setFixedHeight(72)
+        self.setFixedHeight(88)
         self.setStyleSheet(f"""
             QFrame#EggsOptionBtn {{
                 background: rgba(255, 255, 255, 5);
@@ -40,23 +76,23 @@ class _EggsOptionButton(QFrame):
         """)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(16, 0, 16, 0)
+        layout.setContentsMargins(18, 0, 18, 0)
         layout.setSpacing(14)
         layout.setAlignment(Qt.AlignVCenter)
 
         ico_lbl = QLabel()
-        ico_lbl.setFixedSize(42, 42)
+        ico_lbl.setFixedSize(46, 46)
         ico_lbl.setAlignment(Qt.AlignCenter)
-        ico_lbl.setPixmap(qta.icon(glyph, color=color).pixmap(22, 22))
+        ico_lbl.setPixmap(qta.icon(glyph, color=color).pixmap(24, 24))
         h = color.lstrip("#")
         r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
         ico_lbl.setStyleSheet(
             f"QLabel {{ background: rgba({r},{g},{b},40); "
-            f"border-radius: 8px; border: 1px solid rgba({r},{g},{b},90); }}"
+            f"border-radius: 10px; border: 1px solid rgba({r},{g},{b},90); }}"
         )
 
         text = QVBoxLayout()
-        text.setSpacing(1)
+        text.setSpacing(2)
         text.setContentsMargins(0, 0, 0, 0)
         text.setAlignment(Qt.AlignVCenter)
 
@@ -65,7 +101,7 @@ class _EggsOptionButton(QFrame):
         title_row.setContentsMargins(0, 0, 0, 0)
 
         t = QLabel(title)
-        t.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+        t.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
         t.setStyleSheet(f"color: {color}; background: transparent; border: none;")
         title_row.addWidget(t)
 
@@ -75,7 +111,7 @@ class _EggsOptionButton(QFrame):
             badge_lbl.setStyleSheet(
                 "color: #ff9966; background: rgba(255,153,102,22); "
                 "border: 1px solid rgba(255,153,102,70); border-radius: 4px; "
-                "padding: 1px 6px;"
+                "padding: 1px 7px;"
             )
             title_row.addWidget(badge_lbl)
 
@@ -171,9 +207,37 @@ class EggsPage(QWidget):
         h_layout.addLayout(title_row)
         h_layout.addWidget(subtitle)
 
+        # ── Faixa de status ──────────────────────────────────────────────
+        from core.eggs.eggs import get_dashboard_stats
+
+        stats = get_dashboard_stats()
+
+        stats_row = QHBoxLayout()
+        stats_row.setSpacing(10)
+
+        self.stat_last_iso = _StatCard("ÚLTIMA ISO", stats["last_iso"] or "nenhuma gerada")
+        self.stat_ventoy = _StatCard(
+            "VENTOY",
+            f"{stats['ventoy_free_gb']:.1f} GB livres" if stats["ventoy_free_gb"] is not None else "não montado",
+            color="#9bf0bd" if stats["ventoy_free_gb"] is not None else "#6b7a8d",
+        )
+        self.stat_installed = _StatCard(
+            "PENGUINS-EGGS",
+            "instalado" if stats["eggs_installed"] else "não instalado",
+            color="#9bf0bd" if stats["eggs_installed"] else "#ffb86b",
+        )
+
+        stats_row.addWidget(self.stat_last_iso, 1)
+        stats_row.addWidget(self.stat_ventoy, 1)
+        stats_row.addWidget(self.stat_installed, 1)
+
         # ── Cards de ação ────────────────────────────────────────────────
-        cards = QVBoxLayout()
+        from PySide6.QtWidgets import QGridLayout
+
+        cards = QGridLayout()
         cards.setSpacing(10)
+        cards.setColumnStretch(0, 1)
+        cards.setColumnStretch(1, 1)
 
         btn_create = _EggsOptionButton(
             glyph="mdi6.egg-easter",
@@ -223,15 +287,32 @@ class EggsPage(QWidget):
         )
         btn_install.clicked.connect(self._on_install)
 
-        cards.addWidget(btn_create)
-        cards.addWidget(btn_check)
-        cards.addWidget(btn_broot)
-        cards.addWidget(btn_nautilus)
-        cards.addWidget(btn_install)
-        cards.addStretch()
+        cards.addWidget(btn_create, 0, 0)
+        cards.addWidget(btn_check, 0, 1)
+        cards.addWidget(btn_broot, 1, 0)
+        cards.addWidget(btn_nautilus, 1, 1)
+        cards.addWidget(btn_install, 2, 0)
+        # (2, 1) fica livre — reservado para o próximo card que for adicionado aqui
 
         root.addWidget(header)
-        root.addLayout(cards, 1)
+        root.addLayout(stats_row)
+        root.addSpacing(14)
+        root.addLayout(cards)
+        root.addStretch(1)
+
+    def refresh_stats(self) -> None:
+        from core.eggs.eggs import get_dashboard_stats
+
+        stats = get_dashboard_stats()
+        self.stat_last_iso.set_value(stats["last_iso"] or "nenhuma gerada")
+        self.stat_ventoy.set_value(
+            f"{stats['ventoy_free_gb']:.1f} GB livres" if stats["ventoy_free_gb"] is not None else "não montado",
+            color="#9bf0bd" if stats["ventoy_free_gb"] is not None else "#6b7a8d",
+        )
+        self.stat_installed.set_value(
+            "instalado" if stats["eggs_installed"] else "não instalado",
+            color="#9bf0bd" if stats["eggs_installed"] else "#ffb86b",
+        )
 
     # ── Ações ────────────────────────────────────────────────────────────
 
@@ -279,6 +360,7 @@ dialog.exec()
         self._runner = _Runner(cmd)
 
         def on_done(returncode, output):
+            self.refresh_stats()
             if returncode == 126 or "dismissed" in output.lower():
                 return
             if returncode != 0:

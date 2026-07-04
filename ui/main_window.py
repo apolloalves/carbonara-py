@@ -853,12 +853,11 @@ class MenuPage(QWidget):
         self.hero_backups.clicked.connect(self.backups_requested.emit)
         hero_row.addWidget(self.hero_backups, 14)
 
-        self.mid_packages = MidCard(
-            "mdi6.package-variant", "Packages", "Mirrors & updates",
-            badge_text="12 updates", badge_color=ACCENT_AMBER,
+        self.mid_eggs = MidCard(
+            "mdi6.egg-outline", "Penguin's Eggs", "ISO wizard",
         )
-        self.mid_packages.clicked.connect(lambda: self._go_to(3))
-        hero_row.addWidget(self.mid_packages, 10)
+        self.mid_eggs.clicked.connect(lambda: self._go_to(9))
+        hero_row.addWidget(self.mid_eggs, 10)
 
         self.mid_services = MidCard(
             "mdi6.cog-outline", "Services", "Systemd units",

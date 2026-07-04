@@ -21,6 +21,35 @@ VENTOY_DEVICE = "/dev/sdd1"
 MDSATA_DEVICE = "/dev/sdd3"
 
 
+def get_dashboard_stats() -> dict:
+    """Coleta dados leves para o resumo do topo da tela — não exige root."""
+    stats = {
+        "last_iso": None,
+        "ventoy_free_gb": None,
+        "eggs_installed": False,
+    }
+
+    try:
+        if VENTOY.exists() and VENTOY.is_mount():
+            isos = sorted(VENTOY.glob("*.iso"), key=lambda p: p.stat().st_mtime, reverse=True)
+            if isos:
+                stats["last_iso"] = isos[0].name
+            st = os.statvfs(str(VENTOY))
+            stats["ventoy_free_gb"] = (st.f_bavail * st.f_frsize) / (1024 ** 3)
+    except Exception:
+        pass
+
+    try:
+        stats["eggs_installed"] = subprocess.run(
+            ["pacman", "-Q", "penguins-eggs"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        ).returncode == 0
+    except Exception:
+        pass
+
+    return stats
+
+
 def _safe_remove_eggs_dir() -> None:
     """Desmonta todos os bind mounts dentro de /home/eggs antes de remover o diretório."""
     if not EGGS_DIRECTORY.exists():
@@ -353,6 +382,13 @@ def create_eggs(dialog, parent=None) -> None:
             _finish(dialog, True, "ISO gerada, mas não encontrada para mover.", "")
 
     def on_fail(msg: str) -> None:
+        if getattr(dialog, '_cancelled', False) or getattr(worker, '_cancelled', False):
+            dialog.set_current_file("—")
+            dialog.progress.setRange(0, 100)
+            dialog.progress.setValue(0)
+            dialog.set_running(False)
+            dialog.btn_close.setEnabled(True)
+            return
         dialog.append_log(f"ERRO: {msg}")
         _finish(dialog, False, "", "Falha ao gerar ISO.")
 
@@ -462,6 +498,13 @@ def install_eggs(dialog, parent=None) -> None:
             run_next(index + 1)
 
         def on_fail(msg: str) -> None:
+            if getattr(dialog, '_cancelled', False) or getattr(worker, '_cancelled', False):
+                dialog.set_current_file("—")
+                dialog.progress.setRange(0, 100)
+                dialog.progress.setValue(0)
+                dialog.set_running(False)
+                dialog.btn_close.setEnabled(True)
+                return
             dialog.append_log(f"ERRO: {msg}")
             _finish(dialog, False, "", "Falha na instalação.")
 
@@ -476,6 +519,12 @@ def install_eggs(dialog, parent=None) -> None:
 
 def open_file_manager(kind: str = "nautilus") -> None:
     """Abre o diretório de saída final (Ventoy) no file manager escolhido."""
+    for device, mountpoint in ((MDSATA_DEVICE, MDSATA), (VENTOY_DEVICE, VENTOY)):
+        try:
+            ensure_mounted(device, mountpoint)
+        except Exception:
+            pass  # segue com o fallback abaixo (MDSATA/FILEPATH) se não puder montar
+
     # Prioridade: VENTOY (destino final da ISO), depois MDSATA_EGGS, depois FILEPATH
     target = None
     for candidate in (VENTOY, MDSATA_EGGS, FILEPATH):
@@ -491,13 +540,39 @@ def open_file_manager(kind: str = "nautilus") -> None:
         raise RuntimeError("Nenhum diretório de saída acessível encontrado (Ventoy/MDSATA/eggs).")
 
     if kind == "broot":
-        for term in ("gnome-terminal", "kgx", "x-terminal-emulator", "xterm"):
+        if not shutil.which("broot"):
+            raise RuntimeError("broot não está instalado (ou não está no PATH).")
+
+        broot_cmd_str = " ".join(["broot", "-s", "-p", "-d", "--sort-by-date", f"'{target}'"])
+        shell_wrapper = (
+            f"{broot_cmd_str}; "
+            f'st=$?; if [ $st -ne 0 ]; then echo; echo "broot saiu com erro ($st)."; '
+            f'read -p "Pressione enter para fechar..."; fi'
+        )
+        wrapped_cmd = ["bash", "-c", shell_wrapper]
+
+        terminals = [
+            ("gnome-terminal", ["gnome-terminal", "--"] + wrapped_cmd),
+            ("ptyxis", ["ptyxis", "--"] + wrapped_cmd),
+            ("kgx", ["kgx", "-e", " ".join(wrapped_cmd)]),
+            ("konsole", ["konsole", "-e"] + wrapped_cmd),
+            ("xfce4-terminal", ["xfce4-terminal", "-e", " ".join(wrapped_cmd)]),
+            ("terminator", ["terminator", "-e", " ".join(wrapped_cmd)]),
+            ("tilix", ["tilix", "-e", " ".join(wrapped_cmd)]),
+            ("alacritty", ["alacritty", "-e"] + wrapped_cmd),
+            ("foot", ["foot"] + wrapped_cmd),
+            ("x-terminal-emulator", ["x-terminal-emulator", "-e", " ".join(wrapped_cmd)]),
+            ("xterm", ["xterm", "-e", " ".join(wrapped_cmd)]),
+        ]
+        for term, cmd in terminals:
             if shutil.which(term):
-                if term == "gnome-terminal":
-                    subprocess.Popen([term, "--", "broot", str(target)])
-                else:
-                    subprocess.Popen([term, "-e", f"broot {target}"])
+                subprocess.Popen(cmd)
                 return
-        subprocess.Popen(["broot", str(target)])
+
+        raise RuntimeError(
+            "Nenhum emulador de terminal encontrado (gnome-terminal, ptyxis, kgx, "
+            "konsole, xfce4-terminal, terminator, tilix, alacritty, foot, xterm). "
+            "Instale um deles para usar o broot."
+        )
     else:
         subprocess.Popen(["xdg-open", str(target)])

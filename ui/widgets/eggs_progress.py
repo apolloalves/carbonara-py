@@ -47,6 +47,7 @@ class EggsProgressDialog(QDialog):
 
         self._build_ui()
         self._apply_styles()
+        self.log_view.viewport().setStyleSheet("background: rgba(0, 0, 0, 60);")
 
     def showEvent(self, event):
         """Centraliza na tela primária ao exibir — evita aparecer no monitor errado."""
@@ -288,7 +289,7 @@ class EggsProgressDialog(QDialog):
             }
 
             QPlainTextEdit#BackupLog {
-                background: rgba(255, 255, 255, 8);
+                background: transparent;
                 border: 1px solid rgba(255,255,255,16);
                 border-radius: 10px;
                 color: #dce6f0;
@@ -297,6 +298,9 @@ class EggsProgressDialog(QDialog):
                 line-height: 180%;
                 padding: 10px;
                 selection-background-color: rgba(35, 166, 255, 80);
+            }
+            QPlainTextEdit#BackupLog > QWidget {
+                background: transparent;
             }
             QPlainTextEdit#BackupLog QScrollBar:vertical {
                 background: transparent;
@@ -430,10 +434,16 @@ class EggsProgressDialog(QDialog):
         self._cleanup_thread.start()
 
     def _on_eggs_cleanup_done(self) -> None:
-        self.append_log("--- Operação cancelada. Diretório /home/eggs removido. ---")
-        self.lbl_status.setStyleSheet("color: #ffb86b; font-weight: bold;")
         self.lbl_status.setText("Operação cancelada pelo usuário.")
-        self.set_running(False)
+        self.lbl_status.setStyleSheet("color: #ffb86b; font-weight: bold;")
+        self.append_log("")
+        self.append_log("--- Operação cancelada. Diretório /home/eggs removido. ---")
+        self._timer_active = False
+        self._elapsed_timer.stop()
+        self.btn_cancel.setEnabled(False)
+        self.btn_close.setEnabled(True)
+        # Forçar flush do buffer antes de finalizar
+        self._flush_log_buffer()
 
     def _cancel_anim_tick(self) -> None:
         self._cancel_dots = (self._cancel_dots + 1) % 4
