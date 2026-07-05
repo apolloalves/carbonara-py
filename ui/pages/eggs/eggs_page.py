@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
+    QGridLayout,
     QLabel,
     QFrame,
     QPushButton,
@@ -23,25 +24,27 @@ class _StatCard(QFrame):
     def __init__(self, label: str, value: str, color: str = "#dce6f0", parent=None):
         super().__init__(parent)
         self.setObjectName("EggsStatCard")
-        self.setMinimumHeight(64)
+        self.setFixedHeight(130)
         self.setStyleSheet("""
             QFrame#EggsStatCard {
                 background: rgba(255, 255, 255, 5);
                 border: 1px solid rgba(255, 255, 255, 8);
-                border-radius: 10px;
+                border-radius: 18px;
             }
         """)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 12, 16, 12)
-        layout.setSpacing(4)
+        layout.setContentsMargins(22, 20, 22, 20)
+        layout.setSpacing(6)
+        layout.setAlignment(Qt.AlignVCenter)
 
         lbl = QLabel(label)
-        lbl.setFont(QFont("DejaVu Sans Mono", 8))
+        lbl.setFont(QFont("DejaVu Sans Mono", 9))
         lbl.setStyleSheet("color: #6b7a8d; background: transparent; border: none;")
 
         self.value_lbl = QLabel(value)
-        self.value_lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+        self.value_lbl.setFont(QFont("DejaVu Sans Mono", 13, QFont.Bold))
+        self.value_lbl.setWordWrap(True)
         self.value_lbl.setStyleSheet(f"color: {color}; background: transparent; border: none;")
 
         layout.addWidget(lbl)
@@ -62,12 +65,12 @@ class _EggsOptionButton(QFrame):
         super().__init__(parent)
         self.setCursor(Qt.PointingHandCursor)
         self.setObjectName("EggsOptionBtn")
-        self.setFixedHeight(88)
+        self.setFixedHeight(110)
         self.setStyleSheet(f"""
             QFrame#EggsOptionBtn {{
                 background: rgba(255, 255, 255, 5);
                 border: 1px solid rgba(255, 255, 255, 10);
-                border-radius: 12px;
+                border-radius: 18px;
             }}
             QFrame#EggsOptionBtn:hover {{
                 background: rgba(255, 255, 255, 9);
@@ -76,49 +79,49 @@ class _EggsOptionButton(QFrame):
         """)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(18, 0, 18, 0)
-        layout.setSpacing(14)
+        layout.setContentsMargins(24, 0, 24, 0)
+        layout.setSpacing(18)
         layout.setAlignment(Qt.AlignVCenter)
 
         ico_lbl = QLabel()
-        ico_lbl.setFixedSize(46, 46)
+        ico_lbl.setFixedSize(48, 48)
         ico_lbl.setAlignment(Qt.AlignCenter)
         ico_lbl.setPixmap(qta.icon(glyph, color=color).pixmap(24, 24))
         h = color.lstrip("#")
         r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
         ico_lbl.setStyleSheet(
             f"QLabel {{ background: rgba({r},{g},{b},40); "
-            f"border-radius: 10px; border: 1px solid rgba({r},{g},{b},90); }}"
+            f"border-radius: 14px; border: 1px solid rgba({r},{g},{b},90); }}"
         )
 
         text = QVBoxLayout()
-        text.setSpacing(2)
+        text.setSpacing(4)
         text.setContentsMargins(0, 0, 0, 0)
         text.setAlignment(Qt.AlignVCenter)
 
         title_row = QHBoxLayout()
-        title_row.setSpacing(8)
+        title_row.setSpacing(10)
         title_row.setContentsMargins(0, 0, 0, 0)
 
         t = QLabel(title)
-        t.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+        t.setFont(QFont("DejaVu Sans Mono", 12, QFont.Bold))
         t.setStyleSheet(f"color: {color}; background: transparent; border: none;")
         title_row.addWidget(t)
 
         if badge:
             badge_lbl = QLabel(badge.upper())
-            badge_lbl.setFont(QFont("DejaVu Sans Mono", 7, QFont.Bold))
+            badge_lbl.setFont(QFont("DejaVu Sans Mono", 8, QFont.Bold))
             badge_lbl.setStyleSheet(
                 "color: #ff9966; background: rgba(255,153,102,22); "
-                "border: 1px solid rgba(255,153,102,70); border-radius: 4px; "
-                "padding: 1px 7px;"
+                "border: 1px solid rgba(255,153,102,70); border-radius: 5px; "
+                "padding: 2px 8px;"
             )
             title_row.addWidget(badge_lbl)
 
         title_row.addStretch()
 
         d = QLabel(desc)
-        d.setFont(QFont("DejaVu Sans Mono", 9))
+        d.setFont(QFont("DejaVu Sans Mono", 10))
         d.setWordWrap(False)
         d.setStyleSheet("color: #6b7a8d; background: transparent; border: none;")
 
@@ -159,9 +162,14 @@ class EggsPage(QWidget):
         self._build_ui()
 
     def _build_ui(self) -> None:
+        from ui.main_window import TopHeader  # import adiado — evita import circular
+
         root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(18)
+        root.setContentsMargins(32, 24, 32, 24)
+        root.setSpacing(22)
+
+        self.top_header = TopHeader()
+        root.addWidget(self.top_header)
 
         top_row = QHBoxLayout()
         top_row.setContentsMargins(0, 0, 0, 0)
@@ -213,7 +221,7 @@ class EggsPage(QWidget):
         stats = get_dashboard_stats()
 
         stats_row = QHBoxLayout()
-        stats_row.setSpacing(10)
+        stats_row.setSpacing(14)
 
         self.stat_last_iso = _StatCard("ÚLTIMA ISO", stats["last_iso"] or "nenhuma gerada")
         self.stat_ventoy = _StatCard(
@@ -232,10 +240,8 @@ class EggsPage(QWidget):
         stats_row.addWidget(self.stat_installed, 1)
 
         # ── Cards de ação ────────────────────────────────────────────────
-        from PySide6.QtWidgets import QGridLayout
-
         cards = QGridLayout()
-        cards.setSpacing(10)
+        cards.setSpacing(14)
         cards.setColumnStretch(0, 1)
         cards.setColumnStretch(1, 1)
 
@@ -364,7 +370,6 @@ dialog.exec()
             if returncode == 126 or "dismissed" in output.lower():
                 return
             if returncode != 0:
-                from PySide6.QtWidgets import QMessageBox
                 err = (output or f"exit code {returncode}").strip()
                 QMessageBox.warning(self, "Penguin's Eggs", f"Erro ao executar:\n\n{err}")
 

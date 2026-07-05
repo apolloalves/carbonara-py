@@ -4,6 +4,7 @@ import os
 import signal
 import shutil
 import subprocess
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -517,62 +518,107 @@ def install_eggs(dialog, parent=None) -> None:
 
 # ── File manager (não precisa de root) ──────────────────────────────────────
 
-def open_file_manager(kind: str = "nautilus") -> None:
-    """Abre o diretório de saída final (Ventoy) no file manager escolhido."""
+def resolve_output_target() -> Path:
+    """Monta os devices necessários (Ventoy/MDSATA) e retorna o diretório de
+    saída acessível, na ordem: Ventoy > MDSATA/ARCHEGGS > FILEPATH.
+    Levanta RuntimeError se nenhum estiver acessível."""
     for device, mountpoint in ((MDSATA_DEVICE, MDSATA), (VENTOY_DEVICE, VENTOY)):
         try:
             ensure_mounted(device, mountpoint)
         except Exception:
             pass  # segue com o fallback abaixo (MDSATA/FILEPATH) se não puder montar
 
-    # Prioridade: VENTOY (destino final da ISO), depois MDSATA_EGGS, depois FILEPATH
-    target = None
     for candidate in (VENTOY, MDSATA_EGGS, FILEPATH):
         if _is_mountpoint(candidate.parent if candidate == MDSATA_EGGS else candidate) or candidate.exists():
             try:
                 candidate.stat()
-                target = candidate
-                break
+                return candidate
             except PermissionError:
                 continue
 
-    if target is None:
-        raise RuntimeError("Nenhum diretório de saída acessível encontrado (Ventoy/MDSATA/eggs).")
+    raise RuntimeError("Nenhum diretório de saída acessível encontrado (Ventoy/MDSATA/eggs).")
 
-    if kind == "broot":
-        if not shutil.which("broot"):
-            raise RuntimeError("broot não está instalado (ou não está no PATH).")
 
-        broot_cmd_str = " ".join(["broot", "-s", "-p", "-d", "--sort-by-date", f"'{target}'"])
-        shell_wrapper = (
-            f"{broot_cmd_str}; "
-            f'st=$?; if [ $st -ne 0 ]; then echo; echo "broot saiu com erro ($st)."; '
-            f'read -p "Pressione enter para fechar..."; fi'
+def _bring_window_to_current_workspace(title: str, timeout: float = 2.5) -> None:
+    """No X11, move a janela recém-aberta (por título) pro workspace atual e dá foco.
+    Sem efeito (silencioso) se xdotool não estiver instalado ou a sessão não for X11."""
+    if not shutil.which("xdotool"):
+        return
+
+    try:
+        cur_desktop = subprocess.run(
+            ["xdotool", "get_desktop"], capture_output=True, text=True,
+        ).stdout.strip()
+    except Exception:
+        return
+
+    win_id = None
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        result = subprocess.run(
+            ["xdotool", "search", "--name", title],
+            capture_output=True, text=True,
         )
-        wrapped_cmd = ["bash", "-c", shell_wrapper]
+        ids = [w for w in result.stdout.split() if w]
+        if ids:
+            win_id = ids[-1]
+            break
+        time.sleep(0.15)
 
-        terminals = [
-            ("gnome-terminal", ["gnome-terminal", "--"] + wrapped_cmd),
-            ("ptyxis", ["ptyxis", "--"] + wrapped_cmd),
-            ("kgx", ["kgx", "-e", " ".join(wrapped_cmd)]),
-            ("konsole", ["konsole", "-e"] + wrapped_cmd),
-            ("xfce4-terminal", ["xfce4-terminal", "-e", " ".join(wrapped_cmd)]),
-            ("terminator", ["terminator", "-e", " ".join(wrapped_cmd)]),
-            ("tilix", ["tilix", "-e", " ".join(wrapped_cmd)]),
-            ("alacritty", ["alacritty", "-e"] + wrapped_cmd),
-            ("foot", ["foot"] + wrapped_cmd),
-            ("x-terminal-emulator", ["x-terminal-emulator", "-e", " ".join(wrapped_cmd)]),
-            ("xterm", ["xterm", "-e", " ".join(wrapped_cmd)]),
-        ]
-        for term, cmd in terminals:
-            if shutil.which(term):
-                subprocess.Popen(cmd)
-                return
+    if win_id is None:
+        return
 
-        raise RuntimeError(
-            "Nenhum emulador de terminal encontrado (gnome-terminal, ptyxis, kgx, "
-            "konsole, xfce4-terminal, terminator, tilix, alacritty, foot, xterm). "
-            "Instale um deles para usar o broot."
-        )
-    else:
+    try:
+        if cur_desktop:
+            subprocess.run(["xdotool", "set_desktop_for_window", win_id, cur_desktop])
+        subprocess.run(["xdotool", "windowactivate", win_id])
+    except Exception:
+        pass
+
+
+def open_file_manager(kind: str = "nautilus") -> None:
+    """Abre o diretório de saída final (Ventoy). Nautilus abre embutido no
+    próprio file manager; broot abre num terminal externo (gnome-terminal,
+    kgx, etc.), já que embutir de verdade se mostrou instável demais."""
+    target = resolve_output_target()
+
+    if kind != "broot":
         subprocess.Popen(["xdg-open", str(target)])
+        return
+
+    if not shutil.which("broot"):
+        raise RuntimeError("broot não está instalado (ou não está no PATH).")
+
+    broot_cmd_str = " ".join(["broot", "-s", "-p", "-d", "--sort-by-date", f"'{target}'"])
+    shell_wrapper = (
+        f"{broot_cmd_str}; "
+        f'st=$?; if [ $st -ne 0 ]; then echo; echo "broot saiu com erro ($st)."; '
+        f'read -p "Pressione enter para fechar..."; fi'
+    )
+    wrapped_cmd = ["bash", "-c", shell_wrapper]
+
+    term_title = "Carbonara — broot"
+    terminals = [
+        ("gnome-terminal", ["gnome-terminal", f"--title={term_title}", "--"] + wrapped_cmd),
+        ("ptyxis", ["ptyxis", "--"] + wrapped_cmd),
+        ("kgx", ["kgx", "-e", " ".join(wrapped_cmd)]),
+        ("konsole", ["konsole", "--title", term_title, "-e"] + wrapped_cmd),
+        ("xfce4-terminal", ["xfce4-terminal", "-T", term_title, "-e", " ".join(wrapped_cmd)]),
+        ("terminator", ["terminator", "-T", term_title, "-e", " ".join(wrapped_cmd)]),
+        ("tilix", ["tilix", "-t", term_title, "-e", " ".join(wrapped_cmd)]),
+        ("alacritty", ["alacritty", "-t", term_title, "-e"] + wrapped_cmd),
+        ("foot", ["foot", "-T", term_title] + wrapped_cmd),
+        ("x-terminal-emulator", ["x-terminal-emulator", "-e", " ".join(wrapped_cmd)]),
+        ("xterm", ["xterm", "-T", term_title, "-e", " ".join(wrapped_cmd)]),
+    ]
+    for term, cmd in terminals:
+        if shutil.which(term):
+            subprocess.Popen(cmd)
+            _bring_window_to_current_workspace(term_title)
+            return
+
+    raise RuntimeError(
+        "Nenhum emulador de terminal encontrado (gnome-terminal, ptyxis, kgx, "
+        "konsole, xfce4-terminal, terminator, tilix, alacritty, foot, xterm). "
+        "Instale um deles para usar o broot."
+    )
