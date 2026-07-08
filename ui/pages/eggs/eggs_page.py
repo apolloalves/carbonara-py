@@ -24,7 +24,7 @@ class _StatCard(QFrame):
     def __init__(self, label: str, value: str, color: str = "#dce6f0", parent=None):
         super().__init__(parent)
         self.setObjectName("EggsStatCard")
-        self.setFixedHeight(130)
+        self.setFixedHeight(96)
         self.setStyleSheet("""
             QFrame#EggsStatCard {
                 background: rgba(255, 255, 255, 5);
@@ -109,11 +109,13 @@ class _EggsOptionButton(QFrame):
         title_row.addWidget(t)
 
         if badge:
+            h = color.lstrip("#")
+            r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
             badge_lbl = QLabel(badge.upper())
             badge_lbl.setFont(QFont("DejaVu Sans Mono", 8, QFont.Bold))
             badge_lbl.setStyleSheet(
-                "color: #ff9966; background: rgba(255,153,102,22); "
-                "border: 1px solid rgba(255,153,102,70); border-radius: 5px; "
+                f"color: {color}; background: rgba({r},{g},{b},22); "
+                f"border: 1px solid rgba({r},{g},{b},70); border-radius: 5px; "
                 "padding: 2px 8px;"
             )
             title_row.addWidget(badge_lbl)

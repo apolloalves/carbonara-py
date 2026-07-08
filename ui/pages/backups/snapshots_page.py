@@ -554,6 +554,13 @@ class SnapshotsPage(QWidget):
         self.scope = "both"
         self.scope_cards: dict[str, ScopeCard] = {}
 
+        # Rastreiam a operação em andamento para permitir oferecer
+        # sincronizar o snapshot irmão (ROOT/HOME) ao concluir um sync.
+        self._current_op_kind: str | None = None
+        self._sync_entry: SnapshotEntry | None = None
+        self._offer_pair_after_sync: bool = True
+        self._pair_check_path: Path | None = None
+
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(1000)
         self._poll_timer.timeout.connect(self._poll_backup_process)
@@ -784,13 +791,13 @@ class SnapshotsPage(QWidget):
         self.btn_refresh = QPushButton("REFRESH")
         self.btn_refresh.setIcon(qta.icon(REFRESH_GLYPH, color="#FFFFFF"))
         self.btn_refresh.setIconSize(QSize(16, 16))
-        self.btn_refresh.setFixedWidth(140)
-        self.btn_refresh.setVisible(False)  # oculto: não faz mais sentido na UI atual
+        self.btn_refresh.setFixedSize(160, 40)
+        self.btn_refresh.setVisible(True)  # reabilitado: útil para recalcular espaço após mudanças fora do app
 
         self.btn_create = QPushButton("CREATE SNAPSHOT")
         self.btn_create.setIcon(qta.icon(CREATE_GLYPH))
         self.btn_create.setIconSize(QSize(16, 16))
-        self.btn_create.setFixedWidth(160)
+        self.btn_create.setFixedSize(160, 40)
         self.btn_create.setObjectName("PrimaryButton")
 
         self.btn_refresh.clicked.connect(self.refresh_destinations)
@@ -1078,6 +1085,8 @@ class SnapshotsPage(QWidget):
             return
 
         self.set_busy(True)
+        self._current_op_kind = "backup"
+        self._sync_entry = None
 
         project_root = Path(__file__).resolve().parents[3]
         python_bin = Path.home() / "venvs" / "pyside" / "bin" / "python3"
@@ -1145,6 +1154,19 @@ dialog.exec()
                 parent=self,
             )
 
+        # Após um SYNC concluído com sucesso, oferece sincronizar o
+        # snapshot irmão (ROOT/HOME com o mesmo stamp), se existir.
+        if (
+            rc == 0
+            and self._current_op_kind == "sync"
+            and self._sync_entry is not None
+            and self._offer_pair_after_sync
+        ):
+            self._maybe_offer_pair_sync(self._sync_entry)
+
+        self._sync_entry = None
+        self._current_op_kind = None
+
     def restore_snapshot(self, entry: SnapshotEntry):
         if OperationManager.is_running():
             QMessageBox.warning(
@@ -1166,20 +1188,107 @@ dialog.exec()
         if dialog.exec() != QDialog.Accepted:
             return
 
+        self._start_sync_process(entry, offer_pair=True)
+
+    def _start_sync_process(self, entry: SnapshotEntry, offer_pair: bool = True):
         if not OperationManager.start("sync", f"Sync snapshot {entry.path.name}"):
             QMessageBox.warning(self, "Carbonara", "Another operation is already running.")
             return
 
         self.set_busy(True)
+        self._current_op_kind = "sync"
+        self._sync_entry = entry
+        self._offer_pair_after_sync = offer_pair
 
-        dest = self.current_destination()
         project_root = Path(__file__).resolve().parents[3]
         python_bin = Path.home() / "venvs" / "pyside" / "bin" / "python3"
+
+        # Arquivo onde o processo elevado (pkexec) grava o resultado real
+        # da checagem de pendências do snapshot irmão — evita um segundo
+        # prompt de autenticação e evita heurísticas por horário.
+        pair_check_path = Path(f"/tmp/carbonara-pair-check-{os.getpid()}-{entry.path.name}.json")
+        self._pair_check_path = pair_check_path
+
+        pair_check_block = ""
+        if offer_pair:
+            pair_check_block = f"""
+# ── Verifica via rsync --dry-run se o snapshot irmão (ROOT/HOME) tem
+#    mudanças pendentes reais — não adivinha por horário/synced_at.
+# Exibe um dialog leve (mesmo visual do progresso de delete) enquanto
+# o rsync --dry-run roda em background, sem travar a UI.
+#
+# TUDO aqui — inclusive os imports — fica dentro do try: esta checagem
+# é um extra pós-sync e NUNCA pode derrubar o processo com erro, já
+# que o sync em si já terminou (com sucesso ou falha) antes desta parte.
+import json
+
+payload = dict(needs_sync=False, sibling_kind=None, sibling_path=None)
+
+try:
+    from PySide6.QtCore import QThread, Signal as QSignal
+    from ui.widgets.backup_progress import PairCheckProgressDialog
+    from core.snapshots.backup import ROOT_EXCLUDES, HOME_EXCLUDES
+
+    entry_path = Path({str(entry.path)!r})
+    kind = entry_path.parent.name.upper()
+    sibling_kind = "HOME" if kind == "ROOT" else ("ROOT" if kind == "HOME" else None)
+    payload["sibling_kind"] = sibling_kind
+
+    if sibling_kind:
+        backup_root = entry_path.parent.parent
+        sibling_dir = backup_root / sibling_kind / entry_path.name
+        meta_file = sibling_dir / "snapshot.json"
+
+        if sibling_dir.exists() and meta_file.exists():
+            meta = json.loads(meta_file.read_text(encoding="utf-8"))
+            source = meta.get("source", "")
+            excludes = ROOT_EXCLUDES if sibling_kind == "ROOT" else HOME_EXCLUDES
+            payload["sibling_path"] = str(sibling_dir)
+
+            if source:
+                class _DryRunWorker(QThread):
+                    done = QSignal(bool)
+
+                    def run(self):
+                        cmd = [
+                            "rsync", "-aAXHh", "--delete",
+                            "--dry-run", "--itemize-changes", "--numeric-ids",
+                        ]
+                        for ex in excludes:
+                            cmd += ["--exclude", ex]
+                        cmd += [source, str(sibling_dir) + "/"]
+                        result = subprocess.run(cmd, capture_output=True, text=True)
+                        changed = [l for l in result.stdout.splitlines() if l.strip()]
+                        self.done.emit(len(changed) > 0)
+
+                check_dialog = PairCheckProgressDialog(sibling_kind + " " + entry_path.name)
+                worker = _DryRunWorker()
+
+                def _on_dry_run_done(has_changes):
+                    payload["needs_sync"] = has_changes
+                    check_dialog.accept()
+
+                worker.done.connect(_on_dry_run_done)
+                worker.start()
+                check_dialog.exec()
+except Exception:
+    import traceback
+    payload["error"] = traceback.format_exc()
+
+try:
+    result_path = Path({str(pair_check_path)!r})
+    result_path.write_text(json.dumps(payload), encoding="utf-8")
+    result_path.chmod(0o666)
+except Exception:
+    pass
+"""
 
         script = f"""
 import sys
 sys.path.insert(0, {str(project_root)!r})
 
+import subprocess
+from pathlib import Path
 from PySide6.QtWidgets import QApplication
 from core.snapshots.backup import sync_snapshot
 from ui.widgets.backup_progress import BackupProgressDialog
@@ -1188,6 +1297,7 @@ app = QApplication([])
 dialog = BackupProgressDialog("Sincronizando Snapshot")
 sync_snapshot(dialog, snapshot_path={str(entry.path)!r})
 dialog.exec()
+{pair_check_block}
 """
         cmd = [
             "pkexec",
@@ -1207,6 +1317,63 @@ dialog.exec()
             OperationManager.finish()
             self.set_busy(False)
             _show_error("Carbonara Sync", str(e), parent=self)
+
+    def _maybe_offer_pair_sync(self, entry: SnapshotEntry) -> None:
+        """Lê o resultado do rsync --dry-run gravado pelo processo elevado
+        e só pergunta se houver mudanças pendentes reais no snapshot irmão."""
+        pair_check_path = getattr(self, "_pair_check_path", None)
+        if pair_check_path is None:
+            return
+        if not pair_check_path.exists():
+            _show_error(
+                "Verificação de snapshot irmão",
+                "A checagem não gerou resultado — o arquivo temporário não "
+                "foi criado. Verifique se ui/widgets/backup_progress.py está "
+                "atualizado no projeto (classe PairCheckProgressDialog).",
+                parent=self,
+            )
+            return
+
+        try:
+            payload = json.loads(pair_check_path.read_text(encoding="utf-8"))
+        finally:
+            try:
+                pair_check_path.unlink()
+            except OSError:
+                pass
+
+        if payload.get("error"):
+            _show_error(
+                "Verificação de snapshot irmão",
+                f"A checagem falhou (sync já concluído normalmente):\n\n{payload['error']}",
+                parent=self,
+            )
+            return
+
+        if not payload.get("needs_sync"):
+            return
+
+        sibling_kind = payload.get("sibling_kind")
+        sibling_path = payload.get("sibling_path")
+        if not sibling_kind or not sibling_path:
+            return
+
+        backup_root = entry.path.parent.parent
+        sibling_entry = next(
+            (
+                e for e in collect_snapshots(backup_root)
+                if e.kind.upper() == sibling_kind and str(e.path) == sibling_path
+            ),
+            None,
+        )
+        if sibling_entry is None:
+            return
+
+        dlg = _OfferPairSyncDialog(sibling_kind, sibling_entry.path.name, parent=self)
+        if dlg.exec() != QDialog.Accepted:
+            return
+
+        self._start_sync_process(sibling_entry, offer_pair=False)
 
     def delete_snapshot(self, entry: SnapshotEntry):
         if OperationManager.is_running():
@@ -3405,6 +3572,149 @@ class _SyncConfirmDialog(QDialog):
             QPushButton#SyncClose:hover {
                 background: rgba(200, 60, 60, 60);
                 color: #ff8888;
+            }
+            QPushButton#SyncBtnCancel {
+                background: rgba(255,255,255,6);
+                border: 1px solid rgba(255,255,255,18);
+                border-radius: 10px;
+                color: #ecf4ff;
+                font-family: "DejaVu Sans Mono";
+                font-size: 11px;
+            }
+            QPushButton#SyncBtnCancel:hover {
+                background: rgba(23, 147, 209, 70);
+                border-color: rgba(35, 166, 255, 180);
+            }
+            QPushButton#SyncBtnConfirm {
+                background: rgba(74, 222, 128, 180);
+                border: 1px solid rgba(74, 222, 128, 220);
+                border-radius: 10px;
+                color: #08111d;
+                font-family: "DejaVu Sans Mono";
+                font-size: 11px;
+                font-weight: 700;
+            }
+            QPushButton#SyncBtnConfirm:hover {
+                background: rgba(94, 234, 149, 220);
+                border-color: rgba(94, 234, 149, 255);
+            }
+        """)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.LeftButton and hasattr(self, '_drag'):
+            self.move(event.globalPosition().toPoint() - self._drag)
+
+
+class _OfferPairSyncDialog(QDialog):
+    """Exibido após um SYNC bem-sucedido, perguntando se o usuário quer
+    sincronizar também o snapshot irmão (ROOT ↔ HOME) de mesmo stamp."""
+
+    def __init__(self, sibling_kind: str, sibling_name: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Sincronizar também?")
+        self.setModal(True)
+        self.setFixedSize(540, 240)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self._build_ui(sibling_kind, sibling_name)
+        self._apply_styles()
+
+    def _build_ui(self, sibling_kind: str, sibling_name: str) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        header = QFrame()
+        header.setObjectName("SyncHeader")
+        header.setFixedHeight(56)
+        h_layout = QHBoxLayout(header)
+        h_layout.setContentsMargins(20, 0, 18, 0)
+
+        icon = QLabel()
+        icon.setFixedSize(36, 36)
+        icon.setAlignment(Qt.AlignCenter)
+        icon.setPixmap(qta.icon("mdi6.sync", color="#9bf0bd").pixmap(22, 22))
+        icon.setStyleSheet("QLabel { background: rgba(74,222,128,40); border-radius: 9px; }")
+
+        lbl = QLabel("Sincronizar também?")
+        lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+        lbl.setStyleSheet("color: #ecf4ff;")
+
+        btn_x = _CloseLabel(self)
+        btn_x.mousePressEvent = lambda e: self.reject()
+
+        h_layout.addWidget(icon)
+        h_layout.addSpacing(10)
+        h_layout.addWidget(lbl)
+        h_layout.addStretch()
+        h_layout.addWidget(btn_x)
+
+        body = QFrame()
+        body.setObjectName("SyncBody")
+        b_layout = QVBoxLayout(body)
+        b_layout.setContentsMargins(28, 22, 28, 22)
+        b_layout.setSpacing(12)
+
+        msg = QLabel(
+            f"O snapshot {sibling_kind} correspondente também pode ser "
+            f"sincronizado agora, mantendo ROOT e HOME em par."
+        )
+        msg.setWordWrap(True)
+        msg.setFont(QFont("DejaVu Sans Mono", 9))
+        msg.setStyleSheet("color: #c8d4e0;")
+
+        snap_label = QLabel(f"{sibling_kind} • {sibling_name}")
+        snap_label.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+        snap_label.setStyleSheet(
+            "color: #23a6ff; background: #101115; "
+            "border-radius: 6px; padding: 10px 12px;"
+        )
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
+
+        btn_cancel = QPushButton("Agora não")
+        btn_cancel.setObjectName("SyncBtnCancel")
+        btn_cancel.setFixedSize(130, 40)
+        btn_cancel.clicked.connect(self.reject)
+
+        btn_confirm = QPushButton(f"Sincronizar {sibling_kind}")
+        btn_confirm.setObjectName("SyncBtnConfirm")
+        btn_confirm.setFixedSize(170, 40)
+        btn_confirm.clicked.connect(self.accept)
+
+        btn_row.addStretch()
+        btn_row.addWidget(btn_cancel)
+        btn_row.addWidget(btn_confirm)
+
+        b_layout.addWidget(msg)
+        b_layout.addSpacing(6)
+        b_layout.addWidget(snap_label)
+        b_layout.addStretch()
+        b_layout.addLayout(btn_row)
+
+        root.addWidget(header)
+        root.addWidget(body, stretch=1)
+
+    def _apply_styles(self) -> None:
+        self.setStyleSheet("""
+            QDialog {
+                background: #131417;
+                border-radius: 14px;
+            }
+            QFrame#SyncHeader {
+                background: rgba(74, 222, 128, 35);
+                border-bottom: 1px solid rgba(74, 222, 128, 25);
+                border-top-left-radius: 14px;
+                border-top-right-radius: 14px;
+            }
+            QFrame#SyncBody {
+                background: #131417;
+                border-bottom-left-radius: 14px;
+                border-bottom-right-radius: 14px;
             }
             QPushButton#SyncBtnCancel {
                 background: rgba(255,255,255,6);
