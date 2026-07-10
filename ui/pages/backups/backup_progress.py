@@ -10,10 +10,14 @@ from PySide6.QtWidgets import (
 
 
 class BackupProgressDialog(QDialog):
-    def __init__(self, title: str = "Carbonara Backup", preparing_text: str = "Preparando snapshot...", icon_glyph: str = "mdi6.harddisk", parent=None):
+    def __init__(self, title: str = "Carbonara Backup", preparing_text: str | None = None, icon_glyph: str = "mdi6.harddisk", parent=None):
         super().__init__(parent)
         self.setWindowTitle(title)
-        self._preparing_text = preparing_text
+        # Por padrão, o texto acima da barra de progresso reflete a própria
+        # ação em curso (ex: "Criando Snapshot...", "Sincronizando
+        # Snapshot..."), em vez de um "Preparando snapshot..." genérico que
+        # fica factualmente errado assim que a cópia real começa.
+        self._preparing_text = preparing_text if preparing_text is not None else f"{title}..."
         self._icon_glyph = icon_glyph
         self.setModal(True)
         self.setMinimumSize(900, 640)
@@ -85,6 +89,7 @@ class BackupProgressDialog(QDialog):
         lbl_header = QLabel(self.windowTitle())
         lbl_header.setObjectName("HeaderTitle")
         lbl_header.setFont(QFont("DejaVu Sans Mono", 12, QFont.Bold))
+        self.lbl_header = lbl_header
 
         header_layout.addWidget(lbl_icon)
         header_layout.addSpacing(10)

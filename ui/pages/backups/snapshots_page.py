@@ -1180,7 +1180,7 @@ from core.snapshots.backup import create_backup
 from ui.widgets.backup_progress import BackupProgressDialog
 
 app = QApplication([])
-dialog = BackupProgressDialog("Criando Snapshot")
+dialog = BackupProgressDialog("Create Snapshot")
 create_backup(dialog, destination_mountpoint={dest.mountpoint!r}, scope={self.current_scope()!r})
 dialog.exec()
 """
@@ -1492,17 +1492,11 @@ dialog.exec()
             return
 
         backup_root = Path(dest.backup_root)
-        entries = collect_snapshots(backup_root)
+        all_entries = [
+            e for e in collect_snapshots(backup_root) if e.kind.upper() in ("ROOT", "HOME")
+        ]
 
-        latest: dict[str, SnapshotEntry] = {}
-        for e in entries:
-            kind = e.kind.upper()
-            if kind not in ("ROOT", "HOME"):
-                continue
-            if kind not in latest or e.path.name > latest[kind].path.name:
-                latest[kind] = e
-
-        if not latest:
+        if not all_entries:
             _show_info(
                 "Carbonara",
                 "Nenhum snapshot ROOT/HOME encontrado para verificar.",
@@ -1510,13 +1504,35 @@ dialog.exec()
             )
             return
 
-        if not OperationManager.start("verify", "Verificando ROOT e HOME"):
+        # Por padrão, pré-marca só o mais recente de cada tipo (mesmo
+        # comportamento de antes) — o usuário pode marcar outros também.
+        latest_by_kind: dict[str, SnapshotEntry] = {}
+        for e in all_entries:
+            k = e.kind.upper()
+            if k not in latest_by_kind or e.path.name > latest_by_kind[k].path.name:
+                latest_by_kind[k] = e
+        default_checked = {_VerifySelectDialog.make_id(e) for e in latest_by_kind.values()}
+
+        if len(all_entries) == 1:
+            # Só existe um candidato — nada para escolher, verifica direto.
+            selected = all_entries
+        else:
+            select_dlg = _VerifySelectDialog(all_entries, default_checked=default_checked, parent=self)
+            if select_dlg.exec() != QDialog.Accepted:
+                return
+
+            selected = select_dlg.selected_entries()
+            if not selected:
+                return
+
+        verify_label_op = ", ".join(f"{e.kind.upper()} {e.path.name}" for e in selected)
+        if not OperationManager.start("verify", f"Verificando {verify_label_op}"):
             QMessageBox.warning(self, "Carbonara", "Another operation is already running.")
             return
 
         self.set_busy(True)
         self._current_op_kind = "verify"
-        self._verify_entries = latest
+        self._verify_entries = {_VerifySelectDialog.make_id(e): e for e in selected}
 
         project_root = Path(__file__).resolve().parents[3]
         python_bin = Path.home() / "venvs" / "pyside" / "bin" / "python3"
@@ -1524,7 +1540,15 @@ dialog.exec()
         verify_path = Path(f"/tmp/carbonara-verify-{os.getpid()}.json")
         self._verify_check_path = verify_path
 
-        targets_literal = repr({kind: str(e.path) for kind, e in latest.items()})
+        targets_literal = repr({
+            _VerifySelectDialog.make_id(e): {"kind": e.kind.upper(), "path": str(e.path)}
+            for e in selected
+        })
+        kinds_involved = sorted({e.kind.upper() for e in selected})
+        verify_label = (
+            " + ".join(kinds_involved) if len(selected) <= 2
+            else f"{len(selected)} snapshots"
+        )
 
         verify_body = f"""
 import json
@@ -1545,18 +1569,20 @@ class _VerifyWorker(QThread):
 
     def run(self):
         out = dict()
-        for kind, snap_path in targets.items():
+        for id_, info in targets.items():
+            kind = info["kind"]
+            snap_path = info["path"]
             snap_dir = Path(snap_path)
             meta_file = snap_dir / "snapshot.json"
             if not meta_file.exists():
-                out[kind] = dict(status="error", detail="snapshot.json nao encontrado")
+                out[id_] = dict(status="error", detail="snapshot.json nao encontrado")
                 continue
             try:
                 meta = json.loads(meta_file.read_text(encoding="utf-8"))
                 source = meta.get("source", "")
                 excludes = ROOT_EXCLUDES if kind == "ROOT" else HOME_EXCLUDES
                 if not source:
-                    out[kind] = dict(status="error", detail="campo source ausente no snapshot.json")
+                    out[id_] = dict(status="error", detail="campo source ausente no snapshot.json")
                     continue
                 cmd = [
                     "rsync", "-aAXHh", "--delete",
@@ -1568,19 +1594,19 @@ class _VerifyWorker(QThread):
                 result = subprocess.run(cmd, capture_output=True, text=True)
                 if result.returncode not in (0, 23, 24):
                     detail = "rsync codigo " + str(result.returncode) + ": " + result.stderr.strip()[:200]
-                    out[kind] = dict(status="error", detail=detail)
+                    out[id_] = dict(status="error", detail=detail)
                     continue
                 changed = [l for l in result.stdout.splitlines() if l.strip()]
-                # Mesmo raciocinio do SYNC individual: ignora ruido normal
-                # do sistema, so acusa desatualizado com mudanca significativa.
+                # Ruido normal do sistema (cache, logs, etc.) - so acusa
+                # desatualizado com uma quantidade significativa de mudancas.
                 NOISE_THRESHOLD = 15
                 is_stale = len(changed) > NOISE_THRESHOLD
-                out[kind] = dict(status=("stale" if is_stale else "ok"), detail=str(len(changed)) + " itens no dry-run")
+                out[id_] = dict(status=("stale" if is_stale else "ok"), detail=str(len(changed)) + " itens no dry-run")
             except Exception as exc:
-                out[kind] = dict(status="error", detail=str(exc))
+                out[id_] = dict(status="error", detail=str(exc))
         self.done.emit(out)
 
-check_dialog = PairCheckProgressDialog("ROOT + HOME")
+check_dialog = PairCheckProgressDialog({verify_label!r})
 worker = _VerifyWorker()
 
 def _on_verify_done(res):
@@ -1648,52 +1674,69 @@ sys.path.insert(0, {str(project_root)!r})
 
         entries = getattr(self, "_verify_entries", {}) or {}
 
-        error_kinds = [
-            kind for kind, info in payload.items()
-            if isinstance(info, dict) and info.get("status") == "error" and kind in entries
+        error_ids = [
+            id_ for id_, info in payload.items()
+            if isinstance(info, dict) and info.get("status") == "error" and id_ in entries
         ]
-        stale_kinds = [
-            kind for kind, info in payload.items()
-            if isinstance(info, dict) and info.get("status") == "stale" and kind in entries
+        stale_ids = [
+            id_ for id_, info in payload.items()
+            if isinstance(info, dict) and info.get("status") == "stale" and id_ in entries
         ]
 
-        # Qualquer kind que não pôde ser verificado (erro real, não "sem
+        def _label(id_: str) -> str:
+            e = entries[id_]
+            return f"{e.kind.upper()} {e.path.name}"
+
+        # Qualquer snapshot que não pôde ser verificado (erro real, não "sem
         # mudanças") é reportado explicitamente — nunca tratado como "em dia"
         # por padrão, pra não mascarar uma falha real como sucesso.
-        if error_kinds:
+        if error_ids:
             details = "\n".join(
-                f"{kind}: {payload[kind].get('detail', 'motivo desconhecido')}"
-                for kind in error_kinds
+                f"{_label(id_)}: {payload[id_].get('detail', 'motivo desconhecido')}"
+                for id_ in error_ids
             )
             _show_error(
                 "Carbonara Verify",
-                f"Não foi possível verificar {', '.join(error_kinds)} de verdade:\n\n{details}",
+                f"Não foi possível verificar {', '.join(_label(i) for i in error_ids)} de verdade:\n\n{details}",
                 parent=self,
             )
-            if not stale_kinds:
+            if not stale_ids:
                 return
 
-        if not stale_kinds:
+        if not stale_ids:
+            lines = [
+                f"Snapshot {e.path.name} {e.kind.upper()} já está sincronizado com o estado atual do sistema."
+                for id_, e in sorted(entries.items())
+            ]
             _show_info(
                 "Carbonara",
-                "ROOT e HOME já estão em dia com o sistema atual.",
+                "\n".join(lines) if lines else "Nenhum snapshot verificado.",
                 parent=self,
             )
             return
 
-        stale_list = [(kind, entries[kind].path.name) for kind in stale_kinds]
+        stale_list = [(entries[id_].kind.upper(), entries[id_].path.name) for id_ in stale_ids]
         dlg = _VerifyResultsDialog(stale_list, parent=self)
         if dlg.exec() != QDialog.Accepted:
             return
 
-        selected = dlg.selected_kinds()
-        if not selected:
+        selected_labels = dlg.selected_kinds()
+        if not selected_labels:
             return
+
+        # _VerifyResultsDialog trabalha com (kind, name) — remonta pra id_
+        # composto pra buscar o SnapshotEntry certo de volta.
+        selected_ids = [
+            id_ for id_ in stale_ids
+            if f"{entries[id_].kind.upper()}|{entries[id_].path.name}" in selected_labels
+        ]
 
         # Sync é uma operação exclusiva — enfileira e processa uma de cada
         # vez, encadeando automaticamente (sem perguntar de novo, já que
-        # o usuário acabou de confirmar as duas no mesmo dialog).
-        queue = [entries[kind] for kind in selected]
+        # o usuário acabou de confirmar todos no mesmo dialog).
+        queue = [entries[id_] for id_ in selected_ids]
+        if not queue:
+            return
         first = queue.pop(0)
         self._sync_queue = queue
         self._start_sync_process(first, offer_pair=False)
@@ -1707,7 +1750,19 @@ sys.path.insert(0, {str(project_root)!r})
             )
             return
 
-        dialog = _DeleteConfirmDialog(entry, parent=self)
+        # Se este for o último snapshot ROOT, apagá-lo também remove o
+        # carbonara-restore.sh (nada sobra pra restaurar) — avisa antes.
+        is_last_root = False
+        if entry.kind.upper() == "ROOT":
+            dest = self.current_destination()
+            if dest is not None:
+                root_count = sum(
+                    1 for e in collect_snapshots(Path(dest.backup_root))
+                    if e.kind.upper() == "ROOT"
+                )
+                is_last_root = root_count <= 1
+
+        dialog = _DeleteConfirmDialog(entry, is_last_root=is_last_root, parent=self)
         if dialog.exec() != QDialog.Accepted:
             return
 
@@ -4203,6 +4258,191 @@ class _OfferPairSyncDialog(QDialog):
             self.move(event.globalPosition().toPoint() - self._drag)
 
 
+class _VerifySelectDialog(QDialog):
+    """Mostrado ao clicar em VERIFICAR — lista todos os snapshots ROOT/HOME
+    disponíveis com checkboxes, permitindo escolher exatamente quais serão
+    checados de verdade (rsync --dry-run). Por padrão só o mais recente de
+    cada tipo vem pré-marcado, mas o usuário pode marcar snapshots antigos
+    também."""
+
+    @staticmethod
+    def make_id(entry: SnapshotEntry) -> str:
+        return f"{entry.kind.upper()}::{entry.path.name}"
+
+    def __init__(self, entries: list[SnapshotEntry], default_checked: set[str], parent=None):
+        super().__init__(parent)
+        self.entries = entries
+        self.checkboxes: dict[str, QCheckBox] = {}
+        self.setWindowTitle("Escolher snapshots para verificar")
+        self.setModal(True)
+        row_h = 30
+        self.setFixedSize(560, 240 + row_h * max(0, len(entries) - 1))
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self._build_ui(default_checked)
+        self._apply_styles()
+
+    def selected_entries(self) -> list[SnapshotEntry]:
+        return [e for e in self.entries if self.checkboxes[self.make_id(e)].isChecked()]
+
+    def _build_ui(self, default_checked: set[str]) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        header = QFrame()
+        header.setObjectName("SelHeader")
+        header.setFixedHeight(56)
+        h_layout = QHBoxLayout(header)
+        h_layout.setContentsMargins(20, 0, 18, 0)
+
+        icon = QLabel()
+        icon.setFixedSize(36, 36)
+        icon.setAlignment(Qt.AlignCenter)
+        icon.setPixmap(qta.icon(VERIFY_GLYPH, color="#9bf0e0").pixmap(22, 22))
+        icon.setStyleSheet("QLabel { background: rgba(35,166,255,40); border-radius: 9px; }")
+
+        lbl = QLabel("Escolher snapshots para verificar")
+        lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+        lbl.setStyleSheet("color: #ecf4ff;")
+
+        btn_x = _CloseLabel(self)
+        btn_x.mousePressEvent = lambda e: self.reject()
+
+        h_layout.addWidget(icon)
+        h_layout.addSpacing(10)
+        h_layout.addWidget(lbl)
+        h_layout.addStretch()
+        h_layout.addWidget(btn_x)
+
+        body = QFrame()
+        body.setObjectName("SelBody")
+        b_layout = QVBoxLayout(body)
+        b_layout.setContentsMargins(28, 20, 28, 20)
+        b_layout.setSpacing(10)
+
+        msg = QLabel(
+            "Por padrão só o mais recente de cada tipo vem marcado. "
+            "Marque outros snapshots se quiser verificá-los também:"
+        )
+        msg.setWordWrap(True)
+        msg.setFont(QFont("DejaVu Sans Mono", 9))
+        msg.setStyleSheet("color: #c8d4e0;")
+        b_layout.addWidget(msg)
+        b_layout.addSpacing(4)
+
+        for e in sorted(self.entries, key=lambda x: (x.kind.upper(), x.path.name), reverse=True):
+            row = QFrame()
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(10)
+
+            id_ = self.make_id(e)
+            cb = QCheckBox()
+            cb.setChecked(id_ in default_checked)
+            cb.setObjectName("SyncCheckbox")
+            self.checkboxes[id_] = cb
+
+            snap_label = QLabel(f"{e.kind.upper()} • {e.path.name}")
+            snap_label.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
+            snap_label.setStyleSheet(
+                "color: #23a6ff; background: #101115; "
+                "border-radius: 6px; padding: 7px 10px;"
+            )
+
+            row_layout.addWidget(cb)
+            row_layout.addWidget(snap_label, 1)
+            b_layout.addWidget(row)
+
+        b_layout.addStretch()
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
+
+        btn_cancel = QPushButton("Cancelar")
+        btn_cancel.setObjectName("SyncBtnCancel")
+        btn_cancel.setFixedSize(130, 40)
+        btn_cancel.clicked.connect(self.reject)
+
+        btn_confirm = QPushButton("Verificar selecionados")
+        btn_confirm.setObjectName("SyncBtnConfirm")
+        btn_confirm.setFixedSize(200, 40)
+        btn_confirm.clicked.connect(self.accept)
+
+        btn_row.addStretch()
+        btn_row.addWidget(btn_cancel)
+        btn_row.addWidget(btn_confirm)
+        b_layout.addLayout(btn_row)
+
+        root.addWidget(header)
+        root.addWidget(body, stretch=1)
+
+    def _apply_styles(self) -> None:
+        self.setStyleSheet("""
+            QDialog {
+                background: #131417;
+                border-radius: 14px;
+            }
+            QFrame#SelHeader {
+                background: rgba(35, 166, 255, 35);
+                border-bottom: 1px solid rgba(35, 166, 255, 25);
+                border-top-left-radius: 14px;
+                border-top-right-radius: 14px;
+            }
+            QFrame#SelBody {
+                background: #131417;
+                border-bottom-left-radius: 14px;
+                border-bottom-right-radius: 14px;
+            }
+            QCheckBox#SyncCheckbox {
+                spacing: 0px;
+            }
+            QCheckBox#SyncCheckbox::indicator {
+                width: 18px;
+                height: 18px;
+                border-radius: 5px;
+                border: 1px solid rgba(255,255,255,40);
+                background: rgba(255,255,255,6);
+            }
+            QCheckBox#SyncCheckbox::indicator:checked {
+                background: rgba(35, 166, 255, 200);
+                border: 1px solid rgba(35, 166, 255, 220);
+            }
+            QPushButton#SyncBtnCancel {
+                background: rgba(255,255,255,6);
+                border: 1px solid rgba(255,255,255,18);
+                border-radius: 10px;
+                color: #ecf4ff;
+                font-family: "DejaVu Sans Mono";
+                font-size: 11px;
+            }
+            QPushButton#SyncBtnCancel:hover {
+                background: rgba(23, 147, 209, 70);
+                border-color: rgba(35, 166, 255, 180);
+            }
+            QPushButton#SyncBtnConfirm {
+                background: rgba(35, 166, 255, 180);
+                border: 1px solid rgba(35, 166, 255, 220);
+                border-radius: 10px;
+                color: #08111d;
+                font-family: "DejaVu Sans Mono";
+                font-size: 11px;
+                font-weight: 700;
+            }
+            QPushButton#SyncBtnConfirm:hover {
+                background: rgba(94, 200, 255, 220);
+                border-color: rgba(94, 200, 255, 255);
+            }
+        """)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.LeftButton and hasattr(self, '_drag'):
+            self.move(event.globalPosition().toPoint() - self._drag)
+
+
 class _VerifyResultsDialog(QDialog):
     """Exibido após o botão VERIFICAR encontrar um ou mais snapshots
     desatualizados. Mostra todos de uma vez com checkboxes, em vez de
@@ -4222,7 +4462,7 @@ class _VerifyResultsDialog(QDialog):
         self._apply_styles()
 
     def selected_kinds(self) -> list[str]:
-        return [kind for kind, cb in self.checkboxes.items() if cb.isChecked()]
+        return [key for key, cb in self.checkboxes.items() if cb.isChecked()]
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
@@ -4241,10 +4481,13 @@ class _VerifyResultsDialog(QDialog):
         icon.setPixmap(qta.icon("mdi6.sync-alert", color="#e0a840").pixmap(22, 22))
         icon.setStyleSheet("QLabel { background: rgba(224,168,64,40); border-radius: 9px; }")
 
-        title_text = (
-            "ROOT e HOME estão desatualizados" if len(self.stale) > 1
-            else f"{self.stale[0][0]} está desatualizado"
-        )
+        kinds_involved = {kind for kind, _ in self.stale}
+        if len(self.stale) > 1 and len(kinds_involved) > 1:
+            title_text = "ROOT e HOME estão desatualizados"
+        elif len(self.stale) > 1:
+            title_text = f"{len(self.stale)} snapshots {next(iter(kinds_involved))} estão desatualizados"
+        else:
+            title_text = f"{self.stale[0][0]} está desatualizado"
         lbl = QLabel(title_text)
         lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
         lbl.setStyleSheet("color: #ecf4ff;")
@@ -4280,11 +4523,12 @@ class _VerifyResultsDialog(QDialog):
             row_layout.setContentsMargins(0, 0, 0, 0)
             row_layout.setSpacing(10)
 
+            key = f"{kind}|{name}"
             cb = QCheckBox()
             cb.setChecked(True)
             cb.setObjectName("SyncCheckbox")
             cb.stateChanged.connect(self._update_confirm_label)
-            self.checkboxes[kind] = cb
+            self.checkboxes[key] = cb
 
             snap_label = QLabel(f"{kind} • {name}")
             snap_label.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
@@ -4329,10 +4573,14 @@ class _VerifyResultsDialog(QDialog):
             self.btn_confirm.setText("Sincronizar")
             self.btn_confirm.setEnabled(False)
         elif len(selected) == len(self.stale) and len(self.stale) > 1:
-            self.btn_confirm.setText("Sincronizar ambas")
+            self.btn_confirm.setText(f"Sincronizar todos ({len(selected)})")
+            self.btn_confirm.setEnabled(True)
+        elif len(selected) == 1:
+            kind = selected[0].split("|", 1)[0]
+            self.btn_confirm.setText(f"Sincronizar {kind}")
             self.btn_confirm.setEnabled(True)
         else:
-            self.btn_confirm.setText(f"Sincronizar {selected[0]}")
+            self.btn_confirm.setText(f"Sincronizar {len(selected)} selecionados")
             self.btn_confirm.setEnabled(True)
 
     def _apply_styles(self) -> None:
@@ -4412,16 +4660,16 @@ class _VerifyResultsDialog(QDialog):
 class _DeleteConfirmDialog(QDialog):
     """Dialog de confirmação estilizado para delete de snapshot."""
 
-    def __init__(self, entry: SnapshotEntry, parent=None):
+    def __init__(self, entry: SnapshotEntry, is_last_root: bool = False, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Confirmar exclusão")
         self.setModal(True)
-        self.setFixedSize(520, 220)
+        self.setFixedSize(520, 300 if is_last_root else 240)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
-        self._build_ui(entry)
+        self._build_ui(entry, is_last_root)
         self._apply_styles()
 
-    def _build_ui(self, entry: SnapshotEntry) -> None:
+    def _build_ui(self, entry: SnapshotEntry, is_last_root: bool = False) -> None:
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
@@ -4467,6 +4715,24 @@ class _DeleteConfirmDialog(QDialog):
         warn.setFont(QFont("DejaVu Sans Mono", 9))
         warn.setStyleSheet("color: #c8d4e0;")
 
+        root_warn = None
+        if is_last_root:
+            root_warn = QLabel(
+                "Este é o último snapshot ROOT — o carbonara-restore.sh "
+                "também será removido, já que não sobrará nada para restaurar."
+            )
+            root_warn.setWordWrap(True)
+            root_warn.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
+            root_warn.setStyleSheet(
+                "color: #e0a840; background: rgba(224,168,64,0.12); "
+                "border-radius: 6px; padding: 8px 10px;"
+            )
+
+        pw_note = QLabel("Será solicitada a senha de root para concluir a exclusão.")
+        pw_note.setWordWrap(True)
+        pw_note.setFont(QFont("DejaVu Sans Mono", 8))
+        pw_note.setStyleSheet("color: #5f6b7a;")
+
         snap_label = QLabel(entry.path.name)
         snap_label.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
         snap_label.setStyleSheet(
@@ -4492,7 +4758,10 @@ class _DeleteConfirmDialog(QDialog):
         btn_row.addWidget(btn_confirm)
 
         b_layout.addWidget(warn)
+        if root_warn is not None:
+            b_layout.addWidget(root_warn)
         b_layout.addWidget(snap_label)
+        b_layout.addWidget(pw_note)
         b_layout.addStretch()
         b_layout.addLayout(btn_row)
 
@@ -4719,10 +4988,16 @@ class _DeleteWorker(QThread):
                 )
                 new_latest = candidates[-1] if candidates else None
 
+            project_root = Path(__file__).resolve().parents[3]
+
             # Script python que roda como root via pkexec
             script = f"""
+import sys
+sys.path.insert(0, {str(project_root)!r})
+
 import shutil, os
 from pathlib import Path
+from core.snapshots.backup import _try_generate_restore_script
 
 target = Path({str(self._path)!r})
 link   = Path({str(link)!r})
@@ -4736,6 +5011,22 @@ if link.is_symlink() or link.exists():
 new_latest = {repr(str(new_latest)) if new_latest else repr(None)}
 if new_latest:
     link.symlink_to(Path(new_latest).name)
+
+# Remove a pasta ROOT/HOME em si se ficou vazia — os.rmdir só funciona
+# se estiver realmente vazia (nunca apaga nada com conteúdo dentro),
+# então é seguro tentar sem checagem extra.
+kind_base = target.parent
+try:
+    os.rmdir(kind_base)
+except OSError:
+    pass  # ainda tem outros snapshots, ou não está vazia por outro motivo
+
+# Regenera (ou remove, se não sobrar ROOT) o carbonara-restore.sh — mesmo
+# processo usado após backup/sync, pra nunca deixar o script apontando
+# para um snapshot que acabou de ser apagado.
+snapshot_base = Path({str(kind_base.parent)!r})
+destination_mountpoint = {str(kind_base.parent.parent)!r}
+_try_generate_restore_script(snapshot_base, destination_mountpoint)
 """
             import subprocess
             from pathlib import Path as _Path
