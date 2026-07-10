@@ -159,12 +159,37 @@ class ShellWorker(QThread):
             )
 
             assert self._proc.stdout is not None
-            for raw_line in self._proc.stdout:
-                line = raw_line.rstrip("\n")
-                if not line:
-                    continue
-                self.log_line.emit(line)
-                self.file_changed.emit(line[:140])
+
+            # Leitura em chunks — não usar `for line in stdout`, que só quebra
+            # em '\n'. Ferramentas como xorriso usam '\r' para atualizar a
+            # barra de progresso na mesma linha; sem tratar '\r' também como
+            # fim de linha, centenas de atualizações ficam acumuladas numa
+            # única string gigante até o próximo '\n' real (só no fim do
+            # processo), e emitir isso de uma vez trava o QPlainTextEdit.
+            buf = ""
+            while True:
+                chunk = self._proc.stdout.read(1024)
+                if not chunk:
+                    break
+                buf += chunk
+                while True:
+                    idx_n = buf.find("\n")
+                    idx_r = buf.find("\r")
+                    candidates = [i for i in (idx_n, idx_r) if i != -1]
+                    if not candidates:
+                        break
+                    idx = min(candidates)
+                    line = buf[:idx].strip()
+                    buf = buf[idx + 1:]
+                    if not line:
+                        continue
+                    self.log_line.emit(line)
+                    self.file_changed.emit(line[:140])
+
+            leftover = buf.strip()
+            if leftover:
+                self.log_line.emit(leftover)
+                self.file_changed.emit(leftover[:140])
 
             self._proc.wait()
 
