@@ -846,16 +846,16 @@ class SnapshotsPage(QWidget):
         buttons_row = QHBoxLayout()
         buttons_row.setSpacing(12)
 
-        self.btn_refresh = QPushButton("REFRESH")
+        self.btn_refresh = QPushButton("ATUALIZAR ESPAÇO")
         self.btn_refresh.setIcon(qta.icon(REFRESH_GLYPH, color="#FFFFFF"))
         self.btn_refresh.setIconSize(QSize(16, 16))
-        self.btn_refresh.setFixedSize(160, 40)
+        self.btn_refresh.setFixedSize(190, 40)
         self.btn_refresh.setVisible(True)  # reabilitado: útil para recalcular espaço após mudanças fora do app
 
-        self.btn_verify = QPushButton("VERIFICAR")
+        self.btn_verify = QPushButton("VERIFICAR SYNC")
         self.btn_verify.setIcon(qta.icon(VERIFY_GLYPH, color="#9bf0bd"))
         self.btn_verify.setIconSize(QSize(16, 16))
-        self.btn_verify.setFixedSize(160, 40)
+        self.btn_verify.setFixedSize(180, 40)
         self.btn_verify.setToolTip(
             "Verifica de verdade (rsync --dry-run) se o ROOT e o HOME mais "
             "recentes estão desatualizados em relação ao sistema."

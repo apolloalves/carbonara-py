@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import qtawesome as qta
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, QSize
 from PySide6.QtGui import QFont, QMouseEvent
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout,
@@ -87,6 +87,7 @@ class EggsProgressDialog(QDialog):
         lbl_header = QLabel(self.windowTitle())
         lbl_header.setObjectName("HeaderTitle")
         lbl_header.setFont(QFont("DejaVu Sans Mono", 12, QFont.Bold))
+        self.lbl_header = lbl_header
 
         header_layout.addWidget(lbl_icon)
         header_layout.addSpacing(10)
@@ -113,6 +114,22 @@ class EggsProgressDialog(QDialog):
 
         header_layout.addWidget(self.elapsed_badge)
         header_layout.addSpacing(12)
+
+        # Botão maximizar/restaurar — usa o mecanismo nativo do Qt
+        # (showMaximized/showNormal) para o gerenciador de janelas (GNOME
+        # Shell) reconhecer o estado corretamente (ex: esconder dock
+        # com auto-hide quando a janela está maximizada de verdade).
+        self._is_maximized = False
+        self._normal_geometry = None
+        self._btn_header_maximize = QPushButton()
+        self._btn_header_maximize.setIcon(qta.icon("mdi6.window-maximize", color="#9aa6b2"))
+        self._btn_header_maximize.setIconSize(QSize(15, 15))
+        self._btn_header_maximize.setObjectName("HeaderMaximize")
+        self._btn_header_maximize.setFixedSize(32, 32)
+        self._btn_header_maximize.setToolTip("Maximizar")
+        self._btn_header_maximize.clicked.connect(self._toggle_maximize)
+        header_layout.addWidget(self._btn_header_maximize)
+        header_layout.addSpacing(4)
 
         # Botão fechar no header (× apenas visual — só fecha se não estiver rodando)
         self._btn_header_close = QPushButton("✕")
@@ -218,6 +235,15 @@ class EggsProgressDialog(QDialog):
                 color: #ecf4ff;
                 background: transparent;
                 letter-spacing: 1px;
+            }
+
+            QPushButton#HeaderMaximize {
+                background: transparent;
+                border: none;
+                border-radius: 6px;
+            }
+            QPushButton#HeaderMaximize:hover {
+                background: rgba(35, 166, 255, 50);
             }
 
             QPushButton#HeaderClose {
@@ -498,6 +524,39 @@ class EggsProgressDialog(QDialog):
             return
         self.accept()
 
+    def _toggle_maximize(self) -> None:
+        """Usa o maximize nativo do Qt (showMaximized/showNormal) — isso
+        registra o estado junto ao gerenciador de janelas (GNOME Shell),
+        que é o que faz docks com auto-hide reconhecerem a janela como
+        maximizada e se esconderem. Mas alguns WMs (ex: mutter customizado
+        sem decoração) simplesmente ignoram o estado "maximizado" para
+        janelas frameless e não redimensionam nada — por isso também
+        força o setGeometry manual como garantia de que o redimensionamento
+        acontece de verdade, independente do WM aplicar o estado ou não."""
+        if not self._is_maximized:
+            self._normal_geometry = self.geometry()
+            self.showMaximized()
+            from PySide6.QtWidgets import QApplication
+            screen = self.screen() or QApplication.primaryScreen()
+            if screen:
+                self.setGeometry(screen.availableGeometry())
+            self._btn_header_maximize.setIcon(qta.icon("mdi6.window-restore", color="#9aa6b2"))
+            self._btn_header_maximize.setToolTip("Restaurar")
+            self._is_maximized = True
+        else:
+            self.showNormal()
+            if self._normal_geometry is not None:
+                self.setGeometry(self._normal_geometry)
+            self._btn_header_maximize.setIcon(qta.icon("mdi6.window-maximize", color="#9aa6b2"))
+            self._btn_header_maximize.setToolTip("Maximizar")
+            self._is_maximized = False
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        """Duplo clique no header também alterna maximizar, como em janelas normais."""
+        if self.header.underMouse():
+            self._toggle_maximize()
+        super().mouseDoubleClickEvent(event)
+
     # ----------------------------------------------------------- public API --
 
     def register_worker(self, worker) -> None:
@@ -601,6 +660,10 @@ class EggsProgressDialog(QDialog):
             self.lbl_status.setStyleSheet("color: #9bf0bd; font-weight: bold;")
             self.append_log(f"✓ {status}")
             self.append_log(f"Tempo decorrido: {elapsed}")
+
+        # Garante que as últimas linhas apareçam na hora, sem esperar o
+        # próximo tick do timer de 300ms (a operação já terminou).
+        self._flush_log_buffer()
 
     def closeEvent(self, event) -> None:
         if any(w.isRunning() for w in self._workers):

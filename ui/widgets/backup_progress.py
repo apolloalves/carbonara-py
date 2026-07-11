@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import qtawesome as qta
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, QSize
 from PySide6.QtGui import QFont, QMouseEvent
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout,
@@ -38,6 +38,16 @@ class BackupProgressDialog(QDialog):
         self._elapsed_timer = QTimer(self)
         self._elapsed_timer.setInterval(1000)
         self._elapsed_timer.timeout.connect(self._tick_elapsed)
+
+        # Buffer de log — evita travar a UI quando o rsync despeja muitas
+        # linhas rapidamente (ex: milhares de arquivos pequenos de runtime
+        # Flatpak). Sem isso, cada linha faz cursor+scrollbar update
+        # síncrono, e uma rajada alta trava o event loop do Qt.
+        self._log_buffer: list[str] = []
+        self._log_flush_timer = QTimer(self)
+        self._log_flush_timer.setInterval(300)
+        self._log_flush_timer.timeout.connect(self._flush_log_buffer)
+        self._log_flush_timer.start()
 
         # Para drag da janela sem titlebar
         self._drag_pos = None
@@ -116,6 +126,20 @@ class BackupProgressDialog(QDialog):
 
         header_layout.addWidget(self.elapsed_badge)
         header_layout.addSpacing(12)
+
+        # Botão maximizar/restaurar — janela é frameless, então não tem
+        # controle nativo do WM; alterna entre tamanho normal e maximizado.
+        self._is_maximized = False
+        self._normal_geometry = None
+        self._btn_header_maximize = QPushButton()
+        self._btn_header_maximize.setIcon(qta.icon("mdi6.window-maximize", color="#9aa6b2"))
+        self._btn_header_maximize.setIconSize(QSize(15, 15))
+        self._btn_header_maximize.setObjectName("HeaderMaximize")
+        self._btn_header_maximize.setFixedSize(32, 32)
+        self._btn_header_maximize.setToolTip("Maximizar")
+        self._btn_header_maximize.clicked.connect(self._toggle_maximize)
+        header_layout.addWidget(self._btn_header_maximize)
+        header_layout.addSpacing(4)
 
         # Botão fechar no header (× apenas visual — só fecha se não estiver rodando)
         self._btn_header_close = QPushButton("✕")
@@ -221,6 +245,15 @@ class BackupProgressDialog(QDialog):
                 color: #ecf4ff;
                 background: transparent;
                 letter-spacing: 1px;
+            }
+
+            QPushButton#HeaderMaximize {
+                background: transparent;
+                border: none;
+                border-radius: 6px;
+            }
+            QPushButton#HeaderMaximize:hover {
+                background: rgba(35, 166, 255, 50);
             }
 
             QPushButton#HeaderClose {
@@ -493,6 +526,40 @@ class BackupProgressDialog(QDialog):
             return
         self.accept()
 
+    def _toggle_maximize(self) -> None:
+        """Usa o maximize nativo do Qt (showMaximized/showNormal) — isso
+        registra o estado de "maximizado" junto ao gerenciador de janelas,
+        que é o que faz docks com auto-hide (ex: no GNOME) reconhecerem a
+        janela e se esconderem corretamente. Mas alguns WMs (ex: mutter
+        customizado sem decoração) simplesmente ignoram o estado
+        "maximizado" para janelas frameless e não redimensionam nada —
+        por isso também força o setGeometry manual como garantia de que
+        o redimensionamento acontece de verdade, independente do WM
+        aplicar o estado ou não."""
+        if not self._is_maximized:
+            self._normal_geometry = self.geometry()
+            self.showMaximized()
+            from PySide6.QtWidgets import QApplication
+            screen = self.screen() or QApplication.primaryScreen()
+            if screen:
+                self.setGeometry(screen.availableGeometry())
+            self._btn_header_maximize.setIcon(qta.icon("mdi6.window-restore", color="#9aa6b2"))
+            self._btn_header_maximize.setToolTip("Restaurar")
+            self._is_maximized = True
+        else:
+            self.showNormal()
+            if self._normal_geometry is not None:
+                self.setGeometry(self._normal_geometry)
+            self._btn_header_maximize.setIcon(qta.icon("mdi6.window-maximize", color="#9aa6b2"))
+            self._btn_header_maximize.setToolTip("Maximizar")
+            self._is_maximized = False
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        """Duplo clique no header também alterna maximizar, como em janelas normais."""
+        if self.header.underMouse():
+            self._toggle_maximize()
+        super().mouseDoubleClickEvent(event)
+
     # ----------------------------------------------------------- public API --
 
     def register_worker(self, worker) -> None:
@@ -509,34 +576,46 @@ class BackupProgressDialog(QDialog):
             self._workers.remove(worker)
 
     def append_log(self, text: str) -> None:
+        """Enfileira a linha no buffer — o flush acontece a cada 300ms via QTimer."""
+        self._log_buffer.append(text)
+
+    def _flush_log_buffer(self) -> None:
+        """Descarrega o buffer no QPlainTextEdit de uma vez — chamado pelo QTimer."""
+        if not self._log_buffer:
+            return
+
         from PySide6.QtGui import QTextCharFormat, QColor, QTextCursor
 
-        # Paleta por tipo de linha
-        if any(text.startswith(p) for p in ("ERRO:", "ERRO ", "✗")):
-            color = "#ff8888"
-        elif any(text.startswith(p) for p in ("✓", "--- ", "=== ")):
-            color = "#9bf0bd"
-        elif any(text.startswith(p) for p in ("AVISO:", "AVISO ", "  ✗")):
-            color = "#ffb86b"
-        elif text.startswith("$"):
-            color = "#8fd4ff"
-        elif text.startswith("Copiando:"):
-            color = "#c8d4e0"       # branco suave — legível mas não dominante
-        elif text.startswith("Tempo decorrido:"):
-            color = "#6b7a8d"
-        elif not text.strip():
-            color = "#000000"
-        else:
-            color = "#9aa6b2"
-
-        char_fmt = QTextCharFormat()
-        char_fmt.setForeground(QColor(color))
+        lines = self._log_buffer[:]
+        self._log_buffer.clear()
 
         cursor = self.log_view.textCursor()
         cursor.movePosition(QTextCursor.End)
-        cursor.insertText(("\n" if cursor.position() > 0 else "") + text, char_fmt)
-        self.log_view.setTextCursor(cursor)
 
+        for text in lines:
+            # Paleta por tipo de linha
+            if any(text.startswith(p) for p in ("ERRO:", "ERRO ", "✗")):
+                color = "#ff8888"
+            elif any(text.startswith(p) for p in ("✓", "--- ", "=== ")):
+                color = "#9bf0bd"
+            elif any(text.startswith(p) for p in ("AVISO:", "AVISO ", "  ✗")):
+                color = "#ffb86b"
+            elif text.startswith("$"):
+                color = "#8fd4ff"
+            elif text.startswith("Copiando:"):
+                color = "#c8d4e0"       # branco suave — legível mas não dominante
+            elif text.startswith("Tempo decorrido:"):
+                color = "#6b7a8d"
+            elif not text.strip():
+                color = "#000000"
+            else:
+                color = "#9aa6b2"
+
+            char_fmt = QTextCharFormat()
+            char_fmt.setForeground(QColor(color))
+            cursor.insertText(("\n" if cursor.position() > 0 else "") + text, char_fmt)
+
+        self.log_view.setTextCursor(cursor)
         sb = self.log_view.verticalScrollBar()
         sb.setValue(sb.maximum())
 
@@ -581,6 +660,10 @@ class BackupProgressDialog(QDialog):
             self.lbl_status.setStyleSheet("color: #9bf0bd; font-weight: bold;")
             self.append_log(f"✓ {status}")
             self.append_log(f"Tempo decorrido: {elapsed}")
+
+        # Garante que as últimas linhas apareçam na hora, sem esperar o
+        # próximo tick do timer de 300ms (a operação já terminou).
+        self._flush_log_buffer()
 
     def closeEvent(self, event) -> None:
         if any(w.isRunning() for w in self._workers):
