@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 import qtawesome as qta
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QWidget,
@@ -14,8 +14,133 @@ from PySide6.QtWidgets import (
     QLabel,
     QFrame,
     QPushButton,
-    QMessageBox,
+    QDialog,
 )
+
+
+class _CloseLabel(QLabel):
+    """'X' de fechar clicável, no mesmo padrão visual usado nos outros dialogs."""
+
+    def __init__(self, parent=None):
+        super().__init__("✕", parent)
+        self.setFixedSize(24, 24)
+        self.setAlignment(Qt.AlignCenter)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setStyleSheet(
+            "QLabel { color: #9aa6b2; font-size: 13px; border-radius: 6px; }"
+            "QLabel:hover { background: rgba(200,60,60,60); color: #ff8888; }"
+        )
+
+
+class _ErrorDialog(QDialog):
+    """Dialog de erro estilizado (dark, tema vermelho) — substitui o
+    QMessageBox.warning() genérico do sistema, que destoa do resto da UI."""
+
+    def __init__(self, title: str, message: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setModal(True)
+        self.setMinimumWidth(460)
+        self.setMaximumWidth(640)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self._build_ui(title, message)
+        self._apply_styles()
+        self.adjustSize()
+
+    def _build_ui(self, title: str, message: str) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        header = QFrame()
+        header.setObjectName("ErrHeader")
+        header.setFixedHeight(46)
+        h_layout = QHBoxLayout(header)
+        h_layout.setContentsMargins(16, 0, 14, 0)
+
+        icon = QLabel()
+        icon.setFixedSize(26, 26)
+        icon.setAlignment(Qt.AlignCenter)
+        icon.setPixmap(qta.icon("mdi6.alert-circle", color="#ff8888").pixmap(16, 16))
+        icon.setStyleSheet("QLabel { background: rgba(220,80,80,40); border-radius: 7px; }")
+
+        lbl = QLabel(title)
+        lbl.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+        lbl.setStyleSheet("color: #ecf4ff;")
+
+        btn_x = _CloseLabel(self)
+        btn_x.mousePressEvent = lambda e: self.accept()
+
+        h_layout.addWidget(icon)
+        h_layout.addSpacing(8)
+        h_layout.addWidget(lbl)
+        h_layout.addStretch()
+        h_layout.addWidget(btn_x)
+
+        body = QFrame()
+        body.setObjectName("ErrBody")
+        b_layout = QVBoxLayout(body)
+        b_layout.setContentsMargins(20, 16, 20, 18)
+        b_layout.setSpacing(14)
+
+        msg = QLabel(message)
+        msg.setFont(QFont("DejaVu Sans Mono", 9))
+        msg.setStyleSheet("color: #c8d4e0;")
+        msg.setWordWrap(True)
+        msg.setTextInteractionFlags(Qt.TextSelectableByMouse)
+
+        btn_ok = QPushButton("OK")
+        btn_ok.setObjectName("ErrBtnOk")
+        btn_ok.setFixedWidth(90)
+        btn_ok.clicked.connect(self.accept)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_row.addWidget(btn_ok)
+
+        b_layout.addWidget(msg)
+        b_layout.addLayout(btn_row)
+
+        root.addWidget(header)
+        root.addWidget(body)
+
+    def _apply_styles(self) -> None:
+        self.setStyleSheet("""
+            QFrame#ErrHeader {
+                background: rgba(220, 80, 80, 35);
+                border-bottom: 1px solid rgba(220, 80, 80, 100);
+                border-top-left-radius: 12px;
+                border-top-right-radius: 12px;
+            }
+            QFrame#ErrBody {
+                background: #080c14;
+                border-bottom-left-radius: 12px;
+                border-bottom-right-radius: 12px;
+            }
+            QPushButton#ErrBtnOk {
+                background: rgba(10, 15, 25, 230);
+                border: 1px solid rgba(220, 80, 80, 120);
+                border-radius: 8px; color: #ecf4ff;
+                font-family: "DejaVu Sans Mono";
+                font-size: 11px; padding: 5px 0;
+            }
+            QPushButton#ErrBtnOk:hover {
+                background: rgba(220, 80, 80, 40);
+                border-color: rgba(255, 120, 120, 200);
+            }
+        """)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.LeftButton and hasattr(self, '_drag'):
+            self.move(event.globalPosition().toPoint() - self._drag)
+
+
+def _show_error(title: str, message: str, parent=None) -> None:
+    _ErrorDialog(title, message, parent=parent).exec()
 
 
 class _StatCard(QFrame):
@@ -75,6 +200,10 @@ class _EggsOptionButton(QFrame):
             QFrame#EggsOptionBtn:hover {{
                 background: rgba(255, 255, 255, 9);
                 border: 1px solid {color};
+            }}
+            QFrame#EggsOptionBtn:disabled {{
+                background: rgba(255, 255, 255, 2);
+                border: 1px solid rgba(255, 255, 255, 6);
             }}
         """)
 
@@ -145,6 +274,22 @@ class EggsPage(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        # Mesmo mecanismo do Create Snapshot: Popen direto na thread
+        # principal + QTimer de polling, sem QThread própria — elimina
+        # qualquer diferença arquitetural entre as duas telas.
+        self._proc = None
+        self._poll_timer = QTimer(self)
+        self._poll_timer.setInterval(300)
+        self._poll_timer.timeout.connect(self._poll_process)
+
+        # Garante que nenhum pkexec fique órfão rodando em segundo plano
+        # se o app for fechado com uma operação (Create/Check/Install)
+        # ainda em andamento.
+        from PySide6.QtWidgets import QApplication
+        app = QApplication.instance()
+        if app is not None:
+            app.aboutToQuit.connect(self._terminate_pending_operation)
+
         self.setStyleSheet(
             """
             QWidget { background: transparent; }
@@ -247,7 +392,7 @@ class EggsPage(QWidget):
         cards.setColumnStretch(0, 1)
         cards.setColumnStretch(1, 1)
 
-        btn_create = _EggsOptionButton(
+        self.btn_create = _EggsOptionButton(
             glyph="mdi6.egg-easter",
             title="Create Penguin's Eggs",
             desc="Gera uma nova ISO live (ou move uma já pronta para o Ventoy).",
@@ -255,9 +400,9 @@ class EggsPage(QWidget):
             parent=self,
             badge="requer root",
         )
-        btn_create.clicked.connect(self._on_create)
+        self.btn_create.clicked.connect(self._on_create)
 
-        btn_check = _EggsOptionButton(
+        self.btn_check = _EggsOptionButton(
             glyph="mdi6.file-search-outline",
             title="Check Penguin's Eggs .iso",
             desc="Verifica se há uma .iso pendente e move/faz backup automaticamente.",
@@ -265,27 +410,27 @@ class EggsPage(QWidget):
             parent=self,
             badge="requer root",
         )
-        btn_check.clicked.connect(self._on_check)
+        self.btn_check.clicked.connect(self._on_check)
 
-        btn_broot = _EggsOptionButton(
+        self.btn_broot = _EggsOptionButton(
             glyph="mdi6.folder-search-outline",
             title="Open files — broot",
             desc="Abre o diretório do Ventoy (destino final da ISO) no broot.",
             color="#c8a2ff",
             parent=self,
         )
-        btn_broot.clicked.connect(lambda: self._open_files("broot"))
+        self.btn_broot.clicked.connect(lambda: self._open_files("broot"))
 
-        btn_nautilus = _EggsOptionButton(
+        self.btn_nautilus = _EggsOptionButton(
             glyph="mdi6.folder-open-outline",
             title="Open files — Nautilus",
             desc="Abre o diretório do Ventoy (destino final da ISO) no Nautilus.",
             color="#ffb86b",
             parent=self,
         )
-        btn_nautilus.clicked.connect(lambda: self._open_files("nautilus"))
+        self.btn_nautilus.clicked.connect(lambda: self._open_files("nautilus"))
 
-        btn_install = _EggsOptionButton(
+        self.btn_install = _EggsOptionButton(
             glyph="mdi6.download-circle-outline",
             title="Penguin's Eggs and Calamares Install",
             desc="Instala o penguins-eggs e o módulo Calamares, se necessário.",
@@ -293,13 +438,13 @@ class EggsPage(QWidget):
             parent=self,
             badge="requer root",
         )
-        btn_install.clicked.connect(self._on_install)
+        self.btn_install.clicked.connect(self._on_install)
 
-        cards.addWidget(btn_create, 0, 0)
-        cards.addWidget(btn_check, 0, 1)
-        cards.addWidget(btn_broot, 1, 0)
-        cards.addWidget(btn_nautilus, 1, 1)
-        cards.addWidget(btn_install, 2, 0)
+        cards.addWidget(self.btn_create, 0, 0)
+        cards.addWidget(self.btn_check, 0, 1)
+        cards.addWidget(self.btn_broot, 1, 0)
+        cards.addWidget(self.btn_nautilus, 1, 1)
+        cards.addWidget(self.btn_install, 2, 0)
         # (2, 1) fica livre — reservado para o próximo card que for adicionado aqui
 
         root.addWidget(header)
@@ -324,9 +469,24 @@ class EggsPage(QWidget):
 
     # ── Ações ────────────────────────────────────────────────────────────
 
+    def _terminate_pending_operation(self) -> None:
+        """Mata qualquer pkexec ainda em andamento — chamado ao fechar o
+        app inteiro (aboutToQuit). Sem isso, fechar o Carbonara no meio
+        de um Create/Check/Install deixava o processo órfão rodando pra
+        sempre, acumulando a cada tentativa abandonada."""
+        if self._proc is not None and self._proc.poll() is None:
+            try:
+                self._proc.terminate()
+            except Exception:
+                pass
+
     def _run_with_progress(self, func_name: str, dialog_title: str, preparing_text: str = "Aguardando...", icon_glyph: str = "mdi6.egg-outline") -> None:
+        # Evita disparar uma segunda execução em paralelo se o usuário
+        # clicar de novo enquanto o pkexec ainda está subindo.
+        if self._proc is not None and self._proc.poll() is None:
+            return
+
         import subprocess
-        from PySide6.QtCore import QThread, Signal as Sig
 
         project_root = Path(__file__).resolve().parents[3]
         python_bin = str(Path.home() / "venvs" / "pyside" / "bin" / "python3")
@@ -349,34 +509,55 @@ dialog.exec()
             "env",
             f"DISPLAY={os.environ.get('DISPLAY', '')}",
             f"XAUTHORITY={os.environ.get('XAUTHORITY', '')}",
+            f"PYTHONPATH={project_root}",
             python_bin,
             "-c",
             script,
         ]
 
-        class _Runner(QThread):
-            done = Sig(int, str)
+        try:
+            self._proc = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+            )
+        except Exception as exc:
+            _show_error("Penguin's Eggs", f"Erro ao executar:\n\n{exc}", parent=self)
+            return
 
-            def __init__(self, cmd):
-                super().__init__()
-                self._cmd = cmd
+        self._set_cards_enabled(False)
+        self._poll_timer.start()
 
-            def run(self):
-                result = subprocess.run(self._cmd, capture_output=True, text=True)
-                self.done.emit(result.returncode, result.stderr or result.stdout)
+    def _poll_process(self) -> None:
+        if self._proc is None:
+            return
 
-        self._runner = _Runner(cmd)
+        rc = self._proc.poll()
+        if rc is None:
+            return  # ainda rodando
 
-        def on_done(returncode, output):
-            self.refresh_stats()
-            if returncode == 126 or "dismissed" in output.lower():
-                return
-            if returncode != 0:
-                err = (output or f"exit code {returncode}").strip()
-                QMessageBox.warning(self, "Penguin's Eggs", f"Erro ao executar:\n\n{err}")
+        self._poll_timer.stop()
+        try:
+            stdout, stderr = self._proc.communicate()
+        except Exception:
+            stdout, stderr = "", ""
+        self._proc = None
 
-        self._runner.done.connect(on_done)
-        self._runner.start()
+        self._set_cards_enabled(True)
+        self.refresh_stats()
+
+        output = stderr or stdout or ""
+        if rc == 126 or "dismissed" in output.lower():
+            return
+        if rc != 0:
+            err = (output or f"exit code {rc}").strip()
+            _show_error("Penguin's Eggs", f"Erro ao executar:\n\n{err}", parent=self)
+
+    def _set_cards_enabled(self, enabled: bool) -> None:
+        """Desabilita visualmente os cards de ação enquanto uma operação
+        pkexec está em andamento — dá feedback imediato de que o clique
+        já registrou, evitando que o usuário clique de novo achando que
+        não funcionou durante o delay de abertura do prompt de senha."""
+        for btn in (self.btn_create, self.btn_check, self.btn_install):
+            btn.setEnabled(enabled)
 
     def _on_create(self) -> None:
         self._run_with_progress("create_eggs", "Criando Penguin's Eggs...", "Criando ISO...", "mdi6.egg-easter")
@@ -392,7 +573,7 @@ dialog.exec()
         try:
             open_file_manager(kind)
         except Exception as exc:  # noqa: BLE001
-            QMessageBox.warning(self, "Penguin's Eggs", f"Não foi possível abrir: {exc}")
+            _show_error("Penguin's Eggs", f"Não foi possível abrir: {exc}", parent=self)
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Escape:
