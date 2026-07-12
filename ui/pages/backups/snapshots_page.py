@@ -1283,124 +1283,31 @@ class SnapshotsPage(QWidget):
         self._sync_entry = entry
         self._offer_pair_after_sync = offer_pair
 
-        project_root = Path(__file__).resolve().parents[3]
-        python_bin = Path.home() / "venvs" / "pyside" / "bin" / "python3"
-
         # Arquivo onde o processo elevado (pkexec) grava o resultado real
         # da checagem de pendências do snapshot irmão — evita um segundo
         # prompt de autenticação e evita heurísticas por horário.
         pair_check_path = Path(f"/tmp/carbonara-pair-check-{os.getpid()}-{entry.path.name}.json")
         self._pair_check_path = pair_check_path
 
-        pair_check_block = ""
-        if offer_pair:
-            pair_check_block = f"""
-# ── Verifica via rsync --dry-run se o snapshot irmão (ROOT/HOME) tem
-#    mudanças pendentes reais — não adivinha por horário/synced_at.
-# Exibe um dialog leve (mesmo visual do progresso de delete) enquanto
-# o rsync --dry-run roda em background, sem travar a UI.
-#
-# TUDO aqui — inclusive os imports — fica dentro do try: esta checagem
-# é um extra pós-sync e NUNCA pode derrubar o processo com erro, já
-# que o sync em si já terminou (com sucesso ou falha) antes desta parte.
-import json
+        import json
 
-payload = dict(needs_sync=False, sibling_kind=None, sibling_path=None)
+        args_json = json.dumps({
+            "snapshot_path": str(entry.path),
+            "offer_pair": offer_pair,
+            "pair_check_path": str(pair_check_path),
+        })
 
-try:
-    from PySide6.QtCore import QThread, Signal as QSignal
-    from ui.widgets.backup_progress import PairCheckProgressDialog
-    from core.snapshots.backup import ROOT_EXCLUDES, HOME_EXCLUDES
-
-    entry_path = Path({str(entry.path)!r})
-    kind = entry_path.parent.name.upper()
-    sibling_kind = "HOME" if kind == "ROOT" else ("ROOT" if kind == "HOME" else None)
-    payload["sibling_kind"] = sibling_kind
-
-    if sibling_kind:
-        backup_root = entry_path.parent.parent
-        sibling_dir = backup_root / sibling_kind / entry_path.name
-        meta_file = sibling_dir / "snapshot.json"
-
-        if sibling_dir.exists() and meta_file.exists():
-            meta = json.loads(meta_file.read_text(encoding="utf-8"))
-            source = meta.get("source", "")
-            excludes = ROOT_EXCLUDES if sibling_kind == "ROOT" else HOME_EXCLUDES
-            payload["sibling_path"] = str(sibling_dir)
-
-            if source:
-                class _DryRunWorker(QThread):
-                    done = QSignal(bool)
-
-                    def run(self):
-                        cmd = [
-                            "rsync", "-aAXHh", "--delete",
-                            "--dry-run", "--itemize-changes", "--numeric-ids",
-                        ]
-                        for ex in excludes:
-                            cmd += ["--exclude", ex]
-                        cmd += [source, str(sibling_dir) + "/"]
-                        result = subprocess.run(cmd, capture_output=True, text=True)
-                        changed = [l for l in result.stdout.splitlines() if l.strip()]
-                        # Ruido normal: HOME/ROOT sao diretorios vivos (cache
-                        # de navegador, historico, logs, etc.) que mudam o
-                        # tempo todo, mesmo segundos apos um sync perfeito.
-                        # So considera "desatualizado" se houver uma
-                        # quantidade significativa de mudancas pendentes.
-                        NOISE_THRESHOLD = 15
-                        self.done.emit(len(changed) > NOISE_THRESHOLD)
-
-                check_dialog = PairCheckProgressDialog(sibling_kind + " " + entry_path.name)
-                worker = _DryRunWorker()
-
-                def _on_dry_run_done(has_changes):
-                    payload["needs_sync"] = has_changes
-                    check_dialog.accept()
-
-                worker.done.connect(_on_dry_run_done)
-                worker.start()
-                check_dialog.exec()
-except Exception:
-    import traceback
-    payload["error"] = traceback.format_exc()
-
-try:
-    result_path = Path({str(pair_check_path)!r})
-    result_path.write_text(json.dumps(payload), encoding="utf-8")
-    result_path.chmod(0o666)
-except Exception:
-    pass
-"""
-
-        script = f"""
-import sys
-sys.path.insert(0, {str(project_root)!r})
-
-import subprocess
-from pathlib import Path
-from PySide6.QtWidgets import QApplication
-from core.snapshots.backup import sync_snapshot
-from ui.widgets.backup_progress import BackupProgressDialog
-
-app = QApplication([])
-dialog = BackupProgressDialog("Sincronizando Snapshot")
-sync_snapshot(dialog, snapshot_path={str(entry.path)!r})
-dialog.exec()
-{pair_check_block}
-"""
         cmd = [
             "pkexec",
-            "env",
-            f"DISPLAY={os.environ.get('DISPLAY', '')}",
-            f"XAUTHORITY={os.environ.get('XAUTHORITY', '')}",
-            f"PYTHONPATH={project_root}",
-            str(python_bin),
-            "-c",
-            script,
+            "/usr/local/bin/carbonara-helper",
+            os.environ.get("DISPLAY", ""),
+            os.environ.get("XAUTHORITY", ""),
+            "backup.sync_snapshot",
+            args_json,
         ]
 
         try:
-            self._backup_proc = subprocess.Popen(cmd, cwd=str(project_root))
+            self._backup_proc = subprocess.Popen(cmd)
             self._poll_timer.start()
         except Exception as e:
             OperationManager.finish()
@@ -1522,115 +1429,36 @@ dialog.exec()
         self._current_op_kind = "verify"
         self._verify_entries = {_VerifySelectDialog.make_id(e): e for e in selected}
 
-        project_root = Path(__file__).resolve().parents[3]
-        python_bin = Path.home() / "venvs" / "pyside" / "bin" / "python3"
-
         verify_path = Path(f"/tmp/carbonara-verify-{os.getpid()}.json")
         self._verify_check_path = verify_path
 
-        targets_literal = repr({
+        targets = {
             _VerifySelectDialog.make_id(e): {"kind": e.kind.upper(), "path": str(e.path)}
             for e in selected
-        })
+        }
         kinds_involved = sorted({e.kind.upper() for e in selected})
         verify_label = (
             " + ".join(kinds_involved) if len(selected) <= 2
             else f"{len(selected)} snapshots"
         )
 
-        verify_body = f"""
-import json
-import subprocess
-from pathlib import Path
-from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import QThread, Signal as QSignal
-from ui.widgets.backup_progress import PairCheckProgressDialog
-from core.snapshots.backup import ROOT_EXCLUDES, HOME_EXCLUDES
+        args_json = json.dumps({
+            "targets": targets,
+            "label": verify_label,
+            "result_path": str(verify_path),
+        })
 
-app = QApplication([])
-
-targets = {targets_literal}
-results = dict()
-
-class _VerifyWorker(QThread):
-    done = QSignal(dict)
-
-    def run(self):
-        out = dict()
-        for id_, info in targets.items():
-            kind = info["kind"]
-            snap_path = info["path"]
-            snap_dir = Path(snap_path)
-            meta_file = snap_dir / "snapshot.json"
-            if not meta_file.exists():
-                out[id_] = dict(status="error", detail="snapshot.json nao encontrado")
-                continue
-            try:
-                meta = json.loads(meta_file.read_text(encoding="utf-8"))
-                source = meta.get("source", "")
-                excludes = ROOT_EXCLUDES if kind == "ROOT" else HOME_EXCLUDES
-                if not source:
-                    out[id_] = dict(status="error", detail="campo source ausente no snapshot.json")
-                    continue
-                cmd = [
-                    "rsync", "-aAXHh", "--delete",
-                    "--dry-run", "--itemize-changes", "--numeric-ids",
-                ]
-                for ex in excludes:
-                    cmd = cmd + ["--exclude", ex]
-                cmd = cmd + [source, str(snap_dir) + "/"]
-                result = subprocess.run(cmd, capture_output=True, text=True)
-                if result.returncode not in (0, 23, 24):
-                    detail = "rsync codigo " + str(result.returncode) + ": " + result.stderr.strip()[:200]
-                    out[id_] = dict(status="error", detail=detail)
-                    continue
-                changed = [l for l in result.stdout.splitlines() if l.strip()]
-                # Ruido normal do sistema (cache, logs, etc.) - so acusa
-                # desatualizado com uma quantidade significativa de mudancas.
-                NOISE_THRESHOLD = 15
-                is_stale = len(changed) > NOISE_THRESHOLD
-                out[id_] = dict(status=("stale" if is_stale else "ok"), detail=str(len(changed)) + " itens no dry-run")
-            except Exception as exc:
-                out[id_] = dict(status="error", detail=str(exc))
-        self.done.emit(out)
-
-check_dialog = PairCheckProgressDialog({verify_label!r})
-worker = _VerifyWorker()
-
-def _on_verify_done(res):
-    results.update(res)
-    check_dialog.accept()
-
-worker.done.connect(_on_verify_done)
-worker.start()
-check_dialog.exec()
-
-try:
-    result_path = Path({str(verify_path)!r})
-    result_path.write_text(json.dumps(results), encoding="utf-8")
-    result_path.chmod(0o666)
-except Exception:
-    pass
-"""
-
-        script = f"""
-import sys
-sys.path.insert(0, {str(project_root)!r})
-{verify_body}
-"""
         cmd = [
             "pkexec",
-            "env",
-            f"DISPLAY={os.environ.get('DISPLAY', '')}",
-            f"XAUTHORITY={os.environ.get('XAUTHORITY', '')}",
-            f"PYTHONPATH={project_root}",
-            str(python_bin),
-            "-c",
-            script,
+            "/usr/local/bin/carbonara-helper",
+            os.environ.get("DISPLAY", ""),
+            os.environ.get("XAUTHORITY", ""),
+            "backup.verify",
+            args_json,
         ]
 
         try:
-            self._backup_proc = subprocess.Popen(cmd, cwd=str(project_root))
+            self._backup_proc = subprocess.Popen(cmd)
             self._poll_timer.start()
         except Exception as e:
             OperationManager.finish()
