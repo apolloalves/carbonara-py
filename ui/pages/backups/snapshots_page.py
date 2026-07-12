@@ -1168,36 +1168,24 @@ class SnapshotsPage(QWidget):
         self._current_op_kind = "backup"
         self._sync_entry = None
 
-        project_root = Path(__file__).resolve().parents[3]
-        python_bin = Path.home() / "venvs" / "pyside" / "bin" / "python3"
+        import json
 
-        script = f"""
-import sys
-sys.path.insert(0, {str(project_root)!r})
-
-from PySide6.QtWidgets import QApplication
-from core.snapshots.backup import create_backup
-from ui.widgets.backup_progress import BackupProgressDialog
-
-app = QApplication([])
-dialog = BackupProgressDialog("Create Snapshot")
-create_backup(dialog, destination_mountpoint={dest.mountpoint!r}, scope={self.current_scope()!r})
-dialog.exec()
-"""
+        args_json = json.dumps({
+            "destination_mountpoint": dest.mountpoint,
+            "scope": self.current_scope(),
+        })
 
         cmd = [
             "pkexec",
-            "env",
-            f"DISPLAY={os.environ.get('DISPLAY', '')}",
-            f"XAUTHORITY={os.environ.get('XAUTHORITY', '')}",
-            f"PYTHONPATH={project_root}",
-            str(python_bin),
-            "-c",
-            script,
+            "/usr/local/bin/carbonara-helper",
+            os.environ.get("DISPLAY", ""),
+            os.environ.get("XAUTHORITY", ""),
+            "backup.create_backup",
+            args_json,
         ]
 
         try:
-            self._backup_proc = subprocess.Popen(cmd, cwd=str(project_root))
+            self._backup_proc = subprocess.Popen(cmd)
             self._poll_timer.start()
         except Exception as e:
             OperationManager.finish()

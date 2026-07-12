@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 import qtawesome as qta
 from PySide6.QtCore import Qt, Signal, QTimer
@@ -486,33 +485,23 @@ class EggsPage(QWidget):
         if self._proc is not None and self._proc.poll() is None:
             return
 
+        import json
         import subprocess
 
-        project_root = Path(__file__).resolve().parents[3]
-        python_bin = str(Path.home() / "venvs" / "pyside" / "bin" / "python3")
+        args_json = json.dumps({
+            "func_name": func_name,
+            "title": dialog_title,
+            "preparing_text": preparing_text,
+            "icon_glyph": icon_glyph,
+        })
 
-        script = f"""
-import sys
-sys.path.insert(0, {str(project_root)!r})
-
-from PySide6.QtWidgets import QApplication
-from core.eggs.eggs import {func_name}
-from ui.widgets.eggs_progress import EggsProgressDialog
-
-app = QApplication([])
-dialog = EggsProgressDialog({dialog_title!r}, preparing_text={preparing_text!r}, icon_glyph={icon_glyph!r})
-{func_name}(dialog)
-dialog.exec()
-"""
         cmd = [
             "pkexec",
-            "env",
-            f"DISPLAY={os.environ.get('DISPLAY', '')}",
-            f"XAUTHORITY={os.environ.get('XAUTHORITY', '')}",
-            f"PYTHONPATH={project_root}",
-            python_bin,
-            "-c",
-            script,
+            "/usr/local/bin/carbonara-helper",
+            os.environ.get("DISPLAY", ""),
+            os.environ.get("XAUTHORITY", ""),
+            "eggs_action",
+            args_json,
         ]
 
         try:
