@@ -167,7 +167,13 @@ class TitleBar(QWidget):
 
     def _close(self):
         win = self._window()
-        if win:
+        if not win:
+            return
+        # Reusa o mesmo dialog de confirmação que o ESC já dispara
+        # (MainWindow._show_exit_dialog), em vez de fechar direto.
+        if hasattr(win, "_show_exit_dialog"):
+            win._show_exit_dialog()
+        else:
             win.close()
 
     def mousePressEvent(self, event):

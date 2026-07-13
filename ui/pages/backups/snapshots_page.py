@@ -1242,6 +1242,11 @@ class SnapshotsPage(QWidget):
         # confirmado, não precisa perguntar de novo.
         if rc == 0 and self._current_op_kind == "sync" and self._sync_queue:
             next_entry = self._sync_queue.pop(0)
+            # Garantia defensiva: nesse ponto o finish() já rodou linhas
+            # acima, mas forçamos de novo antes de encadear — nada mais
+            # deveria estar "rodando" aqui, então isso é seguro e evita
+            # qualquer resquício de estado impedir o próximo da fila.
+            OperationManager.finish()
             self._start_sync_process(next_entry, offer_pair=False)
             return
 
@@ -1369,6 +1374,9 @@ class SnapshotsPage(QWidget):
         if dlg.exec() != QDialog.Accepted:
             return
 
+        # Garantia defensiva — ver comentário equivalente no encadeamento
+        # da fila em _poll_backup_process.
+        OperationManager.finish()
         self._start_sync_process(sibling_entry, offer_pair=False)
 
     def verify_all_snapshots(self):
@@ -1555,6 +1563,9 @@ class SnapshotsPage(QWidget):
             return
         first = queue.pop(0)
         self._sync_queue = queue
+        # Garantia defensiva — ver comentário equivalente no encadeamento
+        # da fila em _poll_backup_process.
+        OperationManager.finish()
         self._start_sync_process(first, offer_pair=False)
 
     def delete_snapshot(self, entry: SnapshotEntry):
@@ -1742,8 +1753,8 @@ class _InfoDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setModal(True)
-        self.setMinimumWidth(460)
-        self.setMaximumWidth(640)
+        self.setMinimumWidth(500)
+        self.setMaximumWidth(680)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
         self._build_ui(title, message)
         self._apply_styles()
@@ -1783,11 +1794,12 @@ class _InfoDialog(QDialog):
         body = QFrame()
         body.setObjectName("InfoBody")
         b_layout = QVBoxLayout(body)
-        b_layout.setContentsMargins(20, 16, 20, 18)
-        b_layout.setSpacing(14)
+        b_layout.setContentsMargins(24, 24, 24, 22)
+        b_layout.setSpacing(20)
 
-        msg = QLabel(message)
-        msg.setFont(QFont("DejaVu Sans Mono", 9))
+        msg = QLabel(message.replace("\n", "<br><br>"))
+        msg.setTextFormat(Qt.RichText)
+        msg.setFont(QFont("DejaVu Sans Mono", 10))
         msg.setStyleSheet("color: #c8d4e0;")
         msg.setWordWrap(True)
         msg.setTextInteractionFlags(Qt.TextSelectableByMouse)
@@ -2314,8 +2326,6 @@ def _do_full_restore(entry: SnapshotEntry, parent=None) -> None:
 
         output = Path(destination_mountpoint) / "carbonara-restore.sh"
         output_instr = Path(destination_mountpoint) / "carbonara-restore-INSTRUCOES.txt"
-        project_root = Path(__file__).resolve().parents[3]
-        python_bin = str(Path.home() / "venvs" / "pyside" / "bin" / "python3")
 
         # Detecta ISO sugerida para incluir nas instruções
         ventoy = Path("/mnt/VENTOY")
@@ -2330,62 +2340,22 @@ def _do_full_restore(entry: SnapshotEntry, parent=None) -> None:
         except Exception:
             pass
 
-        script = f"""
-import sys
-sys.path.insert(0, {str(project_root)!r})
-from core.snapshots.restore import generate_restore_script
-from pathlib import Path
-from datetime import datetime
+        args_json = json.dumps({
+            "root_path": root_path,
+            "home_path": home_path,
+            "output": str(output),
+            "output_instr": str(output_instr),
+            "suggested_iso": suggested_iso,
+        })
 
-script_path = generate_restore_script(
-    snapshot_root_path={repr(root_path)},
-    snapshot_home_path={repr(home_path)},
-    output_path={str(output)!r},
-)
-
-# Gera arquivo de instruções junto
-out_instr = Path({str(output_instr)!r})
-content = f\"\"\"
-================================================================================
-  CARBONARA — INSTRUCOES DE RESTORE COMPLETO DO SISTEMA
-  Gerado em: {{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}}
-================================================================================
-
-PASSO 1 — Boot pelo Ventoy
-  Reinicie o computador e selecione pelo Ventoy:
-  -> {suggested_iso}
-
-PASSO 2 — Execute no shell do live ISO
-  Cole o comando abaixo e pressione Enter:
-
-  bash <(mount /dev/sdc3 /mnt/bk 2>/dev/null; cat /mnt/bk/carbonara-restore.sh)
-
-  O script ira:
-  OK Montar o disco de backup automaticamente
-  OK Montar o array RAID0 (/dev/md127)
-  OK Restaurar ROOT e HOME via rsync
-  OK Reinstalar o GRUB (legacy BIOS)
-  OK Desmontar tudo ao finalizar
-
-PASSO 3 — Confirmacao
-  Quando solicitado, digite exatamente:  RESTAURAR
-  (qualquer outra entrada cancela a operacao)
-
-================================================================================
-  ARQUIVOS GERADOS
-  Script:      {str(output)}
-  Instrucoes:  {str(output_instr)}
-================================================================================
-\"\"\".strip()
-out_instr.write_text(content, encoding="utf-8")
-"""
         result = subprocess.run(
             [
-                "pkexec", "env",
-                f"DISPLAY={os.environ.get('DISPLAY', '')}",
-                f"XAUTHORITY={os.environ.get('XAUTHORITY', '')}",
-                f"PYTHONPATH={project_root}",
-                python_bin, "-c", script,
+                "pkexec",
+                "/usr/local/bin/carbonara-helper",
+                os.environ.get("DISPLAY", ""),
+                os.environ.get("XAUTHORITY", ""),
+                "restore.generate_script",
+                args_json,
             ],
             capture_output=True, text=True,
         )
@@ -3107,61 +3077,14 @@ class _FileBrowserDialog(QDialog):
         if confirm.exec() != QDialog.Accepted:
             return
 
-        items_repr = repr([str(p) for p in self._selected_items])
-        snap_root_repr = repr(str(self.snapshot_root))
-        conflict_repr = repr(self._conflict_mode)
-        # Snapshot HOME armazena o conteúdo de /home/ sem o prefixo "home/"
-        # — precisa recolocar esse prefixo no destino real.
-        dest_prefix_repr = repr("home") if self.entry.kind.upper() == "HOME" else repr("")
-
-        script = f"""
-import shutil
-from pathlib import Path
-
-snapshot_root = Path({snap_root_repr})
-items = {items_repr}
-conflict = {conflict_repr}
-dest_prefix = {dest_prefix_repr}
-
-def to_dest(rel: Path) -> Path:
-    if dest_prefix:
-        return Path("/") / dest_prefix / rel
-    return Path("/") / rel
-
-for src_str in items:
-    src = Path(src_str)
-    try:
-        rel = src.relative_to(snapshot_root)
-    except ValueError:
-        continue
-    dst = to_dest(rel)
-    if src.is_dir():
-        for f in src.rglob("*"):
-            if f.is_file() or f.is_symlink():
-                try:
-                    rel_f = f.relative_to(snapshot_root)
-                    dst_f = to_dest(rel_f)
-                    if dst_f.exists() and conflict == "skip":
-                        print(f"SKIP: {{dst_f}}")
-                        continue
-                    dst_f.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(f, dst_f)
-                    print(f"OK: {{dst_f}}")
-                except Exception as ex:
-                    print(f"ERR: {{dst_f}} -- {{ex}}")
-    else:
-        try:
-            if dst.exists() and conflict == "skip":
-                print(f"SKIP: {{dst}}")
-            else:
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(src, dst)
-                print(f"OK: {{dst}}")
-        except Exception as ex:
-            print(f"ERR: {{dst}} -- {{ex}}")
-"""
-        project_root = Path(__file__).resolve().parents[3]
-        python_bin = str(Path.home() / "venvs" / "pyside" / "bin" / "python3")
+        args_json = json.dumps({
+            "snapshot_root": str(self.snapshot_root),
+            "items": [str(p) for p in self._selected_items],
+            "conflict": self._conflict_mode,
+            # Snapshot HOME armazena o conteúdo de /home/ sem o prefixo
+            # "home/" — precisa recolocar esse prefixo no destino real.
+            "dest_prefix": "home" if self.entry.kind.upper() == "HOME" else "",
+        })
 
         self.log_frame.setVisible(True)
         self.log_view.clear()
@@ -3169,9 +3092,7 @@ for src_str in items:
         self.restore_progress.setRange(0, 0)
 
         worker = _FileBrowserRestoreWorker(
-            python_bin=python_bin,
-            project_root=str(project_root),
-            script=script,
+            args_json=args_json,
             parent=self,
         )
         worker.log_line.connect(self._on_log_line)
@@ -3304,21 +3225,20 @@ class _FileBrowserRestoreWorker(QThread):
     finished_ok = Signal()
     failed = Signal(str)
 
-    def __init__(self, python_bin, project_root, script, parent=None):
+    def __init__(self, args_json: str, parent=None):
         super().__init__(parent)
-        self._python_bin = python_bin
-        self._project_root = project_root
-        self._script = script
+        self._args_json = args_json
 
     def run(self):
         try:
             result = subprocess.run(
                 [
-                    "pkexec", "env",
-                    f"DISPLAY={os.environ.get('DISPLAY', '')}",
-                    f"XAUTHORITY={os.environ.get('XAUTHORITY', '')}",
-                    f"PYTHONPATH={self._project_root}",
-                    self._python_bin, "-c", self._script,
+                    "pkexec",
+                    "/usr/local/bin/carbonara-helper",
+                    os.environ.get("DISPLAY", ""),
+                    os.environ.get("XAUTHORITY", ""),
+                    "restore.copy_files",
+                    self._args_json,
                 ],
                 capture_output=True, text=True,
             )
@@ -3672,75 +3592,25 @@ class _AltRestoreDialog(QDialog):
 
         self.accept()
 
-        project_root = Path(__file__).resolve().parents[3]
-        python_bin = str(Path.home() / "venvs" / "pyside" / "bin" / "python3")
-        snap_path = str(self.entry.path)
-        dest_path = dest.mountpoint
+        args_json = json.dumps({
+            "snap_path": str(self.entry.path),
+            "dest_path": dest.mountpoint,
+            "dest_label": dest.label,
+            "use_delete": use_delete,
+            "use_hardlinks": use_hardlinks,
+        })
 
-        script = f"""
-import sys, subprocess
-sys.path.insert(0, {str(project_root)!r})
-
-from PySide6.QtWidgets import QApplication
-from ui.widgets.backup_progress import BackupProgressDialog
-from core.workers.rsync_worker import RsyncWorker
-from pathlib import Path
-
-snap = Path({snap_path!r})
-dest_base = Path({dest_path!r}) / "CarbonaraSnapshots" / snap.parent.name
-dest_base.mkdir(parents=True, exist_ok=True)
-dest_dir = dest_base / snap.name
-
-cmd = [
-    "rsync", "-aAXHh",
-    "--numeric-ids",
-    "--info=progress2",
-    "--out-format=Copiando: %n",
-]
-{"""cmd.append("--delete")""" if use_delete else ""}
-{"""cmd.append("-H")""" if use_hardlinks else ""}
-cmd += [str(snap) + "/", str(dest_dir) + "/"]
-
-app = QApplication([])
-dialog = BackupProgressDialog("Restore para {dest.label}")
-dialog.set_running(True)
-dialog.set_status("Iniciando restore...")
-dialog.progress.setRange(0, 100)
-dialog.progress.setValue(0)
-
-worker = RsyncWorker(cmd, title="Copiando snapshot...", parent=dialog)
-dialog.register_worker(worker)
-worker.progress_changed.connect(dialog.progress.setValue)
-worker.status_changed.connect(dialog.set_status)
-worker.file_changed.connect(dialog.set_current_file)
-worker.log_line.connect(dialog.append_log)
-
-def on_ok():
-    dialog.set_status("Restore concluído com sucesso.")
-    dialog.progress.setValue(100)
-    dialog.set_running(False)
-    dialog.btn_close.setEnabled(True)
-
-def on_fail(msg):
-    dialog.set_status(f"Erro: {{msg}}")
-    dialog.set_running(False)
-    dialog.btn_close.setEnabled(True)
-
-worker.finished_ok.connect(on_ok)
-worker.failed.connect(on_fail)
-worker.start()
-dialog.exec()
-"""
         cmd_pkexec = [
-            "pkexec", "env",
-            f"DISPLAY={os.environ.get('DISPLAY', '')}",
-            f"XAUTHORITY={os.environ.get('XAUTHORITY', '')}",
-            f"PYTHONPATH={project_root}",
-            python_bin, "-c", script,
+            "pkexec",
+            "/usr/local/bin/carbonara-helper",
+            os.environ.get("DISPLAY", ""),
+            os.environ.get("XAUTHORITY", ""),
+            "restore.copy_to_alt_disk",
+            args_json,
         ]
 
         try:
-            subprocess.Popen(cmd_pkexec, cwd=str(project_root))
+            subprocess.Popen(cmd_pkexec)
         except Exception as e:
             _show_error("Restore Alternativo", str(e), parent=self.parent())
 
@@ -4804,53 +4674,21 @@ class _DeleteWorker(QThread):
                 )
                 new_latest = candidates[-1] if candidates else None
 
-            project_root = Path(__file__).resolve().parents[3]
-
-            # Script python que roda como root via pkexec
-            script = f"""
-import sys
-sys.path.insert(0, {str(project_root)!r})
-
-import shutil, os
-from pathlib import Path
-from core.snapshots.backup import _try_generate_restore_script
-
-target = Path({str(self._path)!r})
-link   = Path({str(link)!r})
-
-shutil.rmtree(target)
-
-# Atualiza symlink latest
-if link.is_symlink() or link.exists():
-    link.unlink()
-
-new_latest = {repr(str(new_latest)) if new_latest else repr(None)}
-if new_latest:
-    link.symlink_to(Path(new_latest).name)
-
-# Remove a pasta ROOT/HOME em si se ficou vazia — os.rmdir só funciona
-# se estiver realmente vazia (nunca apaga nada com conteúdo dentro),
-# então é seguro tentar sem checagem extra.
-kind_base = target.parent
-try:
-    os.rmdir(kind_base)
-except OSError:
-    pass  # ainda tem outros snapshots, ou não está vazia por outro motivo
-
-# Regenera (ou remove, se não sobrar ROOT) o carbonara-restore.sh — mesmo
-# processo usado após backup/sync, pra nunca deixar o script apontando
-# para um snapshot que acabou de ser apagado.
-snapshot_base = Path({str(kind_base.parent)!r})
-destination_mountpoint = {str(kind_base.parent.parent)!r}
-_try_generate_restore_script(snapshot_base, destination_mountpoint)
-"""
-            import subprocess
-            from pathlib import Path as _Path
-
-            python_bin = str(_Path.home() / "venvs" / "pyside" / "bin" / "python3")
+            args_json = json.dumps({
+                "target": str(self._path),
+                "link": str(link),
+                "new_latest": str(new_latest) if new_latest else None,
+            })
 
             result = subprocess.run(
-                ["pkexec", python_bin, "-c", script],
+                [
+                    "pkexec",
+                    "/usr/local/bin/carbonara-helper",
+                    os.environ.get("DISPLAY", ""),
+                    os.environ.get("XAUTHORITY", ""),
+                    "backup.delete_snapshot",
+                    args_json,
+                ],
                 capture_output=True,
                 text=True,
             )
