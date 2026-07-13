@@ -32,7 +32,15 @@ def get_dashboard_stats() -> dict:
 
     try:
         if VENTOY.exists() and VENTOY.is_mount():
-            isos = sorted(VENTOY.glob("*.iso"), key=lambda p: p.stat().st_mtime, reverse=True)
+            # Só ISOs geradas pelo próprio Eggs (renomeadas com o prefixo
+            # "ARCHLINUX_" em _move_and_backup_iso) — sem isso, uma ISO
+            # baixada manualmente do site oficial (ex: archlinux-2026...)
+            # podia aparecer como "última ISO" só por ter mtime mais recente,
+            # mesmo sem ter nenhuma relação com o Eggs.
+            isos = sorted(
+                VENTOY.glob("ARCHLINUX_*.iso"),
+                key=lambda p: p.stat().st_mtime, reverse=True,
+            )
             if isos:
                 stats["last_iso"] = isos[0].name
             st = os.statvfs(str(VENTOY))

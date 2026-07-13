@@ -3,8 +3,8 @@ from __future__ import annotations
 import os
 
 import qtawesome as qta
-from PySide6.QtCore import Qt, Signal, QTimer
-from PySide6.QtGui import QFont
+from PySide6.QtCore import Qt, Signal, QTimer, QPropertyAnimation, QEasingCurve
+from PySide6.QtGui import QFont, QColor
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -14,6 +14,8 @@ from PySide6.QtWidgets import (
     QFrame,
     QPushButton,
     QDialog,
+    QGraphicsDropShadowEffect,
+    QGraphicsOpacityEffect,
 )
 
 
@@ -145,39 +147,86 @@ def _show_error(title: str, message: str, parent=None) -> None:
 class _StatCard(QFrame):
     """Card de resumo (somente leitura) para a faixa de status do topo."""
 
-    def __init__(self, label: str, value: str, color: str = "#dce6f0", parent=None):
+    def __init__(
+        self,
+        label: str,
+        value: str,
+        color: str = "#dce6f0",
+        parent=None,
+        glyph: str = "mdi6.information-outline",
+        bar_color: str = "#23a6ff",
+        is_status: bool = False,
+    ):
         super().__init__(parent)
         self.setObjectName("EggsStatCard")
         self.setFixedHeight(96)
-        self.setStyleSheet("""
-            QFrame#EggsStatCard {
+        self._glyph = glyph
+        self._is_status = is_status
+        self.setStyleSheet(f"""
+            QFrame#EggsStatCard {{
                 background: rgba(255, 255, 255, 5);
                 border: 1px solid rgba(255, 255, 255, 8);
-                border-radius: 18px;
-            }
+                border-top: 2px solid {bar_color};
+                border-radius: 14px;
+            }}
         """)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(22, 20, 22, 20)
-        layout.setSpacing(6)
-        layout.setAlignment(Qt.AlignVCenter)
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(18)
+        shadow.setOffset(0, 0)
+        shadow.setColor(QColor(0, 0, 0, 35))
+        self.setGraphicsEffect(shadow)
+
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(20, 16, 20, 16)
+        outer.setSpacing(14)
+        outer.setAlignment(Qt.AlignVCenter)
+
+        self.icon_lbl = QLabel()
+        self.icon_lbl.setFixedSize(34, 34)
+        self.icon_lbl.setAlignment(Qt.AlignCenter)
+        self.icon_lbl.setPixmap(qta.icon(glyph, color=bar_color).pixmap(18, 18))
+        h = bar_color.lstrip("#")
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        self.icon_lbl.setStyleSheet(
+            f"QLabel {{ background: rgba({r},{g},{b},30); border-radius: 10px; }}"
+        )
+
+        text_col = QVBoxLayout()
+        text_col.setSpacing(6)
+        text_col.setAlignment(Qt.AlignVCenter)
 
         lbl = QLabel(label)
         lbl.setFont(QFont("DejaVu Sans Mono", 9))
         lbl.setStyleSheet("color: #6b7a8d; background: transparent; border: none;")
+
+        value_row = QHBoxLayout()
+        value_row.setSpacing(6)
+        value_row.setContentsMargins(0, 0, 0, 0)
+
+        self.dot_lbl = QLabel("●")
+        self.dot_lbl.setStyleSheet(f"color: {color}; background: transparent; border: none; font-size: 10px;")
+        self.dot_lbl.setVisible(is_status)
 
         self.value_lbl = QLabel(value)
         self.value_lbl.setFont(QFont("DejaVu Sans Mono", 13, QFont.Bold))
         self.value_lbl.setWordWrap(True)
         self.value_lbl.setStyleSheet(f"color: {color}; background: transparent; border: none;")
 
-        layout.addWidget(lbl)
-        layout.addWidget(self.value_lbl)
+        value_row.addWidget(self.dot_lbl)
+        value_row.addWidget(self.value_lbl, 1)
+
+        text_col.addWidget(lbl)
+        text_col.addLayout(value_row)
+
+        outer.addWidget(self.icon_lbl)
+        outer.addLayout(text_col, 1)
 
     def set_value(self, value: str, color: str | None = None) -> None:
         self.value_lbl.setText(value)
         if color:
             self.value_lbl.setStyleSheet(f"color: {color}; background: transparent; border: none;")
+            self.dot_lbl.setStyleSheet(f"color: {color}; background: transparent; border: none; font-size: 10px;")
 
 
 class _EggsOptionButton(QFrame):
@@ -185,19 +234,33 @@ class _EggsOptionButton(QFrame):
 
     clicked = Signal()
 
-    def __init__(self, glyph: str, title: str, desc: str, color: str, parent=None, badge: str = ""):
+    def __init__(
+        self,
+        glyph: str,
+        title: str,
+        desc: str,
+        color: str,
+        parent=None,
+        badge: str = "",
+        primary: bool = False,
+    ):
         super().__init__(parent)
+        self._color = color
+        self._primary = primary
         self.setCursor(Qt.PointingHandCursor)
         self.setObjectName("EggsOptionBtn")
-        self.setFixedHeight(110)
+        self.setFixedHeight(130 if primary else 110)
+
+        bg = "rgba(255, 255, 255, 9)" if primary else "rgba(255, 255, 255, 5)"
+        border = f"1px solid {color}" if primary else "1px solid rgba(255, 255, 255, 10)"
         self.setStyleSheet(f"""
             QFrame#EggsOptionBtn {{
-                background: rgba(255, 255, 255, 5);
-                border: 1px solid rgba(255, 255, 255, 10);
+                background: {bg};
+                border: {border};
                 border-radius: 18px;
             }}
             QFrame#EggsOptionBtn:hover {{
-                background: rgba(255, 255, 255, 9);
+                background: rgba(255, 255, 255, 12);
                 border: 1px solid {color};
             }}
             QFrame#EggsOptionBtn:disabled {{
@@ -206,15 +269,31 @@ class _EggsOptionButton(QFrame):
             }}
         """)
 
+        # Sombra de profundidade — card primário ganha um glow sutil na
+        # cor de destaque, os demais uma sombra neutra discreta.
+        self._shadow = QGraphicsDropShadowEffect(self)
+        self._shadow.setBlurRadius(28 if primary else 18)
+        self._shadow.setOffset(0, 2 if primary else 0)
+        if primary:
+            h = color.lstrip("#")
+            r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+            self._shadow.setColor(QColor(r, g, b, 90))
+        else:
+            self._shadow.setColor(QColor(0, 0, 0, 35))
+        self.setGraphicsEffect(self._shadow)
+        self._shadow_blur_base = self._shadow.blurRadius()
+
         layout = QHBoxLayout(self)
         layout.setContentsMargins(24, 0, 24, 0)
         layout.setSpacing(18)
         layout.setAlignment(Qt.AlignVCenter)
 
+        icon_size = 56 if primary else 48
+        glyph_size = 28
         ico_lbl = QLabel()
-        ico_lbl.setFixedSize(48, 48)
+        ico_lbl.setFixedSize(icon_size, icon_size)
         ico_lbl.setAlignment(Qt.AlignCenter)
-        ico_lbl.setPixmap(qta.icon(glyph, color=color).pixmap(24, 24))
+        ico_lbl.setPixmap(qta.icon(glyph, color=color).pixmap(glyph_size, glyph_size))
         h = color.lstrip("#")
         r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
         ico_lbl.setStyleSheet(
@@ -231,39 +310,81 @@ class _EggsOptionButton(QFrame):
         title_row.setSpacing(10)
         title_row.setContentsMargins(0, 0, 0, 0)
 
-        t = QLabel(title)
-        t.setFont(QFont("DejaVu Sans Mono", 12, QFont.Bold))
-        t.setStyleSheet(f"color: {color}; background: transparent; border: none;")
-        title_row.addWidget(t)
+        self.title_lbl = QLabel(title)
+        self.title_lbl.setFont(QFont("DejaVu Sans Mono", 13 if primary else 12, QFont.Bold))
+        self.title_lbl.setStyleSheet(f"color: {color}; background: transparent; border: none;")
+        title_row.addWidget(self.title_lbl)
 
+        self.badge_lbl = None
         if badge:
-            h = color.lstrip("#")
-            r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
             badge_lbl = QLabel(badge.upper())
             badge_lbl.setFont(QFont("DejaVu Sans Mono", 8, QFont.Bold))
+            # Badge discreta — cinza neutro em vez da cor de destaque do
+            # card, pra não competir visualmente com o título.
             badge_lbl.setStyleSheet(
-                f"color: {color}; background: rgba({r},{g},{b},22); "
-                f"border: 1px solid rgba({r},{g},{b},70); border-radius: 5px; "
-                "padding: 2px 8px;"
+                "color: #6b7a8d; background: rgba(255,255,255,10); "
+                "border: 1px solid rgba(255,255,255,18); border-radius: 5px; "
+                "padding: 2px 7px;"
             )
             title_row.addWidget(badge_lbl)
+            self.badge_lbl = badge_lbl
 
         title_row.addStretch()
 
-        d = QLabel(desc)
-        d.setFont(QFont("DejaVu Sans Mono", 10))
-        d.setWordWrap(False)
-        d.setStyleSheet("color: #6b7a8d; background: transparent; border: none;")
+        self.desc_lbl = QLabel(desc)
+        self.desc_lbl.setFont(QFont("DejaVu Sans Mono", 10.5))
+        self.desc_lbl.setWordWrap(False)
+        self.desc_lbl.setStyleSheet("color: #7d8a99; background: transparent; border: none;")
 
         text.addLayout(title_row)
-        text.addWidget(d)
+        text.addWidget(self.desc_lbl)
+
+        if primary:
+            cta_row = QHBoxLayout()
+            cta_row.setContentsMargins(0, 4, 0, 0)
+            cta = QLabel(f"▸ {title.split()[0]} ISO")
+            cta.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
+            cta.setStyleSheet(f"color: {color}; background: transparent; border: none;")
+            cta_row.addStretch()
+            cta_row.addWidget(cta)
+            text.addLayout(cta_row)
+
         layout.addWidget(ico_lbl, 0, Qt.AlignVCenter)
         layout.addLayout(text)
         layout.addStretch()
 
+    def set_title(self, title: str) -> None:
+        self.title_lbl.setText(title)
+
+    def set_desc(self, desc: str) -> None:
+        self.desc_lbl.setText(desc)
+
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self.clicked.emit()
+
+    def enterEvent(self, event):
+        # Hover "moderno" (estilo GNOME Software): intensifica a sombra
+        # em vez de mover pixels de verdade — é mais robusto dentro de um
+        # QGridLayout do que tentar deslocar a posição do widget.
+        anim = QPropertyAnimation(self._shadow, b"blurRadius", self)
+        anim.setDuration(150)
+        anim.setStartValue(self._shadow.blurRadius())
+        anim.setEndValue(self._shadow_blur_base + 14)
+        anim.setEasingCurve(QEasingCurve.OutCubic)
+        anim.start()
+        self._hover_anim = anim
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        anim = QPropertyAnimation(self._shadow, b"blurRadius", self)
+        anim.setDuration(150)
+        anim.setStartValue(self._shadow.blurRadius())
+        anim.setEndValue(self._shadow_blur_base)
+        anim.setEasingCurve(QEasingCurve.OutCubic)
+        anim.start()
+        self._hover_anim = anim
+        super().leaveEvent(event)
 
 
 class EggsPage(QWidget):
@@ -280,6 +401,14 @@ class EggsPage(QWidget):
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(300)
         self._poll_timer.timeout.connect(self._poll_process)
+
+        # Auto-refresh das stats do topo (Última ISO, Ventoy, Instalado) —
+        # só roda enquanto a tela está de fato visível (liga no showEvent,
+        # desliga no hideEvent), pra não ficar varrendo o Ventoy e chamando
+        # pacman em segundo plano quando o usuário está em outra tela.
+        self._stats_refresh_timer = QTimer(self)
+        self._stats_refresh_timer.setInterval(8000)
+        self._stats_refresh_timer.timeout.connect(self.refresh_stats)
 
         # Garante que nenhum pkexec fique órfão rodando em segundo plano
         # se o app for fechado com uma operação (Create/Check/Install)
@@ -303,6 +432,18 @@ class EggsPage(QWidget):
                 background: rgba(23, 147, 209, 70);
                 border: 1px solid rgba(35, 166, 255, 180);
             }
+            QPushButton#BackLink {
+                padding: 4px 2px;
+                border: none;
+                background: transparent;
+                color: #9aa6b2;
+                text-align: left;
+            }
+            QPushButton#BackLink:hover {
+                background: transparent;
+                border: none;
+                color: #23a6ff;
+            }
             """
         )
         self._build_ui()
@@ -311,8 +452,8 @@ class EggsPage(QWidget):
         from ui.main_window import TopHeader  # import adiado — evita import circular
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(32, 24, 32, 24)
-        root.setSpacing(22)
+        root.setContentsMargins(32, 18, 32, 24)
+        root.setSpacing(16)
 
         self.top_header = TopHeader()
         root.addWidget(self.top_header)
@@ -321,7 +462,11 @@ class EggsPage(QWidget):
         top_row.setContentsMargins(0, 0, 0, 0)
         top_row.setSpacing(10)
 
-        btn_back = QPushButton("← Back to menu")
+        # Item 10 — parece navegação (só texto, sem moldura de botão),
+        # em vez de um botão comum.
+        btn_back = QPushButton("←  Back")
+        btn_back.setObjectName("BackLink")
+        btn_back.setCursor(Qt.PointingHandCursor)
         btn_back.clicked.connect(self.back_requested.emit)
         top_row.addWidget(btn_back)
         top_row.addStretch(1)
@@ -354,7 +499,7 @@ class EggsPage(QWidget):
         title_row.addWidget(title)
         title_row.addStretch()
 
-        subtitle = QLabel("Create, check and install Arch Linux live ISOs")
+        subtitle = QLabel("Create, verify and deploy Arch Linux Live ISOs")
         subtitle.setFont(QFont("DejaVu Sans Mono", 10))
         subtitle.setStyleSheet("color: #9aa6b2;")
 
@@ -367,18 +512,24 @@ class EggsPage(QWidget):
         stats = get_dashboard_stats()
 
         stats_row = QHBoxLayout()
-        stats_row.setSpacing(14)
+        stats_row.setSpacing(12)
 
-        self.stat_last_iso = _StatCard("ÚLTIMA ISO", stats["last_iso"] or "nenhuma gerada")
+        self.stat_last_iso = _StatCard(
+            "ÚLTIMA ISO", stats["last_iso"] or "nenhuma gerada",
+            glyph="mdi6.file-multiple-outline", bar_color="#23a6ff",
+        )
         self.stat_ventoy = _StatCard(
             "VENTOY",
             f"{stats['ventoy_free_gb']:.1f} GB livres" if stats["ventoy_free_gb"] is not None else "não montado",
             color="#9bf0bd" if stats["ventoy_free_gb"] is not None else "#6b7a8d",
+            glyph="mdi6.usb-flash-drive-outline", bar_color="#9bf0bd",
         )
         self.stat_installed = _StatCard(
             "PENGUINS-EGGS",
-            "instalado" if stats["eggs_installed"] else "não instalado",
+            "Instalado" if stats["eggs_installed"] else "Não instalado",
             color="#9bf0bd" if stats["eggs_installed"] else "#ffb86b",
+            glyph="mdi6.check-decagram-outline", bar_color="#ffb86b",
+            is_status=True,
         )
 
         stats_row.addWidget(self.stat_last_iso, 1)
@@ -387,7 +538,7 @@ class EggsPage(QWidget):
 
         # ── Cards de ação ────────────────────────────────────────────────
         cards = QGridLayout()
-        cards.setSpacing(14)
+        cards.setSpacing(12)
         cards.setColumnStretch(0, 1)
         cards.setColumnStretch(1, 1)
 
@@ -397,7 +548,8 @@ class EggsPage(QWidget):
             desc="Gera uma nova ISO live (ou move uma já pronta para o Ventoy).",
             color="#9bf0bd",
             parent=self,
-            badge="requer root",
+            badge="root",
+            primary=True,
         )
         self.btn_create.clicked.connect(self._on_create)
 
@@ -407,7 +559,7 @@ class EggsPage(QWidget):
             desc="Verifica se há uma .iso pendente e move/faz backup automaticamente.",
             color="#23a6ff",
             parent=self,
-            badge="requer root",
+            badge="root",
         )
         self.btn_check.clicked.connect(self._on_check)
 
@@ -429,28 +581,91 @@ class EggsPage(QWidget):
         )
         self.btn_nautilus.clicked.connect(lambda: self._open_files("nautilus"))
 
+        # Item 13 — o card de instalação muda de texto sozinho conforme o
+        # penguins-eggs já estar instalado ou não.
+        install_title, install_desc = self._install_card_texts(stats["eggs_installed"])
         self.btn_install = _EggsOptionButton(
             glyph="mdi6.download-circle-outline",
-            title="Penguin's Eggs and Calamares Install",
-            desc="Instala o penguins-eggs e o módulo Calamares, se necessário.",
+            title=install_title,
+            desc=install_desc,
             color="#ff9966",
             parent=self,
-            badge="requer root",
+            badge="root",
         )
         self.btn_install.clicked.connect(self._on_install)
 
-        cards.addWidget(self.btn_create, 0, 0)
-        cards.addWidget(self.btn_check, 0, 1)
-        cards.addWidget(self.btn_broot, 1, 0)
-        cards.addWidget(self.btn_nautilus, 1, 1)
-        cards.addWidget(self.btn_install, 2, 0)
-        # (2, 1) fica livre — reservado para o próximo card que for adicionado aqui
+        cards.addWidget(self.btn_create, 0, 0, 1, 2)
+        cards.addWidget(self.btn_check, 1, 0)
+        cards.addWidget(self.btn_install, 1, 1)
+        cards.addWidget(self.btn_broot, 2, 0)
+        cards.addWidget(self.btn_nautilus, 2, 1)
+
+        # Envolve cada grupo (header, faixa de status, cards) num QWidget
+        # próprio — necessário pra poder animar opacidade em grupo com
+        # QGraphicsOpacityEffect (item 14, fade-in escalonado ao abrir).
+        stats_widget = QWidget()
+        stats_widget.setLayout(stats_row)
+
+        cards_widget = QWidget()
+        cards_widget.setLayout(cards)
 
         root.addWidget(header)
-        root.addLayout(stats_row)
-        root.addSpacing(14)
-        root.addLayout(cards)
+        root.addWidget(stats_widget)
+        root.addSpacing(12)
+        root.addWidget(cards_widget)
         root.addStretch(1)
+
+        self._animate_entrance(
+            header_widgets=[self.top_header, header],
+            reveal_widgets=[stats_widget, cards_widget],
+        )
+
+    def _animate_entrance(self, header_widgets: list[QWidget], reveal_widgets: list[QWidget]) -> None:
+        """Fade-in escalonado ao abrir a tela.
+
+        header_widgets: aparecem com fade suave via QGraphicsOpacityEffect
+        (seguro aqui porque não têm filhos com efeito gráfico próprio).
+
+        reveal_widgets: os cards de status/ação têm filhos com seu próprio
+        QGraphicsDropShadowEffect — no Qt, aninhar um QGraphicsOpacityEffect
+        num widget-pai cujos filhos já têm efeito próprio faz os filhos
+        simplesmente não serem desenhados. Por isso esses grupos usam um
+        "aparecer" simples (setVisible escalonado) em vez de fade aninhado.
+        """
+        self._entrance_anims = []  # mantém referência viva (senão o GC mata a animação no meio)
+
+        delay = 0
+        for w in header_widgets:
+            effect = QGraphicsOpacityEffect(w)
+            effect.setOpacity(0.0)
+            w.setGraphicsEffect(effect)
+
+            anim = QPropertyAnimation(effect, b"opacity", self)
+            anim.setDuration(180)
+            anim.setStartValue(0.0)
+            anim.setEndValue(1.0)
+            anim.setEasingCurve(QEasingCurve.OutCubic)
+            self._entrance_anims.append((effect, anim))
+            QTimer.singleShot(delay, anim.start)
+            delay += 90
+
+        for w in reveal_widgets:
+            w.setVisible(False)
+            QTimer.singleShot(delay, lambda w=w: w.setVisible(True))
+            delay += 90
+
+    def _install_card_texts(self, installed: bool) -> tuple[str, str]:
+        """Item 13 — o card de instalação muda de texto sozinho conforme
+        o penguins-eggs já estar instalado ou não."""
+        if installed:
+            return (
+                "Update Penguin's Eggs",
+                "Atualiza o penguins-eggs e o módulo Calamares para a versão mais recente.",
+            )
+        return (
+            "Penguin's Eggs and Calamares Install",
+            "Instala o penguins-eggs e o módulo Calamares, se necessário.",
+        )
 
     def refresh_stats(self) -> None:
         from core.eggs.eggs import get_dashboard_stats
@@ -462,9 +677,12 @@ class EggsPage(QWidget):
             color="#9bf0bd" if stats["ventoy_free_gb"] is not None else "#6b7a8d",
         )
         self.stat_installed.set_value(
-            "instalado" if stats["eggs_installed"] else "não instalado",
+            "Instalado" if stats["eggs_installed"] else "Não instalado",
             color="#9bf0bd" if stats["eggs_installed"] else "#ffb86b",
         )
+        install_title, install_desc = self._install_card_texts(stats["eggs_installed"])
+        self.btn_install.set_title(install_title)
+        self.btn_install.set_desc(install_desc)
 
     # ── Ações ────────────────────────────────────────────────────────────
 
@@ -569,3 +787,15 @@ class EggsPage(QWidget):
             self.back_requested.emit()
             return
         super().keyPressEvent(event)
+
+    def showEvent(self, event):
+        # Recalcula na hora que a tela aparece (cobre o caso de ter saído
+        # e voltado), e liga o auto-refresh periódico enquanto estiver
+        # visível.
+        self.refresh_stats()
+        self._stats_refresh_timer.start()
+        super().showEvent(event)
+
+    def hideEvent(self, event):
+        self._stats_refresh_timer.stop()
+        super().hideEvent(event)
