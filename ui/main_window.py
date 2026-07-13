@@ -1079,7 +1079,7 @@ class MainWindow(QMainWindow):
         self.menu_page.backups_requested.connect(self.show_backups)
         self.menu_page.eggs_requested.connect(self.show_eggs)
         self.menu_page.disks_requested.connect(self.show_disks)
-        self.menu_page.exit_requested.connect(self.close)
+        self.menu_page.exit_requested.connect(self._show_exit_dialog)
         self.menu_page.exit_requested_confirm.connect(self._show_exit_dialog)
         self.backups_host.page.back_requested.connect(self.show_menu)
         self.eggs_host.page.back_requested.connect(self.show_menu)
