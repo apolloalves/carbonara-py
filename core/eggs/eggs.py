@@ -27,7 +27,11 @@ def get_dashboard_stats() -> dict:
     stats = {
         "last_iso": None,
         "ventoy_free_gb": None,
+        "ventoy_total_gb": None,
+        "ventoy_free_pct": None,
+        "ventoy_fs_type": None,
         "eggs_installed": False,
+        "eggs_version": None,
     }
 
     try:
@@ -43,20 +47,80 @@ def get_dashboard_stats() -> dict:
             )
             if isos:
                 stats["last_iso"] = isos[0].name
-            st = os.statvfs(str(VENTOY))
-            stats["ventoy_free_gb"] = (st.f_bavail * st.f_frsize) / (1024 ** 3)
+            # Chama o próprio `df` em vez de calcular por conta própria —
+            # garante que os números batem exatamente com o que o usuário
+            # vê rodando `df -h` no terminal, sem risco de divergência por
+            # arredondamento (GiB vs GB, base de cálculo do %, etc.).
+            # -B1 pra pegar bytes exatos (sem o df já arredondar o tamanho),
+            # e --output=pcent pega a porcentagem usada calculada pelo
+            # próprio df, do jeito que ele calcula (idêntico ao df -h).
+            df_result = subprocess.run(
+                ["df", "-B1", "--output=size,avail,pcent", str(VENTOY)],
+                capture_output=True, text=True,
+            )
+            lines = df_result.stdout.strip().splitlines()
+            if df_result.returncode == 0 and len(lines) >= 2:
+                size_str, avail_str, pcent_str = lines[1].split()
+                total_bytes = int(size_str)
+                avail_bytes = int(avail_str)
+                used_pct = int(pcent_str.rstrip("%"))
+                stats["ventoy_total_gb"] = total_bytes / (1024 ** 3)
+                stats["ventoy_free_gb"] = avail_bytes / (1024 ** 3)
+                stats["ventoy_free_pct"] = 100 - used_pct
+
+            # Tipo de sistema de arquivos — mesma fonte que o storage.py
+            # usa pro card de destino do Timeshift (/proc/mounts).
+            try:
+                with open("/proc/mounts", "r", encoding="utf-8") as fh:
+                    for line in fh:
+                        parts = line.split()
+                        if len(parts) >= 3 and parts[1] == str(VENTOY):
+                            stats["ventoy_fs_type"] = parts[2]
+                            break
+            except Exception:
+                pass
     except Exception:
         pass
 
     try:
-        stats["eggs_installed"] = subprocess.run(
+        result = subprocess.run(
             ["pacman", "-Q", "penguins-eggs"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        ).returncode == 0
+            capture_output=True, text=True,
+        )
+        stats["eggs_installed"] = result.returncode == 0
+        if stats["eggs_installed"]:
+            # Saída típica: "penguins-eggs 15.3.2-1" — pega só a versão.
+            parts = result.stdout.strip().split()
+            if len(parts) >= 2:
+                stats["eggs_version"] = parts[1]
     except Exception:
         pass
 
     return stats
+
+
+def check_eggs_update() -> str | None:
+    """Verifica se existe atualização disponível pro penguins-eggs via AUR
+    (usando paru). Faz uma chamada de rede — por isso NÃO deve ser chamada
+    no auto-refresh periódico da tela, só na abertura da página ou depois
+    de uma instalação/atualização. Retorna a versão nova disponível, ou
+    None se já está atualizado (ou se não foi possível checar)."""
+    try:
+        result = subprocess.run(
+            ["paru", "-Qua"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode != 0:
+            return None
+        for line in result.stdout.splitlines():
+            # Formato típico: "penguins-eggs 15.3.2-1 -> 15.4.0-1"
+            if line.startswith("penguins-eggs "):
+                parts = line.split("->")
+                if len(parts) == 2:
+                    return parts[1].strip()
+        return None
+    except Exception:
+        return None
 
 
 def _safe_remove_eggs_dir() -> None:
@@ -485,35 +549,63 @@ def install_eggs(dialog, parent=None) -> None:
 
     if not eggs_installed:
         dialog.append_log("penguins-eggs não encontrado — será instalado.")
+    else:
+        dialog.append_log("penguins-eggs já instalado — verificando atualização...")
+
+    # No Arch, penguins-eggs está disponível diretamente via chaotic-aur
+    # (pacman -Ss penguins-eggs confirma o pacote). Isso é mais confiável
+    # que depender do fresh-eggs.sh, que baixa de penguins-eggs.net e
+    # atualmente está com a pasta "aur/" vazia/em transição no lado deles
+    # (nota oficial do changelog: "Alpine, Arch e Manjaro não estão
+    # migrando imediatamente para os novos repositórios"). Tentamos
+    # pacman primeiro; se o pacote não existir em nenhum repo configurado,
+    # caímos no fresh-eggs.sh como fallback.
+    pkg_in_repo = subprocess.run(
+        ["pacman", "-Si", "penguins-eggs"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    ).returncode == 0
+
+    if pkg_in_repo:
+        dialog.append_log("penguins-eggs disponível via repo (chaotic-aur) — usando pacman.")
+        steps.append(["pacman", "-Sy", "--noconfirm", "--needed", "penguins-eggs"])
+    else:
+        dialog.append_log(
+            "penguins-eggs não encontrado em nenhum repo configurado — "
+            "recorrendo ao fresh-eggs.sh (fallback)."
+        )
         steps.append([
             "bash", "-c",
             "rm -rf /tmp/get-eggs && "
             "git clone https://github.com/pieroproietti/get-eggs /tmp/get-eggs && "
-            "cd /tmp/get-eggs && ./get-eggs.sh",
+            "cd /tmp/get-eggs && "
+            "SCRIPT=$(ls *.sh 2>/dev/null | grep -iE '^(fresh-eggs|get-eggs)\\.sh$' | head -1) && "
+            "if [ -z \"$SCRIPT\" ]; then echo 'ERRO: script de instalação não encontrado no repo get-eggs' >&2; exit 1; fi && "
+            "echo \"Executando: $SCRIPT\" && "
+            "./\"$SCRIPT\"",
         ])
-    else:
-        dialog.append_log("penguins-eggs já instalado — pulando.")
 
     calamares_installed = subprocess.run(
         ["pacman", "-Q", "calamares-eggs"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     ).returncode == 0
 
+    # calamares-eggs não está disponível em nenhum repo pacman (nem
+    # chaotic-aur) — só existe via "eggs calamares --install". Por isso,
+    # ao contrário do penguins-eggs, não dá pra checar versão disponível
+    # antes de rodar. Sempre executamos o comando (ele decide install vs
+    # update internamente); senão o módulo nunca seria atualizado depois
+    # da primeira instalação.
     if not calamares_installed:
         dialog.append_log("módulo Calamares não encontrado — será instalado.")
-        steps.append(["eggs", "calamares", "--install"])
     else:
-        dialog.append_log("módulo Calamares já instalado — pulando.")
-
-    if not steps:
-        dialog.append_log("Nada a fazer — tudo já instalado.")
-        _finish(dialog, True, "Tudo já instalado.", "")
-        return
+        dialog.append_log("módulo Calamares já instalado — verificando atualização...")
+    steps.append(["eggs", "calamares", "--install"])
 
     def run_next(index: int = 0) -> None:
         if index >= len(steps):
-            dialog.append_log("--- instalação concluída ---")
-            _finish(dialog, True, "Instalação concluída com sucesso.", "")
+            action = "Atualização" if eggs_installed else "Instalação"
+            dialog.append_log(f"--- {action.lower()} concluída ---")
+            _finish(dialog, True, f"{action} concluída com sucesso.", "")
             return
 
         cmd = steps[index]
