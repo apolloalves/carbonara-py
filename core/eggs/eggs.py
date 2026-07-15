@@ -196,13 +196,24 @@ class ShellWorker(QThread):
     finished_ok = Signal()
     failed = Signal(str)
 
-    def __init__(self, cmd: list[str], title: str = "", cwd: str | None = None, parent=None):
+    def __init__(self, cmd: list[str], title: str = "", cwd: str | None = None,
+                 suppress_patterns: list[str] | None = None, parent=None):
         super().__init__(parent)
         self.cmd = cmd
         self.title = title
         self.cwd = cwd
         self._proc: subprocess.Popen | None = None
         self._cancelled = False
+        # Linhas de log que são ruído cosmético conhecido e não indicam
+        # falha real (ex.: o `eggs calamares --install` tenta `pacman -S
+        # calamares` mesmo quando `calamares-eggs` já supre a necessidade,
+        # falha, mas segue em frente normalmente). Usado apenas quando o
+        # chamador sabe explicitamente que essas linhas são inofensivas
+        # NESSE comando específico — não filtra nada por padrão.
+        self._suppress_patterns = suppress_patterns or []
+
+    def _is_suppressed(self, line: str) -> bool:
+        return any(pattern in line for pattern in self._suppress_patterns)
 
     def cancel(self) -> None:
         self._cancelled = True
@@ -255,11 +266,13 @@ class ShellWorker(QThread):
                     buf = buf[idx + 1:]
                     if not line:
                         continue
+                    if self._is_suppressed(line):
+                        continue
                     self.log_line.emit(line)
                     self.file_changed.emit(line[:140])
 
             leftover = buf.strip()
-            if leftover:
+            if leftover and not self._is_suppressed(leftover):
                 self.log_line.emit(leftover)
                 self.file_changed.emit(leftover[:140])
 
@@ -599,6 +612,26 @@ def install_eggs(dialog, parent=None) -> None:
         dialog.append_log("módulo Calamares não encontrado — será instalado.")
     else:
         dialog.append_log("módulo Calamares já instalado — verificando atualização...")
+
+    # Bug conhecido de empacotamento do penguins-eggs no Arch: o pacote
+    # grava a config como "settings.yml", mas o comando "eggs calamares
+    # --install" procura "settings.yaml" (com "a") e falha com ENOENT
+    # fatal se não achar. Auto-cura: copia .yml -> .yaml se a versão
+    # certa ainda não existir. Não sobrescreve se já existir (pode ter
+    # sido customizado); só cria a cópia que falta.
+    _calamares_cfg_dir = Path("/etc/penguins-eggs.d/distros/archlinux/calamares")
+    _settings_yml = _calamares_cfg_dir / "settings.yml"
+    _settings_yaml = _calamares_cfg_dir / "settings.yaml"
+    if _settings_yml.exists() and not _settings_yaml.exists():
+        try:
+            shutil.copy2(_settings_yml, _settings_yaml)
+            dialog.append_log(
+                "auto-cura: settings.yml copiado para settings.yaml "
+                "(bug conhecido de empacotamento do penguins-eggs no Arch)."
+            )
+        except OSError as exc:
+            dialog.append_log(f"aviso: falha ao auto-corrigir settings.yaml ({exc}).")
+
     steps.append(["eggs", "calamares", "--install"])
 
     def run_next(index: int = 0) -> None:
@@ -609,7 +642,17 @@ def install_eggs(dialog, parent=None) -> None:
             return
 
         cmd = steps[index]
-        worker = ShellWorker(cmd, title="Instalando...", parent=dialog)
+
+        # Ruído cosmético conhecido: o `eggs calamares --install` tenta
+        # `pacman -S calamares` mesmo com `calamares-eggs` já instalado
+        # (que supre a mesma necessidade), falha, e segue em frente
+        # normalmente — não é uma falha real do comando. Suprimimos só
+        # essas duas linhas específicas, só nesse comando.
+        suppress = None
+        if cmd == ["eggs", "calamares", "--install"]:
+            suppress = ["pacman -S calamares --noconfirm", "error: target not found: calamares"]
+
+        worker = ShellWorker(cmd, title="Instalando...", suppress_patterns=suppress, parent=dialog)
 
         register = getattr(dialog, "register_worker", None)
         if callable(register):
