@@ -1,0 +1,33 @@
+<div style="background:#0b0c0f;border-radius:12px;padding:20px;font-family:'DejaVu Sans Mono','Courier New',monospace;color:#ecf4ff;">
+  <div style="display:flex;gap:10px;margin-bottom:16px;">
+    <button id="btn3" style="flex:1;padding:8px;border-radius:8px;border:1px solid rgba(35,166,255,140);background:rgba(35,166,255,30);color:#ecf4ff;font-family:inherit;font-size:12px;cursor:pointer;">3 por linha</button>
+    <button id="btn4" style="flex:1;padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,20);background:rgba(255,255,255,6);color:#ecf4ff;font-family:inherit;font-size:12px;cursor:pointer;">4 por linha</button>
+  </div>
+  <div id="grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;"></div>
+</div>
+<script>
+const cards = [
+  {icon:'ti-egg',color:'#9bf0bd',title:"Create Penguin's Eggs",badge:'REQUER ROOT',badgeColor:'#9bf0bd',desc:'Gera uma nova ISO live.'},
+  {icon:'ti-file-search',color:'#23a6ff',title:"Check Penguin's Eggs .iso",badge:'REQUER ROOT',badgeColor:'#23a6ff',desc:'Verifica .iso pendente.'},
+  {icon:'ti-terminal-2',color:'#c8a2ff',title:'Open files — broot',badge:null,desc:'Abre no broot.'},
+  {icon:'ti-folder',color:'#ffb86b',title:'Open files — Nautilus',badge:null,desc:'Abre no Nautilus.'},
+  {icon:'ti-plus',color:'#5f6672',title:'(futuro)',badge:null,desc:'Espaço pra novo card.',ghost:true},
+  {icon:'ti-plus',color:'#5f6672',title:'(futuro)',badge:null,desc:'Espaço pra novo card.',ghost:true}
+];
+function render(cols){
+  const grid = document.getElementById('grid');
+  grid.style.gridTemplateColumns = 'repeat(' + cols + ',1fr)';
+  grid.innerHTML = cards.map(c => {
+    const border = c.ghost ? '1px dashed rgba(255,255,255,18)' : '1px solid rgba(255,255,255,10)';
+    const bg = c.ghost ? 'transparent' : 'rgba(255,255,255,4)';
+    const badge = c.badge ? '<span style="font-size:9px;padding:2px 6px;border-radius:5px;border:1px solid ' + c.badgeColor + '55;color:' + c.badgeColor + ';margin-left:6px;">' + c.badge + '</span>' : '';
+    return '<div style="background:' + bg + ';border:' + border + ';border-radius:12px;padding:14px;display:flex;gap:10px;align-items:flex-start;min-height:78px;">' +
+      '<div style="width:36px;height:36px;border-radius:10px;background:' + c.color + '28;border:1px solid ' + c.color + '55;display:flex;align-items:center;justify-content:center;flex-shrink:0;"><i class="ti ' + c.icon + '" style="font-size:17px;color:' + c.color + ';" aria-hidden="true"></i></div>' +
+      '<div style="min-width:0;"><div style="font-size:11px;font-weight:700;color:#ecf4ff;">' + c.title + badge + '</div>' +
+      '<div style="font-size:10px;color:#8b95a1;margin-top:3px;line-height:1.4;">' + c.desc + '</div></div></div>';
+  }).join('');
+}
+render(3);
+document.getElementById('btn3').onclick = () => { render(3); document.getElementById('btn3').style.background='rgba(35,166,255,30)'; document.getElementById('btn4').style.background='rgba(255,255,255,6)'; };
+document.getElementById('btn4').onclick = () => { render(4); document.getElementById('btn4').style.background='rgba(35,166,255,30)'; document.getElementById('btn3').style.background='rgba(255,255,255,6)'; };
+</script>

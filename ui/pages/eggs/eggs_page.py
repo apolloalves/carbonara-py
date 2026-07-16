@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QListView,
     QScrollArea,
+    QSizePolicy,
 )
 
 
@@ -71,6 +72,77 @@ def style_combo_popup(combo: QComboBox) -> None:
 
 
 from core.system.disks import list_relevant_disks
+
+
+def _format_disk_label(d) -> str:
+    """Mesma formatação usada no combo de destino — reusada também no
+    card 'ÚLTIMA ISO' quando o disco selecionado não tem nenhuma ISO,
+    pra mostrar a descrição completa do disco, não só o path."""
+    return f"{d.mountpoint}  •  {d.model or d.name}  •  {d.avail} livre  •  {d.fstype}"
+
+
+class _ElideLabel(QLabel):
+    """QLabel que corta o texto com reticências no fim em vez de deixar
+    o Qt cortar cru sem indicar que o texto continua. Usado no título dos
+    cards de ação quando o card fica muito estreito (monitor pequeno)."""
+
+    def __init__(self, text: str = "", parent=None):
+        super().__init__(parent)
+        self._full_text = text
+        self.setMinimumWidth(0)
+
+    def setText(self, text: str) -> None:
+        self._full_text = text
+        self._update_elide()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._update_elide()
+
+    def _update_elide(self) -> None:
+        fm = self.fontMetrics()
+        elided = fm.elidedText(self._full_text, Qt.ElideRight, self.width())
+        super().setText(elided)
+
+
+class _ResponsiveCardGrid(QWidget):
+    """Grid que reflui o número de colunas conforme a largura disponível
+    — o Qt não tem nada nativo tipo CSS grid/flexbox com auto-fit, então
+    isso recalcula manualmente a cada resize, igual uma media query faria
+    na web. Os cards em si não mudam de tamanho, só a disposição."""
+
+    MIN_CARD_WIDTH = 340
+    MAX_COLUMNS = 3
+
+    def __init__(self, cards: list, parent=None):
+        super().__init__(parent)
+        self._cards = cards
+        self._current_columns = -1
+        self.grid = QGridLayout(self)
+        self.grid.setContentsMargins(0, 0, 0, 0)
+        self.grid.setHorizontalSpacing(14)
+        self.grid.setVerticalSpacing(14)
+        self._relayout(self.MAX_COLUMNS)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        spacing = self.grid.horizontalSpacing() or 14
+        columns = max(
+            1,
+            min(self.MAX_COLUMNS, (self.width() + spacing) // (self.MIN_CARD_WIDTH + spacing)),
+        )
+        if columns != self._current_columns:
+            self._relayout(columns)
+
+    def _relayout(self, columns: int) -> None:
+        self._current_columns = columns
+        while self.grid.count():
+            self.grid.takeAt(0)
+        for col in range(self.MAX_COLUMNS):
+            self.grid.setColumnStretch(col, 1 if col < columns else 0)
+        for i, card in enumerate(self._cards):
+            row, col = divmod(i, columns)
+            self.grid.addWidget(card, row, col)
 
 
 class _CloseLabel(QLabel):
@@ -355,6 +427,7 @@ class _VentoyCard(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("VentoyCard")
+        self.setFixedHeight(110)
         self.setStyleSheet("""
             QFrame#VentoyCard {
                 background: rgba(255, 255, 255, 5);
@@ -366,15 +439,16 @@ class _VentoyCard(QFrame):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(18, 16, 18, 16)
         outer.setSpacing(10)
+        outer.setAlignment(Qt.AlignVCenter)
 
         top_row = QHBoxLayout()
         top_row.setSpacing(14)
 
         self.icon_lbl = QLabel()
-        self.icon_lbl.setFixedSize(44, 44)
+        self.icon_lbl.setFixedSize(48, 48)
         self.icon_lbl.setAlignment(Qt.AlignCenter)
-        self.icon_lbl.setPixmap(qta.icon("mdi6.usb-flash-drive-outline", color="#9bf0bd").pixmap(20, 20))
-        self.icon_lbl.setStyleSheet(_badge_style("#9bf0bd"))
+        self.icon_lbl.setPixmap(qta.icon("mdi6.usb-flash-drive-outline", color="#9bf0bd").pixmap(24, 24))
+        self.icon_lbl.setStyleSheet(_badge_style("#9bf0bd", radius=14))
 
         text_col = QVBoxLayout()
         text_col.setSpacing(2)
@@ -389,6 +463,7 @@ class _VentoyCard(QFrame):
         self.detail_lbl.setStyleSheet("color: #7d8a99; background: transparent; border: none;")
 
         text_col.addWidget(title_lbl)
+
         text_col.addWidget(self.detail_lbl)
 
         top_row.addWidget(self.icon_lbl)
@@ -451,7 +526,8 @@ class _VentoyCard(QFrame):
         self.pct_lbl.setText(f"{pct_free:.0f}% livre")
 
         track_width = self.bar_track.width() or 200
-        fill_width = int(track_width * min(max(pct_free / 100, 0), 1))
+        used_pct = 100 - pct_free
+        fill_width = int(track_width * min(max(used_pct / 100, 0), 1))
         self.bar_fill.setGeometry(0, 0, fill_width, 5)
 
     def resizeEvent(self, event):
@@ -461,8 +537,9 @@ class _VentoyCard(QFrame):
         text = self.pct_lbl.text()
         if text != "—" and text.endswith("% livre"):
             try:
-                pct = float(text.replace("% livre", ""))
-                fill_width = int(self.bar_track.width() * min(max(pct / 100, 0), 1))
+                pct_free = float(text.replace("% livre", ""))
+                used_pct = 100 - pct_free
+                fill_width = int(self.bar_track.width() * min(max(used_pct / 100, 0), 1))
                 self.bar_fill.setGeometry(0, 0, fill_width, self.bar_track.height())
             except ValueError:
                 pass
@@ -476,6 +553,7 @@ class _IsoCard(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("IsoCard")
+        self.setFixedHeight(110)
         self.setStyleSheet("""
             QFrame#IsoCard {
                 background: rgba(255, 255, 255, 5);
@@ -487,46 +565,63 @@ class _IsoCard(QFrame):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(18, 16, 18, 16)
         outer.setSpacing(10)
+        outer.setAlignment(Qt.AlignVCenter)
 
         top_row = QHBoxLayout()
         top_row.setSpacing(14)
 
         self.icon_lbl = QLabel()
-        self.icon_lbl.setFixedSize(44, 44)
+        self.icon_lbl.setFixedSize(48, 48)
         self.icon_lbl.setAlignment(Qt.AlignCenter)
-        self.icon_lbl.setPixmap(qta.icon("mdi6.disc", color="#9bf0bd").pixmap(20, 20))
-        self.icon_lbl.setStyleSheet(_badge_style("#9bf0bd"))
+        self.icon_lbl.setPixmap(qta.icon("mdi6.disc", color="#9bf0bd").pixmap(24, 24))
+        self.icon_lbl.setStyleSheet(_badge_style("#9bf0bd", radius=14))
 
         text_col = QVBoxLayout()
         text_col.setSpacing(2)
 
+        title_row = QHBoxLayout()
+        title_row.setSpacing(10)
+        title_row.setContentsMargins(0, 0, 0, 0)
+
         title_lbl = QLabel("ÚLTIMA ISO")
         title_lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
         title_lbl.setStyleSheet("color: #ecf4ff; background: transparent; border: none;")
+        self.title_lbl = title_lbl
+
+        self.meta_lbl = QLabel("")
+        self.meta_lbl.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
+        self.meta_lbl.setStyleSheet("color: #5eea95; background: transparent; border: none;")
+
+        title_row.addWidget(title_lbl)
+        title_row.addStretch(1)
+        title_row.addWidget(self.meta_lbl)
 
         self.name_lbl = QLabel("Nenhuma ISO gerada ainda")
         self.name_lbl.setFont(QFont("DejaVu Sans Mono", 9))
         self.name_lbl.setStyleSheet("color: #7d8a99; background: transparent; border: none;")
         self.name_lbl.setWordWrap(True)
 
-        text_col.addWidget(title_lbl)
+        text_col.addLayout(title_row)
         text_col.addWidget(self.name_lbl)
 
         top_row.addWidget(self.icon_lbl)
         top_row.addLayout(text_col, 1)
 
-        self.meta_lbl = QLabel("")
-        self.meta_lbl.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
-        self.meta_lbl.setStyleSheet("color: #5eea95; background: transparent; border: none;")
-
         outer.addLayout(top_row)
-        outer.addWidget(self.meta_lbl)
 
-    def set_iso(self, name: str | None, date_str: str | None, size_gb: float | None) -> None:
+    def set_iso(
+        self,
+        name: str | None,
+        date_str: str | None,
+        size_gb: float | None,
+        disk_label: str | None = None,
+    ) -> None:
         if not name:
-            self.name_lbl.setText("Nenhuma ISO gerada ainda")
+            self.title_lbl.setText("Sem ISO neste disco")
+            self.name_lbl.setText(disk_label or "—")
             self.meta_lbl.setText("")
             return
+        self.title_lbl.setText("ÚLTIMA ISO")
         self.name_lbl.setText(name)
         if date_str and size_gb is not None:
             self.meta_lbl.setText(f"{date_str}  •  {size_gb:.2f} GB")
@@ -574,10 +669,10 @@ class _IsoListCard(QFrame):
         root.setSpacing(16)
 
         icon_lbl = QLabel()
-        icon_lbl.setFixedSize(38, 38)
+        icon_lbl.setFixedSize(48, 48)
         icon_lbl.setAlignment(Qt.AlignCenter)
-        icon_lbl.setPixmap(qta.icon("mdi6.disc", color="#9bf0bd").pixmap(20, 20))
-        icon_lbl.setStyleSheet(_badge_style("#9bf0bd"))
+        icon_lbl.setPixmap(qta.icon("mdi6.disc", color="#9bf0bd").pixmap(24, 24))
+        icon_lbl.setStyleSheet(_badge_style("#9bf0bd", radius=14))
 
         text_col = QVBoxLayout()
         text_col.setSpacing(4)
@@ -649,7 +744,7 @@ class _EggsOptionButton(QFrame):
         super().__init__(parent)
         self.setCursor(Qt.PointingHandCursor)
         self.setObjectName("EggsOptionBtn")
-        self.setFixedHeight(110)
+        self.setFixedHeight(128)
         self.setStyleSheet(f"""
             QFrame#EggsOptionBtn {{
                 background: rgba(255, 255, 255, 5);
@@ -691,16 +786,17 @@ class _EggsOptionButton(QFrame):
         title_row.setSpacing(10)
         title_row.setContentsMargins(0, 0, 0, 0)
 
-        self.title_lbl = QLabel(title)
+        self.title_lbl = _ElideLabel(title)
         self.title_lbl.setFont(QFont("DejaVu Sans Mono", 12, QFont.Bold))
         self.title_lbl.setStyleSheet(f"color: {color}; background: transparent; border: none;")
-        title_row.addWidget(self.title_lbl)
+        title_row.addWidget(self.title_lbl, 1)
 
         if badge:
             h = color.lstrip("#")
             r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
             badge_lbl = QLabel(badge.upper())
             badge_lbl.setFont(QFont("DejaVu Sans Mono", 8, QFont.Bold))
+            badge_lbl.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
             badge_lbl.setStyleSheet(
                 f"color: {color}; background: rgba({r},{g},{b},22); "
                 f"border: 1px solid rgba({r},{g},{b},70); border-radius: 5px; "
@@ -712,7 +808,7 @@ class _EggsOptionButton(QFrame):
 
         self.desc_lbl = QLabel(desc)
         self.desc_lbl.setFont(QFont("DejaVu Sans Mono", 10))
-        self.desc_lbl.setWordWrap(False)
+        self.desc_lbl.setWordWrap(True)
         self.desc_lbl.setStyleSheet("color: #6b7a8d; background: transparent; border: none;")
 
         text.addLayout(title_row)
@@ -795,6 +891,17 @@ class EggsPage(QWidget):
         if app is not None:
             app.aboutToQuit.connect(self._terminate_pending_operation)
 
+        # Abaixo dessa largura, o combo de destino + card ÚLTIMA ISO no
+        # cabeçalho e o grid de 3 colunas começam a sobrepor texto (título
+        # e badge cortados sem reticências, descrição por cima do título)
+        # — visto na prática num monitor menor. Trava a largura mínima em
+        # vez de tentar redesenhar tudo pra ser fluido até qualquer tamanho.
+        # O grid de cards de ação agora reflui sozinho (_ResponsiveCardGrid),
+        # então essa largura mínima só existe por causa do cabeçalho
+        # (título + card ÚLTIMA ISO lado a lado) e do combo de destino +
+        # card Ventoy, que ainda não são responsivos.
+        self.setMinimumWidth(1050)
+
         self.setStyleSheet(
             """
             QWidget { background: transparent; }
@@ -845,34 +952,48 @@ class EggsPage(QWidget):
         title_row.setSpacing(12)
 
         icon = QLabel()
-        icon.setFixedSize(38, 38)
+        icon.setFixedSize(48, 48)
         icon.setAlignment(Qt.AlignCenter)
-        icon.setPixmap(qta.icon("mdi6.egg-outline", color="#23a6ff").pixmap(24, 24))
-        icon.setStyleSheet(
-            "QLabel { background: rgba(35,166,255,30); border-radius: 10px; }"
-        )
+        icon.setPixmap(qta.icon("mdi6.egg-outline", color="#23a6ff").pixmap(26, 26))
+        icon.setStyleSheet(_badge_style("#23a6ff", radius=14))
 
         title = QLabel("Penguin's Eggs")
         title.setFont(QFont("DejaVu Sans Mono", 22, QFont.Bold))
         title.setStyleSheet("color: #23a6ff;")
 
-        title_row.addWidget(icon)
-        title_row.addWidget(title)
-        title_row.addStretch()
-
         subtitle = QLabel("Create, check and install Arch Linux live ISOs")
         subtitle.setFont(QFont("DejaVu Sans Mono", 10))
         subtitle.setStyleSheet("color: #9aa6b2;")
 
+        title_text_col = QVBoxLayout()
+        title_text_col.setSpacing(2)
+        title_text_col.addWidget(title)
+        title_text_col.addWidget(subtitle)
+
+        title_row.addWidget(icon)
+        title_row.addLayout(title_text_col)
+        title_row.setAlignment(icon, Qt.AlignVCenter)
+        title_row.setAlignment(title_text_col, Qt.AlignVCenter)
+        title_row.addStretch()
+
+        # ÚLTIMA ISO é só informação (não é uma ação clicável) — sobe pro
+        # topo da página, canto superior direito, junto do título, em vez
+        # de ocupar espaço na grade de cards de ação.
+        self.stat_last_iso = _IsoCard()
+        self.stat_last_iso.setFixedWidth(520)
+        title_row.addWidget(self.stat_last_iso)
+
         h_layout.addLayout(title_row)
-        h_layout.addWidget(subtitle)
 
         # ── Seletor de destino da ISO ────────────────────────────────────
         # Genérico: lista todos os discos/mounts disponíveis via
         # core/system/disks.py (list_disks), com o Ventoy pré-selecionado
         # por padrão (comportamento de sempre, agora escolhível).
         dest_row = QHBoxLayout()
-        dest_row.setSpacing(10)
+        dest_row.setSpacing(20)
+
+        dest_col = QVBoxLayout()
+        dest_col.setSpacing(8)
 
         dest_label = QLabel("Destino da ISO:")
         dest_label.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
@@ -924,30 +1045,29 @@ class EggsPage(QWidget):
 
         style_combo_popup(self.cmb_iso_destination)
 
-
-        dest_row.addWidget(dest_label)
-        dest_row.addWidget(self.cmb_iso_destination, 1)
+        dest_col.addWidget(dest_label)
+        dest_col.addWidget(self.cmb_iso_destination)
+        dest_col.addStretch(1)
 
         self._refresh_destinations()
         self.cmb_iso_destination.currentIndexChanged.connect(self._on_destination_changed)
+
+        # stat_ventoy começa vazio aqui — refresh_stats(), chamado no fim
+        # do _build_ui, já preenche de acordo com o disco selecionado no
+        # combo (que pode não ser o Ventoy).
+        self.stat_ventoy = _VentoyCard()
+
+        dest_row.addLayout(dest_col, 5)
+        dest_row.addWidget(self.stat_ventoy, 4)
 
         # ── Faixa de status ──────────────────────────────────────────────
         from core.eggs.eggs import get_dashboard_stats
 
         stats = get_dashboard_stats()
 
-        stats_row = QHBoxLayout()
-        stats_row.setSpacing(14)
-
-        # stat_last_iso e stat_ventoy começam vazios aqui — refresh_stats(),
-        # chamado no fim do _build_ui, já preenche os dois de acordo com o
-        # disco selecionado no combo (que pode não ser o Ventoy).
-        self.stat_last_iso = _IsoCard()
-        self.stat_ventoy = _VentoyCard()
-
         # O card "Update Penguin's Eggs" já mostra a versão instalada e se
-        # está atualizado — substitui o card de status separado que só
-        # repetia essa mesma informação.
+        # está atualizado. Vai pro grid de 3 colunas junto com os demais,
+        # em vez de ficar sozinho numa linha esticado a 100% da largura.
         install_title, install_desc, install_action = self._install_card_texts(
             stats["eggs_installed"], stats["eggs_version"], None
         )
@@ -962,16 +1082,7 @@ class EggsPage(QWidget):
         )
         self.btn_install.clicked.connect(self._on_install)
 
-        stats_row.addWidget(self.stat_last_iso, 1)
-        stats_row.addWidget(self.stat_ventoy, 1)
-        stats_row.addWidget(self.btn_install, 1)
-
         # ── Cards de ação ────────────────────────────────────────────────
-        cards = QGridLayout()
-        cards.setSpacing(14)
-        cards.setColumnStretch(0, 1)
-        cards.setColumnStretch(1, 1)
-
         self.btn_create = _EggsOptionButton(
             glyph="mdi6.egg-easter",
             title="Create Penguin's Eggs",
@@ -1010,16 +1121,18 @@ class EggsPage(QWidget):
         )
         self.btn_nautilus.clicked.connect(lambda: self._open_files("nautilus"))
 
-        cards.addWidget(self.btn_create, 0, 0)
-        cards.addWidget(self.btn_check, 0, 1)
-        cards.addWidget(self.btn_broot, 1, 0)
-        cards.addWidget(self.btn_nautilus, 1, 1)
+        # Reflui pra 2 ou 1 coluna conforme a largura disponível — não tem
+        # equivalente nativo a media query no Qt, então isso recalcula
+        # sozinho a cada resize (ver _ResponsiveCardGrid).
+        cards = _ResponsiveCardGrid([
+            self.btn_create, self.btn_check, self.btn_install,
+            self.btn_broot, self.btn_nautilus,
+        ])
 
         root.addWidget(header)
         root.addLayout(dest_row)
-        root.addLayout(stats_row)
         root.addSpacing(14)
-        root.addLayout(cards)
+        root.addWidget(cards)
         root.addSpacing(18)
 
         # ── Listagem de ISOs existentes (estilo Timeshift, item 3) ───────
@@ -1027,6 +1140,11 @@ class EggsPage(QWidget):
         iso_list_header.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
         iso_list_header.setStyleSheet("color: #ecf4ff;")
         root.addWidget(iso_list_header)
+
+        iso_list_divider = QFrame()
+        iso_list_divider.setFixedHeight(1)
+        iso_list_divider.setStyleSheet("background: rgba(255, 255, 255, 14); border: none;")
+        root.addWidget(iso_list_divider)
 
         self.iso_scroll = QScrollArea()
         self.iso_scroll.setWidgetResizable(True)
@@ -1062,7 +1180,7 @@ class EggsPage(QWidget):
         disks = list_relevant_disks(list_disks())
         ventoy_idx = 0
         for i, d in enumerate(disks):
-            label = f"{d.mountpoint}  •  {d.model or d.name}  •  {d.avail} livre  •  {d.fstype}"
+            label = _format_disk_label(d)
             self.cmb_iso_destination.addItem(label, d.mountpoint)
             if d.mountpoint == "/mnt/VENTOY":
                 ventoy_idx = i
@@ -1204,6 +1322,7 @@ class EggsPage(QWidget):
 
     def refresh_stats(self) -> None:
         from core.eggs.eggs import get_dashboard_stats, get_disk_stats, get_last_iso_for
+        from core.system.disks import list_disks
 
         # eggs_installed/version não dependem do disco escolhido — segue
         # vindo do get_dashboard_stats geral.
@@ -1221,8 +1340,16 @@ class EggsPage(QWidget):
             free_pct=disk_stats["free_pct"], label=dest_label, mountpoint=dest_mount,
         )
 
+        # Descrição completa do disco (mesma formatação do combo) —
+        # usada pelo card "ÚLTIMA ISO" quando o disco selecionado não
+        # tem nenhuma ISO salva.
+        disk_info = next((d for d in list_disks() if d.mountpoint == dest_mount), None)
+        dest_full_label = _format_disk_label(disk_info) if disk_info else dest_mount
+
         last_iso = get_last_iso_for(dest_mount)
-        self.stat_last_iso.set_iso(last_iso["name"], last_iso["date_str"], last_iso["size_gb"])
+        self.stat_last_iso.set_iso(
+            last_iso["name"], last_iso["date_str"], last_iso["size_gb"], dest_full_label
+        )
 
         # Reaproveita o resultado da última checagem de update (feita em
         # background) — não faz outra chamada de rede a cada 8s do

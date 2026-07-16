@@ -23,6 +23,13 @@ class EggsProgressDialog(QDialog):
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
 
         self._workers: list = []
+        # Flag independente de _workers: cobre o período em que a operação
+        # está tecnicamente "em andamento" mas ainda não existe nenhum
+        # QThread rodando — ex: durante o painel de escolha de disco
+        # alternativo (prompt_alternative_destination), que bloqueia com
+        # um QEventLoop local antes de qualquer worker ser criado. Sem
+        # essa flag, ESC escapava exatamente nessa janela de tempo.
+        self._is_running = False
         self._cancel_countdown = 0
         self._cancel_timer = QTimer(self)
         self._cancel_timer.setInterval(1000)
@@ -526,17 +533,14 @@ class EggsProgressDialog(QDialog):
         self.accept()
 
     def _toggle_maximize(self) -> None:
-        """Usa o maximize nativo do Qt (showMaximized/showNormal) — isso
-        registra o estado junto ao gerenciador de janelas (GNOME Shell),
-        que é o que faz docks com auto-hide reconhecerem a janela como
-        maximizada e se esconderem. Mas alguns WMs (ex: mutter customizado
-        sem decoração) simplesmente ignoram o estado "maximizado" para
-        janelas frameless e não redimensionam nada — por isso também
-        força o setGeometry manual como garantia de que o redimensionamento
-        acontece de verdade, independente do WM aplicar o estado ou não."""
+        """Redimensionamento manual pra tela toda (via setGeometry), sem
+        usar o showMaximized() nativo do Qt. No dock customizado do
+        Apollo, o estado "maximizado" nativo registrado junto ao WM fazia
+        essa janela (frameless) empilhar ATRÁS do dock depois de
+        maximizar — usar só setGeometry(availableGeometry()) evita entrar
+        nesse estado do WM e resolve o empilhamento."""
         if not self._is_maximized:
             self._normal_geometry = self.geometry()
-            self.showMaximized()
             from PySide6.QtWidgets import QApplication
             screen = self.screen() or QApplication.primaryScreen()
             if screen:
@@ -736,6 +740,7 @@ class EggsProgressDialog(QDialog):
         self.lbl_elapsed.setText(text)
 
     def set_running(self, running: bool) -> None:
+        self._is_running = running
         self.btn_cancel.setEnabled(running)
         self.btn_close.setEnabled(not running)
 
@@ -769,7 +774,7 @@ class EggsProgressDialog(QDialog):
         self._flush_log_buffer()
 
     def closeEvent(self, event) -> None:
-        if any(w.isRunning() for w in self._workers):
+        if self._is_running or any(w.isRunning() for w in self._workers):
             event.ignore()
             self.set_status("Backup em execução. Use Cancelar para interromper.")
             return
@@ -781,7 +786,10 @@ class EggsProgressDialog(QDialog):
         # bloqueado com processo rodando, mas o ESC escapava e fechava o
         # diálogo sem avisar nada, deixando o worker órfão (foi assim que a
         # ISO em andamento se perdeu). Replica aqui a mesma trava do closeEvent.
-        if any(w.isRunning() for w in self._workers):
+        # Checa _is_running também, não só _workers: durante o painel de
+        # escolha de disco alternativo ainda não existe worker nenhum, só
+        # o QEventLoop local — sem isso o ESC escapava bem nessa janela.
+        if self._is_running or any(w.isRunning() for w in self._workers):
             self.set_status("Backup em execução. Use Cancelar para interromper.")
             return
         super().reject()
