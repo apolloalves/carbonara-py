@@ -769,6 +769,17 @@ class BackupProgressDialog(QDialog):
             return
         super().closeEvent(event)
 
+    def reject(self) -> None:
+        # QDialog trata ESC chamando reject() diretamente (via done()/hide()),
+        # sem passar pelo closeEvent — por isso o "X" da janela já ficava
+        # bloqueado com processo rodando, mas o ESC escapava e fechava o
+        # diálogo sem avisar nada, deixando o worker órfão. Replica aqui a
+        # mesma trava do closeEvent.
+        if any(w.isRunning() for w in self._workers):
+            self.set_status("Backup em execução. Use Cancelar para interromper.")
+            return
+        super().reject()
+
 
 # ── Dialog de sucesso ────────────────────────────────────────────────────────
 

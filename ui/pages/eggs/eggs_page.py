@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 
 import qtawesome as qta
-from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtCore import Qt, Signal, QTimer, QSize
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QWidget,
@@ -14,7 +14,19 @@ from PySide6.QtWidgets import (
     QFrame,
     QPushButton,
     QDialog,
+    QComboBox,
+    QScrollArea,
 )
+
+
+def _clear_layout(layout) -> None:
+    while layout.count():
+        item = layout.takeAt(0)
+        w = item.widget()
+        if w is not None:
+            w.deleteLater()
+        elif item.layout() is not None:
+            _clear_layout(item.layout())
 
 
 class _CloseLabel(QLabel):
@@ -138,8 +150,158 @@ class _ErrorDialog(QDialog):
             self.move(event.globalPosition().toPoint() - self._drag)
 
 
+class _DeleteIsoConfirmDialog(QDialog):
+    """Dialog de confirmação estilizado pra remoção de ISO — mesmo padrão
+    visual do _DeleteConfirmDialog em snapshots_page.py, substitui o
+    QMessageBox.question() genérico que destoava do resto da UI."""
+
+    def __init__(self, name: str, size_gb: float, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Confirmar exclusão")
+        self.setModal(True)
+        self.setFixedSize(480, 220)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self._build_ui(name, size_gb)
+        self._apply_styles()
+
+    def _build_ui(self, name: str, size_gb: float) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        header = QFrame()
+        header.setObjectName("DelHeader")
+        header.setFixedHeight(48)
+        h_layout = QHBoxLayout(header)
+        h_layout.setContentsMargins(18, 0, 16, 0)
+
+        icon = QLabel()
+        icon.setFixedSize(28, 28)
+        icon.setAlignment(Qt.AlignCenter)
+        icon.setPixmap(qta.icon("mdi6.delete", color="#ff6666").pixmap(18, 18))
+        icon.setStyleSheet("QLabel { background: rgba(200,60,60,40); border-radius: 8px; }")
+
+        lbl = QLabel("Excluir ISO")
+        lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+        lbl.setStyleSheet("color: #ecf4ff;")
+
+        btn_x = _CloseLabel(self)
+        btn_x.mousePressEvent = lambda e: self.reject()
+
+        h_layout.addWidget(icon)
+        h_layout.addSpacing(10)
+        h_layout.addWidget(lbl)
+        h_layout.addStretch()
+        h_layout.addWidget(btn_x)
+
+        body = QFrame()
+        body.setObjectName("DelBody")
+        b_layout = QVBoxLayout(body)
+        b_layout.setContentsMargins(24, 18, 24, 20)
+        b_layout.setSpacing(10)
+
+        warn = QLabel("Esta ação é irreversível. A ISO será permanentemente removida do disco.")
+        warn.setWordWrap(True)
+        warn.setFont(QFont("DejaVu Sans Mono", 9))
+        warn.setStyleSheet("color: #c8d4e0;")
+
+        iso_label = QLabel(f"{name}  •  {size_gb:.2f} GB")
+        iso_label.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+        iso_label.setStyleSheet(
+            "color: #ff9966; background: rgba(200,60,60,20); "
+            "border: 1px solid rgba(200,60,60,60); border-radius: 6px; padding: 4px 10px;"
+        )
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
+
+        btn_cancel = QPushButton("Cancelar")
+        btn_cancel.setObjectName("DelBtnCancel")
+        btn_cancel.setFixedWidth(110)
+        btn_cancel.clicked.connect(self.reject)
+
+        btn_confirm = QPushButton("Excluir")
+        btn_confirm.setObjectName("DelBtnConfirm")
+        btn_confirm.setFixedWidth(110)
+        btn_confirm.clicked.connect(self.accept)
+
+        btn_row.addStretch()
+        btn_row.addWidget(btn_cancel)
+        btn_row.addWidget(btn_confirm)
+
+        b_layout.addWidget(warn)
+        b_layout.addWidget(iso_label)
+        b_layout.addStretch()
+        b_layout.addLayout(btn_row)
+
+        root.addWidget(header)
+        root.addWidget(body, stretch=1)
+
+    def _apply_styles(self) -> None:
+        self.setStyleSheet("""
+            QFrame#DelHeader {
+                background: rgba(30, 10, 10, 255);
+                border-bottom: 1px solid rgba(200, 60, 60, 100);
+                border-top-left-radius: 12px;
+                border-top-right-radius: 12px;
+            }
+            QFrame#DelBody {
+                background: #080c14;
+                border-bottom-left-radius: 12px;
+                border-bottom-right-radius: 12px;
+            }
+            QPushButton#DelBtnCancel {
+                background: rgba(10, 15, 25, 230);
+                border: 1px solid rgba(31, 92, 255, 120);
+                border-radius: 8px;
+                color: #ecf4ff;
+                font-family: "DejaVu Sans Mono";
+                font-size: 11px;
+                padding: 6px 0;
+            }
+            QPushButton#DelBtnCancel:hover {
+                background: rgba(23, 147, 209, 70);
+                border-color: rgba(35, 166, 255, 180);
+            }
+            QPushButton#DelBtnConfirm {
+                background: rgba(180, 40, 40, 180);
+                border: 1px solid rgba(255, 80, 80, 160);
+                border-radius: 8px;
+                color: #ffffff;
+                font-family: "DejaVu Sans Mono";
+                font-size: 11px;
+                font-weight: 700;
+                padding: 6px 0;
+            }
+            QPushButton#DelBtnConfirm:hover {
+                background: rgba(220, 60, 60, 220);
+                border-color: rgba(255, 120, 120, 220);
+            }
+        """)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.LeftButton and hasattr(self, '_drag'):
+            self.move(event.globalPosition().toPoint() - self._drag)
+
+
 def _show_error(title: str, message: str, parent=None) -> None:
     _ErrorDialog(title, message, parent=parent).exec()
+
+
+def _badge_style(color_hex: str, radius: int = 10) -> str:
+    """Mesmo padrão de badge do _EggsOptionButton: fundo e borda na cor
+    semântica do ícone, em vez do cinza quase invisível que os cards de
+    stat (Ventoy/ISO) estavam usando antes."""
+    h = color_hex.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return (
+        f"QLabel {{ background: rgba({r},{g},{b},40); "
+        f"border-radius: {radius}px; border: 1px solid rgba({r},{g},{b},90); }}"
+    )
 
 
 class _VentoyCard(QFrame):
@@ -168,9 +330,7 @@ class _VentoyCard(QFrame):
         self.icon_lbl.setFixedSize(44, 44)
         self.icon_lbl.setAlignment(Qt.AlignCenter)
         self.icon_lbl.setPixmap(qta.icon("mdi6.usb-flash-drive-outline", color="#9bf0bd").pixmap(20, 20))
-        self.icon_lbl.setStyleSheet(
-            "QLabel { background: rgba(255,255,255,6); border-radius: 10px; }"
-        )
+        self.icon_lbl.setStyleSheet(_badge_style("#9bf0bd"))
 
         text_col = QVBoxLayout()
         text_col.setSpacing(2)
@@ -178,6 +338,7 @@ class _VentoyCard(QFrame):
         title_lbl = QLabel("VENTOY")
         title_lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
         title_lbl.setStyleSheet("color: #ecf4ff; background: transparent; border: none;")
+        self.title_lbl = title_lbl
 
         self.detail_lbl = QLabel("não montado")
         self.detail_lbl.setFont(QFont("DejaVu Sans Mono", 9))
@@ -221,9 +382,16 @@ class _VentoyCard(QFrame):
         total_gb: float | None,
         fs_type: str | None,
         free_pct: int | None = None,
+        label: str | None = None,
+        mountpoint: str | None = None,
     ) -> None:
+        if label is not None:
+            self.title_lbl.setText(label)
+
+        mount = mountpoint or "/mnt/VENTOY"
+
         if free_gb is None or total_gb is None or total_gb <= 0:
-            self.detail_lbl.setText("não montado")
+            self.detail_lbl.setText(f"não montado  •  {mount}")
             self.pct_lbl.setText("—")
             self.bar_fill.setGeometry(0, 0, 0, 5)
             return
@@ -234,7 +402,7 @@ class _VentoyCard(QFrame):
         pct_free = free_pct if free_pct is not None else (free_gb / total_gb) * 100
         fs = fs_type or "?"
         self.detail_lbl.setText(
-            f"{free_gb:.1f} GB livres de {total_gb:.1f} GB  •  /mnt/VENTOY  •  {fs}"
+            f"{free_gb:.1f} GB livres de {total_gb:.1f} GB  •  {mount}  •  {fs}"
         )
         self.pct_lbl.setText(f"{pct_free:.0f}% livre")
 
@@ -254,6 +422,140 @@ class _VentoyCard(QFrame):
                 self.bar_fill.setGeometry(0, 0, fill_width, self.bar_track.height())
             except ValueError:
                 pass
+
+
+class _IsoCard(QFrame):
+    """Card da última ISO gerada, no mesmo estilo visual do _VentoyCard —
+    ícone, título e linha de detalhe (sem barra de progresso, que não
+    se aplica a um arquivo único)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("IsoCard")
+        self.setStyleSheet("""
+            QFrame#IsoCard {
+                background: rgba(255, 255, 255, 5);
+                border: 1px solid rgba(255, 255, 255, 8);
+                border-radius: 14px;
+            }
+        """)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(18, 16, 18, 16)
+        outer.setSpacing(10)
+
+        top_row = QHBoxLayout()
+        top_row.setSpacing(14)
+
+        self.icon_lbl = QLabel()
+        self.icon_lbl.setFixedSize(44, 44)
+        self.icon_lbl.setAlignment(Qt.AlignCenter)
+        self.icon_lbl.setPixmap(qta.icon("mdi6.disc", color="#9bf0bd").pixmap(20, 20))
+        self.icon_lbl.setStyleSheet(_badge_style("#9bf0bd"))
+
+        text_col = QVBoxLayout()
+        text_col.setSpacing(2)
+
+        title_lbl = QLabel("ÚLTIMA ISO")
+        title_lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+        title_lbl.setStyleSheet("color: #ecf4ff; background: transparent; border: none;")
+
+        self.name_lbl = QLabel("Nenhuma ISO gerada ainda")
+        self.name_lbl.setFont(QFont("DejaVu Sans Mono", 9))
+        self.name_lbl.setStyleSheet("color: #7d8a99; background: transparent; border: none;")
+        self.name_lbl.setWordWrap(True)
+
+        text_col.addWidget(title_lbl)
+        text_col.addWidget(self.name_lbl)
+
+        top_row.addWidget(self.icon_lbl)
+        top_row.addLayout(text_col, 1)
+
+        self.meta_lbl = QLabel("")
+        self.meta_lbl.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
+        self.meta_lbl.setStyleSheet("color: #5eea95; background: transparent; border: none;")
+
+        outer.addLayout(top_row)
+        outer.addWidget(self.meta_lbl)
+
+    def set_iso(self, name: str | None, date_str: str | None, size_gb: float | None) -> None:
+        if not name:
+            self.name_lbl.setText("Nenhuma ISO gerada ainda")
+            self.meta_lbl.setText("")
+            return
+        self.name_lbl.setText(name)
+        if date_str and size_gb is not None:
+            self.meta_lbl.setText(f"{date_str}  •  {size_gb:.2f} GB")
+        else:
+            self.meta_lbl.setText("")
+
+
+class _IsoListCard(QFrame):
+    """Card de uma linha na listagem de ISOs existentes (item 3 do pedido
+    do Apollo) — mesmo padrão visual do SnapshotCard em snapshots_page.py:
+    ícone + nome + meta (data, tamanho, local) + botão de ação."""
+
+    def __init__(self, entry, parent=None):
+        super().__init__(parent)
+        self.entry = entry
+        self.setObjectName("IsoListCard")
+        self.setStyleSheet("""
+            QFrame#IsoListCard {
+                border: 1px solid rgba(255, 255, 255, 12);
+                border-radius: 14px;
+                background: rgba(255, 255, 255, 6);
+            }
+            QFrame#IsoListCard:hover {
+                border: 1px solid rgba(255, 255, 255, 22);
+                background: rgba(255, 255, 255, 9);
+            }
+            QPushButton {
+                padding: 0px 18px;
+                border-radius: 9px;
+                border: 1px solid rgba(200, 60, 60, 100);
+                background: rgba(255, 255, 255, 6);
+                color: #c8d4e0;
+                font: 700 9pt "DejaVu Sans Mono";
+                min-height: 34px;
+            }
+            QPushButton:hover {
+                background: rgba(200, 60, 60, 40);
+                border: 1px solid rgba(255, 100, 100, 180);
+                color: #ffaaaa;
+            }
+        """)
+
+        root = QHBoxLayout(self)
+        root.setContentsMargins(18, 14, 18, 14)
+        root.setSpacing(16)
+
+        icon_lbl = QLabel()
+        icon_lbl.setFixedSize(38, 38)
+        icon_lbl.setAlignment(Qt.AlignCenter)
+        icon_lbl.setPixmap(qta.icon("mdi6.disc", color="#9bf0bd").pixmap(20, 20))
+        icon_lbl.setStyleSheet(_badge_style("#9bf0bd"))
+
+        text_col = QVBoxLayout()
+        text_col.setSpacing(4)
+
+        title = QLabel(entry.name)
+        title.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+        title.setStyleSheet("color: #ecf4ff;")
+
+        meta = QLabel(f"{entry.date_str}  •  {entry.size_gb:.2f} GB  •  {entry.path.parent}")
+        meta.setFont(QFont("DejaVu Sans Mono", 9))
+        meta.setStyleSheet("color: #6b7a8d;")
+
+        text_col.addWidget(title)
+        text_col.addWidget(meta)
+
+        self.btn_delete = QPushButton("DELETE")
+        self.btn_delete.setIcon(qta.icon("mdi6.delete", color="#ff8888"))
+        self.btn_delete.setIconSize(QSize(16, 16))
+
+        root.addWidget(icon_lbl)
+        root.addLayout(text_col, 1)
+        root.addWidget(self.btn_delete)
 
 
 class _StatCard(QFrame):
@@ -521,6 +823,55 @@ class EggsPage(QWidget):
         h_layout.addLayout(title_row)
         h_layout.addWidget(subtitle)
 
+        # ── Seletor de destino da ISO ────────────────────────────────────
+        # Genérico: lista todos os discos/mounts disponíveis via
+        # core/system/disks.py (list_disks), com o Ventoy pré-selecionado
+        # por padrão (comportamento de sempre, agora escolhível).
+        dest_row = QHBoxLayout()
+        dest_row.setSpacing(10)
+
+        dest_label = QLabel("Destino da ISO:")
+        dest_label.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
+        dest_label.setStyleSheet("color: #9aa6b2;")
+
+        self.cmb_iso_destination = QComboBox()
+        self.cmb_iso_destination.setMinimumWidth(420)
+        self.cmb_iso_destination.setStyleSheet("""
+            QComboBox {
+                background: rgba(255,255,255,6);
+                border: 1px solid rgba(255,255,255,14);
+                border-radius: 9px;
+                padding: 10px 14px;
+                color: #ecf4ff;
+                font: 9pt "DejaVu Sans Mono";
+                min-height: 38px;
+            }
+            QComboBox:hover {
+                border: 1px solid rgba(255,255,255,28);
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 28px;
+            }
+            QComboBox QAbstractItemView {
+                background: #131417;
+                color: #ecf4ff;
+                selection-background-color: rgba(74,222,128,35);
+                padding: 6px;
+                outline: none;
+            }
+            QComboBox QAbstractItemView::item {
+                padding: 8px 10px;
+                min-height: 22px;
+            }
+        """)
+
+        dest_row.addWidget(dest_label)
+        dest_row.addWidget(self.cmb_iso_destination, 1)
+
+        self._refresh_destinations()
+        self.cmb_iso_destination.currentIndexChanged.connect(self._on_destination_changed)
+
         # ── Faixa de status ──────────────────────────────────────────────
         from core.eggs.eggs import get_dashboard_stats
 
@@ -529,12 +880,11 @@ class EggsPage(QWidget):
         stats_row = QHBoxLayout()
         stats_row.setSpacing(14)
 
-        self.stat_last_iso = _StatCard("ÚLTIMA ISO", stats["last_iso"] or "Nenhuma ISO gerada ainda")
+        # stat_last_iso e stat_ventoy começam vazios aqui — refresh_stats(),
+        # chamado no fim do _build_ui, já preenche os dois de acordo com o
+        # disco selecionado no combo (que pode não ser o Ventoy).
+        self.stat_last_iso = _IsoCard()
         self.stat_ventoy = _VentoyCard()
-        self.stat_ventoy.set_stats(
-            stats["ventoy_free_gb"], stats["ventoy_total_gb"], stats["ventoy_fs_type"],
-            free_pct=stats["ventoy_free_pct"],
-        )
 
         # O card "Update Penguin's Eggs" já mostra a versão instalada e se
         # está atualizado — substitui o card de status separado que só
@@ -607,12 +957,111 @@ class EggsPage(QWidget):
         cards.addWidget(self.btn_nautilus, 1, 1)
 
         root.addWidget(header)
+        root.addLayout(dest_row)
         root.addLayout(stats_row)
         root.addSpacing(14)
         root.addLayout(cards)
-        root.addStretch(1)
+        root.addSpacing(18)
+
+        # ── Listagem de ISOs existentes (estilo Timeshift, item 3) ───────
+        iso_list_header = QLabel("ISOs existentes")
+        iso_list_header.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+        iso_list_header.setStyleSheet("color: #ecf4ff;")
+        root.addWidget(iso_list_header)
+
+        self.iso_scroll = QScrollArea()
+        self.iso_scroll.setWidgetResizable(True)
+        self.iso_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.iso_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+
+        self.iso_scroll_content = QWidget()
+        self.iso_scroll_layout = QVBoxLayout(self.iso_scroll_content)
+        self.iso_scroll_layout.setContentsMargins(0, 0, 0, 0)
+        self.iso_scroll_layout.setSpacing(10)
+        self.iso_scroll_layout.addStretch(1)
+        self.iso_scroll.setWidget(self.iso_scroll_content)
+
+        root.addWidget(self.iso_scroll, 1)
+
+        self.refresh_stats()
+        self.rebuild_iso_list()
 
         self._check_for_update()
+
+    def _refresh_destinations(self) -> None:
+        """Popula o combo de destino com os discos/mounts disponíveis via
+        core/system/disks.py — deixa o Ventoy pré-selecionado por padrão."""
+        from core.system.disks import list_disks
+
+        current_path = None
+        if self.cmb_iso_destination.count() > 0:
+            current_path = self.cmb_iso_destination.currentData()
+
+        self.cmb_iso_destination.blockSignals(True)
+        self.cmb_iso_destination.clear()
+
+        disks = list_disks()
+        ventoy_idx = 0
+        for i, d in enumerate(disks):
+            label = f"{d.mountpoint}  •  {d.model or d.name}  •  {d.avail} livre  •  {d.fstype}"
+            self.cmb_iso_destination.addItem(label, d.mountpoint)
+            if d.mountpoint == "/mnt/VENTOY":
+                ventoy_idx = i
+
+        self.cmb_iso_destination.blockSignals(False)
+
+        if current_path:
+            idx = self.cmb_iso_destination.findData(current_path)
+            self.cmb_iso_destination.setCurrentIndex(idx if idx >= 0 else ventoy_idx)
+        else:
+            self.cmb_iso_destination.setCurrentIndex(ventoy_idx)
+
+    def _on_destination_changed(self, index: int) -> None:
+        if index < 0:
+            return
+        self.refresh_stats()
+
+    def current_iso_destination(self) -> str:
+        """Path do destino escolhido no combo — cai em /mnt/VENTOY se
+        nada estiver selecionado (nenhum disco detectado, por exemplo)."""
+        data = self.cmb_iso_destination.currentData()
+        return data or "/mnt/VENTOY"
+
+    def rebuild_iso_list(self) -> None:
+        """Repopula a listagem de ISOs existentes — mesmo padrão de
+        rebuild_snapshot_view em snapshots_page.py."""
+        from core.eggs.eggs import list_existing_isos
+
+        _clear_layout(self.iso_scroll_layout)
+
+        entries = list_existing_isos()
+
+        if not entries:
+            empty = QLabel("Nenhuma ISO gerada ainda.")
+            empty.setAlignment(Qt.AlignCenter)
+            empty.setFont(QFont("DejaVu Sans Mono", 9))
+            empty.setStyleSheet("color: #6b7a8d; padding: 24px;")
+            self.iso_scroll_layout.addWidget(empty)
+            self.iso_scroll_layout.addStretch(1)
+            return
+
+        for entry in entries:
+            card = _IsoListCard(entry)
+            card.btn_delete.clicked.connect(lambda _, e=entry: self._delete_iso(e))
+            self.iso_scroll_layout.addWidget(card)
+
+        self.iso_scroll_layout.addStretch(1)
+
+    def _delete_iso(self, entry) -> None:
+        dialog = _DeleteIsoConfirmDialog(entry.name, entry.size_gb, parent=self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        try:
+            entry.path.unlink()
+        except OSError as exc:
+            _show_error("Carbonara", f"Falha ao remover: {exc}", parent=self)
+            return
+        self.rebuild_iso_list()
 
     def _check_for_update(self) -> None:
         """Checa se há atualização do penguins-eggs disponível via AUR —
@@ -670,14 +1119,27 @@ class EggsPage(QWidget):
         )
 
     def refresh_stats(self) -> None:
-        from core.eggs.eggs import get_dashboard_stats
+        from core.eggs.eggs import get_dashboard_stats, get_disk_stats, get_last_iso_for
 
+        # eggs_installed/version não dependem do disco escolhido — segue
+        # vindo do get_dashboard_stats geral.
         stats = get_dashboard_stats()
-        self.stat_last_iso.set_value(stats["last_iso"] or "Nenhuma ISO gerada ainda")
+
+        # Destino + última ISO acompanham o disco selecionado no combo,
+        # não mais o Ventoy fixo — a cada troca de seleção, os dois cards
+        # se atualizam pra refletir aquele disco específico.
+        dest_mount = self.current_iso_destination()
+        dest_label = self._destination_label(dest_mount)
+
+        disk_stats = get_disk_stats(dest_mount)
         self.stat_ventoy.set_stats(
-            stats["ventoy_free_gb"], stats["ventoy_total_gb"], stats["ventoy_fs_type"],
-            free_pct=stats["ventoy_free_pct"],
+            disk_stats["free_gb"], disk_stats["total_gb"], disk_stats["fs_type"],
+            free_pct=disk_stats["free_pct"], label=dest_label, mountpoint=dest_mount,
         )
+
+        last_iso = get_last_iso_for(dest_mount)
+        self.stat_last_iso.set_iso(last_iso["name"], last_iso["date_str"], last_iso["size_gb"])
+
         # Reaproveita o resultado da última checagem de update (feita em
         # background) — não faz outra chamada de rede a cada 8s do
         # auto-refresh, só nos momentos certos (abertura da tela, depois
@@ -689,6 +1151,13 @@ class EggsPage(QWidget):
         self.btn_install.set_title(install_title)
         self.btn_install.set_desc(install_desc)
         self.btn_install.set_action_label(install_action)
+
+    def _destination_label(self, mountpoint: str) -> str:
+        """Nome amigável do disco selecionado, pro título do card de
+        destino — usa o nome do mountpoint em si (ex: 'VENTOY') como
+        antes tinha hardcoded, mas agora vindo do combo."""
+        name = mountpoint.rsplit("/", 1)[-1] or mountpoint
+        return name.upper()
 
     # ── Ações ────────────────────────────────────────────────────────────
 
@@ -703,7 +1172,7 @@ class EggsPage(QWidget):
             except Exception:
                 pass
 
-    def _run_with_progress(self, func_name: str, dialog_title: str, preparing_text: str = "Aguardando...", icon_glyph: str = "mdi6.egg-outline") -> None:
+    def _run_with_progress(self, func_name: str, dialog_title: str, preparing_text: str = "Aguardando...", icon_glyph: str = "mdi6.egg-outline", extra_kwargs: dict | None = None) -> None:
         # Evita disparar uma segunda execução em paralelo se o usuário
         # clicar de novo enquanto o pkexec ainda está subindo.
         if self._proc is not None and self._proc.poll() is None:
@@ -712,12 +1181,15 @@ class EggsPage(QWidget):
         import json
         import subprocess
 
-        args_json = json.dumps({
+        payload = {
             "func_name": func_name,
             "title": dialog_title,
             "preparing_text": preparing_text,
             "icon_glyph": icon_glyph,
-        })
+        }
+        if extra_kwargs:
+            payload.update(extra_kwargs)
+        args_json = json.dumps(payload)
 
         cmd = [
             "pkexec",
@@ -756,6 +1228,7 @@ class EggsPage(QWidget):
 
         self._set_cards_enabled(True)
         self.refresh_stats()
+        self.rebuild_iso_list()
         self._check_for_update()
 
         output = stderr or stdout or ""
@@ -772,12 +1245,19 @@ class EggsPage(QWidget):
         não funcionou durante o delay de abertura do prompt de senha."""
         for btn in (self.btn_create, self.btn_check, self.btn_install):
             btn.setEnabled(enabled)
+        self.cmb_iso_destination.setEnabled(enabled)
 
     def _on_create(self) -> None:
-        self._run_with_progress("create_eggs", "Criando Penguin's Eggs...", "Criando ISO...", "mdi6.egg-easter")
+        self._run_with_progress(
+            "create_eggs", "Criando Penguin's Eggs...", "Criando ISO...", "mdi6.egg-easter",
+            extra_kwargs={"destination": self.current_iso_destination()},
+        )
 
     def _on_check(self) -> None:
-        self._run_with_progress("check_eggs", "Verificando Penguin's Eggs...", "Verificando .iso...", "mdi6.file-search-outline")
+        self._run_with_progress(
+            "check_eggs", "Verificando Penguin's Eggs...", "Verificando .iso...", "mdi6.file-search-outline",
+            extra_kwargs={"destination": self.current_iso_destination()},
+        )
 
     def _on_install(self) -> None:
         self._run_with_progress("install_eggs", "Instalando Penguin's Eggs...", "Instalando...", "mdi6.download-circle-outline")

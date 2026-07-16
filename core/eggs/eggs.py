@@ -5,6 +5,7 @@ import signal
 import shutil
 import subprocess
 import time
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -22,10 +23,69 @@ VENTOY_DEVICE = "/dev/sdd1"
 MDSATA_DEVICE = "/dev/sdd3"
 
 
+def get_disk_stats(mountpoint: str) -> dict:
+    """Generaliza a checagem de espaço que get_dashboard_stats fazia só
+    pro Ventoy — usado pelo card de destino dinâmico na UI, que agora
+    mostra stats de qualquer disco escolhido no combo, não só o Ventoy.
+    Mesma fonte (`df`) que garante bater com `df -h` no terminal."""
+    result = {"free_gb": None, "total_gb": None, "free_pct": None, "fs_type": None}
+    path = Path(mountpoint)
+    if not path.exists() or not path.is_mount():
+        return result
+
+    df_result = subprocess.run(
+        ["df", "-B1", "--output=size,avail,pcent", str(path)],
+        capture_output=True, text=True,
+    )
+    lines = df_result.stdout.strip().splitlines()
+    if df_result.returncode == 0 and len(lines) >= 2:
+        size_str, avail_str, pcent_str = lines[1].split()
+        total_bytes = int(size_str)
+        avail_bytes = int(avail_str)
+        used_pct = int(pcent_str.rstrip("%"))
+        result["total_gb"] = total_bytes / (1024 ** 3)
+        result["free_gb"] = avail_bytes / (1024 ** 3)
+        result["free_pct"] = 100 - used_pct
+
+    try:
+        with open("/proc/mounts", "r", encoding="utf-8") as fh:
+            for line in fh:
+                parts = line.split()
+                if len(parts) >= 3 and parts[1] == str(path):
+                    result["fs_type"] = parts[2]
+                    break
+    except Exception:
+        pass
+
+    return result
+
+
+def get_last_iso_for(directory: str) -> dict:
+    """Última ISO ARCHLINUX_*.iso dentro de um diretório específico —
+    generaliza o que get_dashboard_stats fazia só pro Ventoy, pro card
+    'ÚLTIMA ISO' acompanhar o disco escolhido no combo."""
+    result = {"name": None, "date_str": None, "size_gb": None}
+    path = Path(directory)
+    if not path.exists():
+        return result
+
+    isos = sorted(path.glob("ARCHLINUX_*.iso"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not isos:
+        return result
+
+    st = isos[0].stat()
+    result["name"] = isos[0].name
+    result["date_str"] = datetime.fromtimestamp(st.st_mtime).strftime("%d/%m/%Y %H:%M")
+    result["size_gb"] = st.st_size / (1024 ** 3)
+    return result
+
+
 def get_dashboard_stats() -> dict:
     """Coleta dados leves para o resumo do topo da tela — não exige root."""
     stats = {
         "last_iso": None,
+        "last_iso_date": None,
+        "last_iso_size_gb": None,
         "ventoy_free_gb": None,
         "ventoy_total_gb": None,
         "ventoy_free_pct": None,
@@ -47,6 +107,14 @@ def get_dashboard_stats() -> dict:
             )
             if isos:
                 stats["last_iso"] = isos[0].name
+                _iso_stat = isos[0].stat()
+                # st_mtime como proxy de "data de criação": a ISO não é
+                # reescrita depois de gerada (só renomeada/movida em
+                # _move_and_backup_iso), então mtime reflete o momento
+                # real da geração. Linux não tem um "creation time"
+                # confiável e portável como o Windows/macOS têm.
+                stats["last_iso_date"] = datetime.fromtimestamp(_iso_stat.st_mtime).strftime("%d/%m/%Y %H:%M")
+                stats["last_iso_size_gb"] = _iso_stat.st_size / (1024 ** 3)
             # Chama o próprio `df` em vez de calcular por conta própria —
             # garante que os números batem exatamente com o que o usuário
             # vê rodando `df -h` no terminal, sem risco de divergência por
@@ -179,6 +247,68 @@ def find_iso_files(path: Path) -> list[Path]:
     return sorted(path.glob("*.iso"))
 
 
+@dataclass(frozen=True)
+class IsoEntry:
+    path: Path
+    name: str
+    date_str: str
+    size_gb: float
+
+
+def list_existing_isos(directories: list[Path] | None = None) -> list[IsoEntry]:
+    """Lista todas as ISOs já geradas (padrão ARCHLINUX_*.iso) nos
+    diretórios de destino informados — usado pela listagem estilo
+    Timeshift na tela do Eggs. Por padrão, olha em VENTOY e MDSATA_EGGS
+    (os dois destinos reais usados hoje)."""
+    dirs = directories or [VENTOY, MDSATA_EGGS]
+    entries: list[IsoEntry] = []
+    seen: set[Path] = set()
+    for directory in dirs:
+        if not directory.exists():
+            continue
+        for iso_path in sorted(directory.glob("ARCHLINUX_*.iso")):
+            resolved = iso_path.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            try:
+                st = iso_path.stat()
+            except OSError:
+                continue
+            entries.append(IsoEntry(
+                path=iso_path,
+                name=iso_path.name,
+                date_str=datetime.fromtimestamp(st.st_mtime).strftime("%d/%m/%Y %H:%M"),
+                size_gb=st.st_size / (1024 ** 3),
+            ))
+    entries.sort(key=lambda e: e.path.stat().st_mtime, reverse=True)
+    return entries
+
+
+def _find_produced_iso() -> list[Path]:
+    """Procura a ISO recém-gerada pelo `eggs produce`.
+
+    Confirmado direto na fonte do penguins-eggs-legacy (settings.ts):
+        snapshot_mnt = path.join(snapshot_dir, 'mnt/')
+    e xorriso-command.ts escreve em `snapshot_mnt + isoFilename`. Com
+    snapshot_dir default = '/home/eggs', o destino real é
+    "/home/eggs/mnt/<arquivo>.iso" — SEM ponto, subpasta "mnt", não a
+    raiz de EGGS_DIRECTORY nem FILEPATH ("/home/eggs/.mnt", com ponto).
+
+    A mensagem final do próprio eggs ("in the nest: /home/eggs.") é
+    enganosa: ela imprime `snapshot_dir`, não `snapshot_mnt` — por isso
+    parece que o arquivo está na raiz, mas na verdade está um nível
+    mais fundo. Checamos EGGS_DIRECTORY/mnt primeiro (local real
+    confirmado), depois a raiz e FILEPATH como fallback (por segurança,
+    caso a config do usuário customize snapshot_dir de outro jeito).
+    """
+    for candidate in (EGGS_DIRECTORY / "mnt", EGGS_DIRECTORY, FILEPATH):
+        found = find_iso_files(candidate)
+        if found:
+            return found
+    return []
+
+
 # ── Worker genérico (não-rsync) — streama stdout linha a linha ─────────────────
 
 class ShellWorker(QThread):
@@ -306,40 +436,55 @@ def _run_step(dialog, cmd: list[str]) -> bool:
 
 
 def _cleanup_iso(dialog) -> None:
-    """Remove todos os .iso do FILEPATH após uma falha — evita lixo ocupando espaço."""
-    try:
-        removed = list(FILEPATH.glob("*.iso"))
-        for f in removed:
-            f.unlink(missing_ok=True)
-            dialog.append_log(f"Removido: {f}")
-        if removed:
-            dialog.append_log(f"--- {len(removed)} arquivo(s) removido(s) de {FILEPATH} ---")
-    except Exception as exc:  # noqa: BLE001
-        dialog.append_log(f"AVISO: não foi possível limpar {FILEPATH}: {exc}")
+    """Remove todos os .iso de EGGS_DIRECTORY/mnt (path real), EGGS_DIRECTORY
+    e FILEPATH após uma falha — evita lixo ocupando espaço, em qualquer um
+    dos locais possíveis."""
+    for directory in (EGGS_DIRECTORY / "mnt", EGGS_DIRECTORY, FILEPATH):
+        try:
+            removed = list(directory.glob("*.iso"))
+            for f in removed:
+                f.unlink(missing_ok=True)
+                dialog.append_log(f"Removido: {f}")
+            if removed:
+                dialog.append_log(f"--- {len(removed)} arquivo(s) removido(s) de {directory} ---")
+        except Exception as exc:  # noqa: BLE001
+            dialog.append_log(f"AVISO: não foi possível limpar {directory}: {exc}")
 
 
-def _move_and_backup_iso(dialog, iso_files: list[Path]) -> bool:
+def _move_and_backup_iso(dialog, iso_files: list[Path], destination: Path | None = None) -> bool:
+    dest_dir = destination or VENTOY
     date_str = datetime.now().strftime("%Y-%m-%d")
     src = iso_files[0]
-    renamed = FILEPATH / f"ARCHLINUX_{date_str}.iso"
 
-    dialog.set_status("Renomeando arquivo .iso...")
-    dialog.append_log(f"Copiando: {src} -> {renamed}")
+    # O eggs cria um SYMLINK em EGGS_DIRECTORY apontando pro arquivo real
+    # em EGGS_DIRECTORY/mnt (confirmado em make-iso.ts: "ln -s"). Se src
+    # for esse link, resolve pro arquivo físico de verdade antes de mover
+    # — mover o link em si não adianta nada (o destino precisa dos bytes).
+    if src.is_symlink():
+        real_src = Path(os.path.realpath(src))
+        if not real_src.exists():
+            dialog.append_log(f"ERRO: link '{src}' aponta para '{real_src}', que não existe.")
+            _cleanup_iso(dialog)
+            return False
+        src = real_src
+
+    renamed_name = f"ARCHLINUX_{date_str}.iso"
+
+    # Move direto para o destino escolhido já com o nome canônico — sem
+    # passar por FILEPATH (/home/eggs/.mnt) como etapa intermediária. Esse
+    # diretório provavelmente nunca existiu de verdade no sistema (era
+    # uma suposição não verificada) e foi a causa do "No such file or
+    # directory" ao tentar recriar o symlink lá dentro.
+    dialog.set_status(f"Movendo para {dest_dir}...")
+    dialog.set_current_file(str(src))
+    dest = dest_dir / renamed_name
+    dialog.append_log(f"Movendo: {src} -> {dest}")
     try:
-        src.rename(renamed)
+        shutil.move(str(src), str(dest))
     except OSError as exc:
-        dialog.append_log(f"ERRO ao renomear: {exc}")
+        dialog.append_log(f"ERRO ao mover para {dest_dir}: {exc}")
         _cleanup_iso(dialog)
         return False
-
-    dialog.set_status(f"Movendo para {VENTOY}...")
-    dialog.set_current_file(str(renamed))
-    if not _run_step(dialog, ["mv", "-v", str(renamed), str(VENTOY)]):
-        dialog.append_log("Falha ao mover ISO para o Ventoy — limpando arquivo gerado...")
-        _cleanup_iso(dialog)
-        return False
-
-    dest = VENTOY / renamed.name
 
     dialog.set_status(f"Fazendo backup em {MDSATA_EGGS}...")
     dialog.set_current_file(str(dest))
@@ -384,20 +529,22 @@ def _used_root_gb() -> float:
         return 0.0
 
 
-def check_space(dialog) -> bool:
+def check_space(dialog, destination: Path | None = None) -> bool:
     """
-    Verifica se há espaço suficiente no Ventoy e no MDSATA.
+    Verifica se há espaço suficiente no destino escolhido (Ventoy por
+    padrão) e no MDSATA (backup, sempre fixo).
     Retorna True se OK, False se algum destino está sem espaço.
     """
+    dest = destination or VENTOY
     estimated_gb = _used_root_gb()
-    ventoy_free = _free_gb(VENTOY) if _is_mountpoint(VENTOY) else 0.0
+    dest_free = _free_gb(dest) if _is_mountpoint(dest) else 0.0
     mdsata_free = _free_gb(MDSATA_EGGS.parent) if _is_mountpoint(MDSATA) else 0.0
 
     problems = []
 
-    if ventoy_free < estimated_gb:
+    if dest_free < estimated_gb:
         problems.append(
-            f"VENTOY ({VENTOY}): {ventoy_free:.1f} GB livres "
+            f"{dest}: {dest_free:.1f} GB livres "
             f"— necessário ~{estimated_gb:.1f} GB"
         )
     if mdsata_free < estimated_gb:
@@ -423,52 +570,81 @@ def check_space(dialog) -> bool:
 
     dialog.append_log(
         f"INFO: Espaço verificado: ISO estimada ~{estimated_gb:.1f} GB | "
-        f"Ventoy {ventoy_free:.1f} GB livres | MDSATA {mdsata_free:.1f} GB livres"
+        f"{dest} {dest_free:.1f} GB livres | MDSATA {mdsata_free:.1f} GB livres"
     )
     return True
 
 
-def create_eggs(dialog, parent=None) -> None:
-    """Cria uma nova ISO via penguins-eggs (ou move uma já existente para o Ventoy)."""
+def create_eggs(dialog, parent=None, destination: str | None = None) -> None:
+    """Cria uma nova ISO via penguins-eggs (ou move uma já existente para o
+    destino escolhido). `destination` é o path de um disco/mount escolhido
+    na UI (ver core/system/disks.py) — se None, usa VENTOY por padrão."""
     require_root()
+
+    dest_dir = Path(destination) if destination else VENTOY
 
     dialog.set_running(True)
     dialog.progress.setRange(0, 0)
     dialog.set_status("Verificando dispositivos...")
     dialog.set_current_file("—")
     dialog.append_log("=== CREATE PENGUIN'S EGGS ===")
+    dialog.append_log(f"Destino escolhido: {dest_dir}")
 
     try:
-        ensure_mounted(VENTOY_DEVICE, VENTOY)
+        # Só tenta montar o device fixo do Ventoy se o destino escolhido
+        # for de fato o Ventoy (comportamento padrão) — se o usuário
+        # escolheu outro disco na UI, ele já está montado (veio de
+        # list_disks(), que só lista o que já tem mountpoint ativo).
+        if dest_dir == VENTOY:
+            ensure_mounted(VENTOY_DEVICE, VENTOY)
         ensure_mounted(MDSATA_DEVICE, MDSATA)
     except Exception as exc:  # noqa: BLE001
         dialog.append_log(f"ERRO: {exc}")
         _finish(dialog, False, "", "Falha ao montar dispositivos.")
         return
 
-    dialog.append_log(f"Limpando: {EGGS_DIRECTORY}")
-    _safe_remove_eggs_dir()
-
-    if not check_space(dialog):
+    if not dest_dir.exists() or not dest_dir.is_dir():
+        dialog.append_log(f"ERRO: destino '{dest_dir}' não existe ou não está montado.")
+        _finish(dialog, False, "", "Destino inválido.")
         return
 
-    iso_files = find_iso_files(FILEPATH)
-
+    # Checa PRIMEIRO se já existe uma ISO pronta de uma tentativa anterior
+    # (por exemplo, se a etapa de mover pro destino falhou antes, mas o
+    # `eggs produce` já tinha terminado com sucesso) — só limpa
+    # EGGS_DIRECTORY se não houver nada aproveitável, pra nunca apagar
+    # uma ISO de 30+ GB já pronta sem tentar salvá-la primeiro.
+    iso_files = _find_produced_iso()
     if iso_files:
+        dialog.append_log(
+            f"ISO já existente encontrada em {iso_files[0].parent} — aproveitando em vez de gerar outra."
+        )
+        if not check_space(dialog, dest_dir):
+            return
         dialog.progress.setRange(0, 100)
-        ok = _move_and_backup_iso(dialog, iso_files)
+        ok = _move_and_backup_iso(dialog, iso_files, dest_dir)
         _finish(dialog, ok, "Concluído com sucesso.", "Falha na operação.")
         return
 
+    dialog.append_log(f"Limpando: {EGGS_DIRECTORY}")
+    _safe_remove_eggs_dir()
+
+    if not check_space(dialog, dest_dir):
+        return
+
     # Nenhuma iso encontrada — gera uma nova via `eggs produce`
-    date_str = datetime.now().strftime("%Y-%m-%d")
     dialog.set_status("Gerando nova ISO (eggs produce)...")
     dialog.append_log("")
     dialog.append_log("INICIANDO: Nenhuma .iso encontrada — gerando nova ISO via eggs produce...")
     dialog.append_log("")
 
     worker = ShellWorker(
-        ["eggs", "produce", "--clone", "--nointeractive", "--prefix=ARCHLINUX", f"--basename=_{date_str}"],
+        # --prefix precisa do separador manual: o xorriso-command.ts do
+        # próprio eggs concatena "prefix + volid" sem underscore entre
+        # eles (era isso que gerava "ARCHLINUXarchlinux_amd64..."). O
+        # --basename foi removido: no código fonte, o volid é calculado
+        # ANTES do override de basename ser aplicado (bug de ordem no
+        # fertilization.ts do eggs) — a flag nunca teve efeito nenhum.
+        ["eggs", "produce", "--clone", "--nointeractive", "--prefix=ARCHLINUX_"],
         title="Gerando ISO...",
         parent=dialog,
     )
@@ -485,9 +661,9 @@ def create_eggs(dialog, parent=None) -> None:
     def on_ok() -> None:
         dialog.append_log("--- ISO gerada com sucesso ---")
         dialog.progress.setRange(0, 100)
-        new_isos = find_iso_files(FILEPATH)
+        new_isos = _find_produced_iso()
         if new_isos:
-            ok = _move_and_backup_iso(dialog, new_isos)
+            ok = _move_and_backup_iso(dialog, new_isos, dest_dir)
             _finish(dialog, ok, "Concluído com sucesso.", "Falha na operação.")
         else:
             _finish(dialog, True, "ISO gerada, mas não encontrada para mover.", "")
@@ -508,9 +684,11 @@ def create_eggs(dialog, parent=None) -> None:
     worker.start()
 
 
-def check_eggs(dialog, parent=None) -> None:
+def check_eggs(dialog, parent=None, destination: str | None = None) -> None:
     """Verifica se há .iso pendente; move/backup se houver, senão limpa o diretório."""
     require_root()
+
+    dest_dir = Path(destination) if destination else VENTOY
 
     dialog.set_running(True)
     dialog.progress.setRange(0, 0)
@@ -519,7 +697,8 @@ def check_eggs(dialog, parent=None) -> None:
     dialog.append_log("=== CHECK PENGUIN'S EGGS ===")
 
     try:
-        ensure_mounted(VENTOY_DEVICE, VENTOY)
+        if dest_dir == VENTOY:
+            ensure_mounted(VENTOY_DEVICE, VENTOY)
         ensure_mounted(MDSATA_DEVICE, MDSATA)
     except Exception as exc:  # noqa: BLE001
         dialog.append_log(f"ERRO: {exc}")
@@ -527,17 +706,18 @@ def check_eggs(dialog, parent=None) -> None:
         return
 
     dialog.progress.setRange(0, 100)
-    iso_files = find_iso_files(FILEPATH)
+    iso_files = _find_produced_iso()
 
     if iso_files:
-        dialog.append_log(f"{len(iso_files)} arquivo(s) .iso encontrado(s) em {FILEPATH}")
-        if not check_space(dialog):
+        found_dir = iso_files[0].parent
+        dialog.append_log(f"{len(iso_files)} arquivo(s) .iso encontrado(s) em {found_dir}")
+        if not check_space(dialog, dest_dir):
             return
-        ok = _move_and_backup_iso(dialog, iso_files)
+        ok = _move_and_backup_iso(dialog, iso_files, dest_dir)
         _finish(dialog, ok, "Concluído com sucesso.", "Falha na operação.")
         return
 
-    dialog.append_log(f"Nenhum .iso encontrado em {FILEPATH}")
+    dialog.append_log(f"Nenhum .iso encontrado em {EGGS_DIRECTORY / 'mnt'}, {EGGS_DIRECTORY} ou {FILEPATH}")
     dialog.append_log(f"Limpando: {EGGS_DIRECTORY}")
     _safe_remove_eggs_dir()
     _finish(dialog, True, "Diretório limpo — nada para fazer.", "")
