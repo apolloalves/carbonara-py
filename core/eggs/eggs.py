@@ -244,7 +244,17 @@ def ensure_mounted(device: str, mountpoint: Path) -> None:
 def find_iso_files(path: Path) -> list[Path]:
     if not path.exists():
         return []
-    return sorted(path.glob("*.iso"))
+    # Ignora symlinks órfãos: o eggs cria um link em EGGS_DIRECTORY
+    # apontando pro arquivo físico em EGGS_DIRECTORY/mnt (ln -s), e
+    # _move_and_backup_iso resolve e move só o arquivo real. Se esse link
+    # sobreviver de uma tentativa anterior (já movido embora), ele ainda
+    # bate no glob mas aponta pro nada — sem esse filtro, cada tentativa
+    # nova "encontrava" uma ISO fantasma que já tinha ido pro destino há
+    # muito tempo.
+    return sorted(
+        p for p in path.glob("*.iso")
+        if not p.is_symlink() or p.resolve().exists()
+    )
 
 
 @dataclass(frozen=True)
@@ -454,7 +464,8 @@ def _cleanup_iso(dialog) -> None:
 def _move_and_backup_iso(dialog, iso_files: list[Path], destination: Path | None = None) -> bool:
     dest_dir = destination or VENTOY
     date_str = datetime.now().strftime("%Y-%m-%d")
-    src = iso_files[0]
+    original = iso_files[0]
+    src = original
 
     # O eggs cria um SYMLINK em EGGS_DIRECTORY apontando pro arquivo real
     # em EGGS_DIRECTORY/mnt (confirmado em make-iso.ts: "ln -s"). Se src
@@ -485,6 +496,15 @@ def _move_and_backup_iso(dialog, iso_files: list[Path], destination: Path | None
         dialog.append_log(f"ERRO ao mover para {dest_dir}: {exc}")
         _cleanup_iso(dialog)
         return False
+
+    # O symlink original (em EGGS_DIRECTORY) agora aponta pro nada, já
+    # que o arquivo real acabou de ser movido embora — sem apagar ele
+    # aqui, ele sobrevive e "engana" find_iso_files() numa tentativa
+    # futura, fazendo o Carbonara achar que ainda existe uma ISO pronta
+    # pra mover (foi exatamente esse o bug que causou o "ERRO: link
+    # aponta para ..., que não existe" numa segunda tentativa).
+    if original != src and original.is_symlink():
+        original.unlink(missing_ok=True)
 
     dialog.set_status(f"Fazendo backup em {MDSATA_EGGS}...")
     dialog.set_current_file(str(dest))
@@ -529,50 +549,88 @@ def _used_root_gb() -> float:
         return 0.0
 
 
-def check_space(dialog, destination: Path | None = None) -> bool:
+def _fail_space_check(dialog, message: str) -> None:
+    dialog.set_status(message)
+    dialog.progress.setRange(0, 100)
+    dialog.progress.setValue(0)
+    dialog._had_failure = True   # ← garante que _show_result_inline mostre erro
+    dialog.set_running(False)
+
+
+def check_space(dialog, destination: Path | None = None) -> Path | None:
     """
-    Verifica se há espaço suficiente no destino escolhido (Ventoy por
-    padrão) e no MDSATA (backup, sempre fixo).
-    Retorna True se OK, False se algum destino está sem espaço.
+    Verifica se há espaço suficiente no destino escolhido e no MDSATA
+    (backup, sempre fixo). Se o destino escolhido não tiver espaço,
+    sugere discos alternativos com espaço suficiente diretamente na
+    mesma janela (EggsProgressDialog.prompt_alternative_destination) —
+    se o usuário escolher um, a checagem é refeita com o novo destino.
+
+    Retorna o Path do destino final (pode ter mudado se o usuário
+    escolheu uma alternativa), ou None se não há espaço em algum lugar
+    sem alternativa viável, ou o usuário cancelou a escolha.
     """
     dest = destination or VENTOY
     estimated_gb = _used_root_gb()
-    dest_free = _free_gb(dest) if _is_mountpoint(dest) else 0.0
     mdsata_free = _free_gb(MDSATA_EGGS.parent) if _is_mountpoint(MDSATA) else 0.0
 
-    problems = []
-
-    if dest_free < estimated_gb:
-        problems.append(
-            f"{dest}: {dest_free:.1f} GB livres "
-            f"— necessário ~{estimated_gb:.1f} GB"
-        )
+    # MDSATA é o backup fixo (não escolhido pelo usuário) — sem espaço
+    # ali não tem "alternativa" que faça sentido sugerir, é só falha.
     if mdsata_free < estimated_gb:
-        problems.append(
-            f"MDSATA ({MDSATA}): {mdsata_free:.1f} GB livres "
+        dialog.append_log("AVISO: Espaço insuficiente nos destinos:")
+        dialog.append_log(
+            f"  ✗ MDSATA ({MDSATA}): {mdsata_free:.1f} GB livres "
             f"— necessário ~{estimated_gb:.1f} GB"
         )
-
-    if problems:
-        dialog.append_log("AVISO: Espaço insuficiente nos destinos:")
-        for p in problems:
-            dialog.append_log(f"  ✗ {p}")
         dialog.append_log(
             f"\nEstimativa de tamanho da ISO: ~{estimated_gb:.1f} GB "
             f"(comprimido, baseado no uso atual de /)"
         )
-        dialog.set_status("Espaço insuficiente — verifique os destinos.")
-        dialog.progress.setRange(0, 100)
-        dialog.progress.setValue(0)
-        dialog._had_failure = True   # ← garante que _show_result_inline mostre erro
-        dialog.set_running(False)
-        return False
+        _fail_space_check(dialog, "Espaço insuficiente no MDSATA — verifique o backup.")
+        return None
 
+    dest_free = _free_gb(dest) if _is_mountpoint(dest) else 0.0
+    if dest_free >= estimated_gb:
+        dialog.append_log(
+            f"INFO: Espaço verificado: ISO estimada ~{estimated_gb:.1f} GB | "
+            f"{dest} {dest_free:.1f} GB livres | MDSATA {mdsata_free:.1f} GB livres"
+        )
+        return dest
+
+    # Destino escolhido sem espaço — procura alternativas antes de desistir.
     dialog.append_log(
-        f"INFO: Espaço verificado: ISO estimada ~{estimated_gb:.1f} GB | "
-        f"{dest} {dest_free:.1f} GB livres | MDSATA {mdsata_free:.1f} GB livres"
+        f"AVISO: {dest} tem apenas {dest_free:.1f} GB livres "
+        f"— necessário ~{estimated_gb:.1f} GB."
     )
-    return True
+
+    from core.system.disks import list_relevant_disks, parse_size_to_gb
+
+    candidates = []
+    for d in list_relevant_disks():
+        if d.mountpoint == str(dest):
+            continue
+        free_gb = parse_size_to_gb(d.avail)
+        if free_gb >= estimated_gb:
+            candidates.append({
+                "mountpoint": d.mountpoint,
+                "free_gb": free_gb,
+                "label": d.model or d.name,
+            })
+
+    if not candidates:
+        dialog.append_log("Nenhum disco alternativo com espaço suficiente encontrado.")
+        _fail_space_check(dialog, "Espaço insuficiente — verifique os destinos.")
+        return None
+
+    dialog.append_log(f"Sugerindo {len(candidates)} disco(s) alternativo(s) com espaço suficiente...")
+    chosen = dialog.prompt_alternative_destination(candidates, estimated_gb)
+
+    if not chosen:
+        dialog.append_log("Nenhum destino alternativo escolhido — operação cancelada.")
+        _fail_space_check(dialog, "Cancelado pelo usuário.")
+        return None
+
+    dialog.append_log(f"Novo destino escolhido: {chosen}")
+    return check_space(dialog, Path(chosen))
 
 
 def create_eggs(dialog, parent=None, destination: str | None = None) -> None:
@@ -618,8 +676,10 @@ def create_eggs(dialog, parent=None, destination: str | None = None) -> None:
         dialog.append_log(
             f"ISO já existente encontrada em {iso_files[0].parent} — aproveitando em vez de gerar outra."
         )
-        if not check_space(dialog, dest_dir):
+        resolved_dest = check_space(dialog, dest_dir)
+        if resolved_dest is None:
             return
+        dest_dir = resolved_dest
         dialog.progress.setRange(0, 100)
         ok = _move_and_backup_iso(dialog, iso_files, dest_dir)
         _finish(dialog, ok, "Concluído com sucesso.", "Falha na operação.")
@@ -628,8 +688,10 @@ def create_eggs(dialog, parent=None, destination: str | None = None) -> None:
     dialog.append_log(f"Limpando: {EGGS_DIRECTORY}")
     _safe_remove_eggs_dir()
 
-    if not check_space(dialog, dest_dir):
+    resolved_dest = check_space(dialog, dest_dir)
+    if resolved_dest is None:
         return
+    dest_dir = resolved_dest
 
     # Nenhuma iso encontrada — gera uma nova via `eggs produce`
     dialog.set_status("Gerando nova ISO (eggs produce)...")
@@ -711,8 +773,10 @@ def check_eggs(dialog, parent=None, destination: str | None = None) -> None:
     if iso_files:
         found_dir = iso_files[0].parent
         dialog.append_log(f"{len(iso_files)} arquivo(s) .iso encontrado(s) em {found_dir}")
-        if not check_space(dialog, dest_dir):
+        resolved_dest = check_space(dialog, dest_dir)
+        if resolved_dest is None:
             return
+        dest_dir = resolved_dest
         ok = _move_and_backup_iso(dialog, iso_files, dest_dir)
         _finish(dialog, ok, "Concluído com sucesso.", "Falha na operação.")
         return

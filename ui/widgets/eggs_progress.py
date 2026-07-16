@@ -146,6 +146,7 @@ class EggsProgressDialog(QDialog):
         body_layout = QVBoxLayout(body)
         body_layout.setContentsMargins(24, 26, 24, 20)
         body_layout.setSpacing(0)
+        self._body_layout = body_layout
 
         # Status principal
         self.lbl_title = QLabel(self._preparing_text)
@@ -624,6 +625,108 @@ class EggsProgressDialog(QDialog):
 
     def set_current_file(self, text: str) -> None:
         self.lbl_current.set_text(f"Arquivo atual: {text}")
+
+    def prompt_alternative_destination(self, candidates: list[dict], estimated_gb: float) -> str | None:
+        """Mostra, na mesma janela (sem popup separado), uma lista de
+        discos alternativos com espaço suficiente e espera o usuário
+        escolher um ou cancelar. Bloqueia com um QEventLoop local — não
+        precisa de dialog.exec() aninhado, já que a QApplication já existe
+        nesse ponto (roda dentro do processo privilegiado do helper).
+        Retorna o mountpoint escolhido, ou None se cancelado."""
+        from PySide6.QtCore import QEventLoop
+
+        if not self.isVisible():
+            self.show()
+
+        panel = QFrame()
+        panel.setObjectName("AltDestPanel")
+        panel.setStyleSheet("""
+            QFrame#AltDestPanel {
+                border: 1px solid rgba(255, 184, 107, 90);
+                border-radius: 10px;
+                background: rgba(255, 184, 107, 14);
+            }
+        """)
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(16, 14, 16, 14)
+        panel_layout.setSpacing(10)
+
+        title = QLabel(
+            f"Espaço insuficiente no destino escolhido "
+            f"(necessário ~{estimated_gb:.1f} GB). Escolha outro disco:"
+        )
+        title.setWordWrap(True)
+        title.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
+        title.setStyleSheet("color: #ffb86b; background: transparent; border: none;")
+        panel_layout.addWidget(title)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+
+        result = {"choice": None}
+        loop = QEventLoop()
+
+        def _make_pick(mountpoint: str):
+            def _pick():
+                result["choice"] = mountpoint
+                loop.quit()
+            return _pick
+
+        for c in candidates:
+            btn = QPushButton(f"{c['mountpoint']}\n{c['label']} • {c['free_gb']:.1f} GB livres")
+            btn.setStyleSheet("""
+                QPushButton {
+                    background: rgba(255,255,255,8);
+                    border: 1px solid rgba(255, 184, 107, 110);
+                    border-radius: 8px;
+                    color: #ecf4ff;
+                    font-family: "DejaVu Sans Mono";
+                    font-size: 9pt;
+                    padding: 8px 14px;
+                }
+                QPushButton:hover {
+                    background: rgba(255, 184, 107, 35);
+                    border: 1px solid rgba(255, 184, 107, 200);
+                }
+            """)
+            btn.clicked.connect(_make_pick(c["mountpoint"]))
+            btn_row.addWidget(btn)
+
+        btn_cancel_alt = QPushButton("Cancelar")
+        btn_cancel_alt.setStyleSheet("""
+            QPushButton {
+                background: rgba(200,60,60,20);
+                border: 1px solid rgba(200,60,60,90);
+                border-radius: 8px;
+                color: #ecf4ff;
+                font-family: "DejaVu Sans Mono";
+                font-size: 9pt;
+                padding: 8px 14px;
+            }
+            QPushButton:hover {
+                background: rgba(200,60,60,50);
+                border: 1px solid rgba(255,100,100,180);
+            }
+        """)
+
+        def _cancel_pick():
+            result["choice"] = None
+            loop.quit()
+
+        btn_cancel_alt.clicked.connect(_cancel_pick)
+        btn_row.addWidget(btn_cancel_alt)
+
+        panel_layout.addLayout(btn_row)
+
+        # Insere logo acima do log — bem visível, sem atrapalhar o resto
+        # do layout (barra de progresso, título, etc. continuam no lugar).
+        log_index = self._body_layout.indexOf(self.log_view)
+        self._body_layout.insertWidget(log_index, panel)
+
+        loop.exec()
+
+        panel.deleteLater()
+        return result["choice"]
 
     def _tick_elapsed(self) -> None:
         self._elapsed_seconds += 1

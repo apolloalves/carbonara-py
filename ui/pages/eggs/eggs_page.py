@@ -70,36 +70,7 @@ def style_combo_popup(combo: QComboBox) -> None:
     )
 
 
-def _parse_size_to_gb(size_str: str) -> float:
-    """Converte strings human-readable do lsblk (ex: '65.7G', '512M',
-    '1.2T') pra GB numérico, usado só pra ordenar por espaço livre."""
-    if not size_str:
-        return 0.0
-    size_str = size_str.strip()
-    try:
-        unit = size_str[-1].upper()
-        value = float(size_str[:-1])
-    except (ValueError, IndexError):
-        return 0.0
-    multipliers = {"K": 1 / (1024 ** 2), "M": 1 / 1024, "G": 1, "T": 1024}
-    return value * multipliers.get(unit, 1)
-
-
-def _relevant_disks(disks: list) -> list:
-    """Filtra discos irrelevantes (mesmo critério que o Timeshift usa em
-    list_backup_destinations) e ordena por espaço livre — igual
-    priorização do Timeshift, mais espaço primeiro."""
-    IGNORED_PREFIXES = ("/run", "/boot", "/sys", "/proc", "/dev")
-    IGNORED_FSTYPES = {"swap", "tmpfs", "devtmpfs", "squashfs", "overlay", "iso9660"}
-
-    filtered = [
-        d for d in disks
-        if d.mountpoint
-        and not d.mountpoint.startswith(IGNORED_PREFIXES)
-        and d.fstype not in IGNORED_FSTYPES
-    ]
-    filtered.sort(key=lambda d: _parse_size_to_gb(d.avail), reverse=True)
-    return filtered
+from core.system.disks import list_relevant_disks
 
 
 class _CloseLabel(QLabel):
@@ -1088,7 +1059,7 @@ class EggsPage(QWidget):
         self.cmb_iso_destination.blockSignals(True)
         self.cmb_iso_destination.clear()
 
-        disks = _relevant_disks(list_disks())
+        disks = list_relevant_disks(list_disks())
         ventoy_idx = 0
         for i, d in enumerate(disks):
             label = f"{d.mountpoint}  •  {d.model or d.name}  •  {d.avail} livre  •  {d.fstype}"
@@ -1140,6 +1111,15 @@ class EggsPage(QWidget):
 
         self.iso_scroll_layout.addStretch(1)
 
+    def refresh_list(self) -> None:
+        """Mesmo padrão do snapshots_page.py: um único ponto de entrada
+        que releva o espaço livre de todos os discos (combo + cards) e
+        reconstrói a listagem — chamado depois de qualquer delete,
+        independente de qual disco foi afetado."""
+        self._refresh_destinations()
+        self.refresh_stats()
+        self.rebuild_iso_list()
+
     def _delete_iso(self, entry) -> None:
         dialog = _DeleteIsoConfirmDialog(entry.name, entry.size_gb, parent=self)
         if dialog.exec() != QDialog.Accepted:
@@ -1163,8 +1143,9 @@ class EggsPage(QWidget):
                 return  # usuário cancelou a autenticação
             err = result.stderr.strip() or f"exit code {result.returncode}"
             _show_error("Carbonara", f"Falha ao remover: {err}", parent=self)
+            self.refresh_list()
             return
-        self.rebuild_iso_list()
+        self.refresh_list()
 
     def _check_for_update(self) -> None:
         """Checa se há atualização do penguins-eggs disponível via AUR —

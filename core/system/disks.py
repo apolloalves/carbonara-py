@@ -29,6 +29,41 @@ class RaidInfo:
     array_size: str
 
 
+def parse_size_to_gb(size_str: str) -> float:
+    """Converte strings human-readable do lsblk (ex: '65.7G', '512M',
+    '1.2T') pra GB numérico — usado pra ordenar/filtrar por espaço livre."""
+    if not size_str:
+        return 0.0
+    size_str = size_str.strip()
+    try:
+        unit = size_str[-1].upper()
+        value = float(size_str[:-1])
+    except (ValueError, IndexError):
+        return 0.0
+    multipliers = {"K": 1 / (1024 ** 2), "M": 1 / 1024, "G": 1, "T": 1024}
+    return value * multipliers.get(unit, 1)
+
+
+IGNORED_MOUNT_PREFIXES = ("/run", "/boot", "/sys", "/proc", "/dev")
+IGNORED_FSTYPES = {"swap", "tmpfs", "devtmpfs", "squashfs", "overlay", "iso9660"}
+
+
+def list_relevant_disks(disks: list[DiskInfo] | None = None) -> list[DiskInfo]:
+    """Filtra discos irrelevantes como destino de backup/ISO (/run, /boot,
+    swap, tmpfs, etc.) e ordena por espaço livre disponível, maior
+    primeiro — mesmo critério usado pelo seletor de destino do Timeshift
+    e pelo combo de destino da ISO no Eggs."""
+    base = disks if disks is not None else list_disks()
+    filtered = [
+        d for d in base
+        if d.mountpoint
+        and not d.mountpoint.startswith(IGNORED_MOUNT_PREFIXES)
+        and d.fstype not in IGNORED_FSTYPES
+    ]
+    filtered.sort(key=lambda d: parse_size_to_gb(d.avail), reverse=True)
+    return filtered
+
+
 def run(cmd: list[str]) -> str:
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
