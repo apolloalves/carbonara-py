@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import qtawesome as qta
 from PySide6.QtCore import Qt, Signal, QTimer, QSize
@@ -15,6 +16,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QDialog,
     QComboBox,
+    QListView,
     QScrollArea,
 )
 
@@ -27,6 +29,77 @@ def _clear_layout(layout) -> None:
             w.deleteLater()
         elif item.layout() is not None:
             _clear_layout(item.layout())
+
+
+def style_combo_popup(combo: QComboBox) -> None:
+    """Cópia exata do helper usado em snapshots_page.py (Timeshift) —
+    estiliza o popup/lista suspensa do combo, mesmo tema azul."""
+    view = combo.view()
+    view.setMouseTracking(True)
+    view.viewport().setMouseTracking(True)
+    view.setAttribute(Qt.WA_Hover, True)
+    view.viewport().setAttribute(Qt.WA_Hover, True)
+    view.setUniformItemSizes(True)
+    view.setStyleSheet(
+        """
+        QListView {
+            background: #0a0f19;
+            color: #ecf4ff;
+            border: 1px solid rgba(31, 92, 255, 140);
+            outline: 0;
+            padding: 4px;
+        }
+        QListView::item {
+            min-height: 32px;
+            padding: 8px 10px;
+            border-radius: 6px;
+        }
+        QListView::item:hover {
+            background: rgba(35, 166, 255, 70);
+            color: #ecf4ff;
+        }
+        QListView::item:selected {
+            background: rgba(35, 166, 255, 180);
+            color: #08111d;
+        }
+        QListView::item:selected:hover {
+            background: rgba(70, 188, 255, 220);
+            color: #08111d;
+        }
+        """
+    )
+
+
+def _parse_size_to_gb(size_str: str) -> float:
+    """Converte strings human-readable do lsblk (ex: '65.7G', '512M',
+    '1.2T') pra GB numérico, usado só pra ordenar por espaço livre."""
+    if not size_str:
+        return 0.0
+    size_str = size_str.strip()
+    try:
+        unit = size_str[-1].upper()
+        value = float(size_str[:-1])
+    except (ValueError, IndexError):
+        return 0.0
+    multipliers = {"K": 1 / (1024 ** 2), "M": 1 / 1024, "G": 1, "T": 1024}
+    return value * multipliers.get(unit, 1)
+
+
+def _relevant_disks(disks: list) -> list:
+    """Filtra discos irrelevantes (mesmo critério que o Timeshift usa em
+    list_backup_destinations) e ordena por espaço livre — igual
+    priorização do Timeshift, mais espaço primeiro."""
+    IGNORED_PREFIXES = ("/run", "/boot", "/sys", "/proc", "/dev")
+    IGNORED_FSTYPES = {"swap", "tmpfs", "devtmpfs", "squashfs", "overlay", "iso9660"}
+
+    filtered = [
+        d for d in disks
+        if d.mountpoint
+        and not d.mountpoint.startswith(IGNORED_PREFIXES)
+        and d.fstype not in IGNORED_FSTYPES
+    ]
+    filtered.sort(key=lambda d: _parse_size_to_gb(d.avail), reverse=True)
+    return filtered
 
 
 class _CloseLabel(QLabel):
@@ -835,36 +908,51 @@ class EggsPage(QWidget):
         dest_label.setStyleSheet("color: #9aa6b2;")
 
         self.cmb_iso_destination = QComboBox()
+        self.cmb_iso_destination.setEditable(False)
+        self.cmb_iso_destination.setInsertPolicy(QComboBox.NoInsert)
+        self.cmb_iso_destination.setMaxVisibleItems(8)
+        self.cmb_iso_destination.setFocusPolicy(Qt.StrongFocus)
+        self.cmb_iso_destination.setView(QListView())
         self.cmb_iso_destination.setMinimumWidth(420)
         self.cmb_iso_destination.setStyleSheet("""
             QComboBox {
-                background: rgba(255,255,255,6);
-                border: 1px solid rgba(255,255,255,14);
-                border-radius: 9px;
-                padding: 10px 14px;
+                background: rgba(10, 15, 25, 230);
                 color: #ecf4ff;
+                border: 1px solid rgba(31, 92, 255, 120);
+                border-radius: 10px;
+                padding: 8px 12px;
+                min-height: 28px;
                 font: 9pt "DejaVu Sans Mono";
-                min-height: 38px;
             }
-            QComboBox:hover {
-                border: 1px solid rgba(255,255,255,28);
+            QComboBox:hover,
+            QComboBox:focus {
+                border: 1px solid rgba(35, 166, 255, 200);
             }
             QComboBox::drop-down {
                 border: none;
-                width: 28px;
+                width: 30px;
             }
-            QComboBox QAbstractItemView {
-                background: #131417;
-                color: #ecf4ff;
-                selection-background-color: rgba(74,222,128,35);
-                padding: 6px;
-                outline: none;
-            }
-            QComboBox QAbstractItemView::item {
-                padding: 8px 10px;
-                min-height: 22px;
+            QComboBox::down-arrow {
+                width: 0px;
+                height: 0px;
             }
         """)
+
+        # Chevron via qtawesome renderizado em PNG cacheado — mesmo truque
+        # do Timeshift, já que o CSS de seta nativa do Qt não renderiza de
+        # forma confiável.
+        import tempfile as _tempfile
+        chevron_path = Path(_tempfile.gettempdir()) / "carbonara_chevron_down_v2.png"
+        if not chevron_path.exists():
+            qta.icon("mdi6.chevron-down", color="#23a6ff").pixmap(28, 28).save(str(chevron_path))
+        self.cmb_iso_destination.setStyleSheet(
+            self.cmb_iso_destination.styleSheet()
+            + "QComboBox::down-arrow { image: url(" + chevron_path.as_posix() + "); "
+            + "width: 14px; height: 14px; margin-right: 10px; }"
+        )
+
+        style_combo_popup(self.cmb_iso_destination)
+
 
         dest_row.addWidget(dest_label)
         dest_row.addWidget(self.cmb_iso_destination, 1)
@@ -1000,7 +1088,7 @@ class EggsPage(QWidget):
         self.cmb_iso_destination.blockSignals(True)
         self.cmb_iso_destination.clear()
 
-        disks = list_disks()
+        disks = _relevant_disks(list_disks())
         ventoy_idx = 0
         for i, d in enumerate(disks):
             label = f"{d.mountpoint}  •  {d.model or d.name}  •  {d.avail} livre  •  {d.fstype}"
