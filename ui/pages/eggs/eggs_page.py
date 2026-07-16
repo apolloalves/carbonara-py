@@ -1144,10 +1144,25 @@ class EggsPage(QWidget):
         dialog = _DeleteIsoConfirmDialog(entry.name, entry.size_gb, parent=self)
         if dialog.exec() != QDialog.Accepted:
             return
-        try:
-            entry.path.unlink()
-        except OSError as exc:
-            _show_error("Carbonara", f"Falha ao remover: {exc}", parent=self)
+
+        import json
+        import subprocess
+
+        args_json = json.dumps({"path": str(entry.path)})
+        cmd = [
+            "pkexec",
+            "/usr/local/bin/carbonara-helper",
+            os.environ.get("DISPLAY", ""),
+            os.environ.get("XAUTHORITY", ""),
+            "eggs.delete_iso",
+            args_json,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            if result.returncode == 126:
+                return  # usuário cancelou a autenticação
+            err = result.stderr.strip() or f"exit code {result.returncode}"
+            _show_error("Carbonara", f"Falha ao remover: {err}", parent=self)
             return
         self.rebuild_iso_list()
 
