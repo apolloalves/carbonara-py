@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
-    QGridLayout,
     QLabel,
     QFrame,
     QPushButton,
@@ -109,40 +108,67 @@ class _ResponsiveCardGrid(QWidget):
     """Grid que reflui o número de colunas conforme a largura disponível
     — o Qt não tem nada nativo tipo CSS grid/flexbox com auto-fit, então
     isso recalcula manualmente a cada resize, igual uma media query faria
-    na web. Os cards em si não mudam de tamanho, só a disposição."""
+    na web. Os cards em si não mudam de tamanho, só a disposição.
 
-    MIN_CARD_WIDTH = 340
+    A cada reflow, o container INTEIRO (widget + layout) é destruído e
+    recriado do zero — em vez de tentar limpar/reaproveitar o layout
+    existente via takeAt(), que deixava estado órfão no Qt (o
+    espaçamento vertical simplesmente sumia depois do primeiro reflow,
+    mesmo com o valor certo no código)."""
+
+    MIN_CARD_WIDTH = 400
     MAX_COLUMNS = 3
+    ROW_SPACING = 28
+    COL_SPACING = 14
 
-    def __init__(self, cards: list, parent=None):
+    def __init__(self, cards: list, parent=None, min_card_width: int | None = None):
         super().__init__(parent)
         self._cards = cards
         self._current_columns = -1
-        self.grid = QGridLayout(self)
-        self.grid.setContentsMargins(0, 0, 0, 0)
-        self.grid.setHorizontalSpacing(14)
-        self.grid.setVerticalSpacing(14)
+        if min_card_width is not None:
+            self.MIN_CARD_WIDTH = min_card_width
+        self._outer = QVBoxLayout(self)
+        self._outer.setContentsMargins(0, 0, 0, 0)
+        self._inner = None
         self._relayout(self.MAX_COLUMNS)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        spacing = self.grid.horizontalSpacing() or 14
         columns = max(
             1,
-            min(self.MAX_COLUMNS, (self.width() + spacing) // (self.MIN_CARD_WIDTH + spacing)),
+            min(self.MAX_COLUMNS, (self.width() + self.COL_SPACING) // (self.MIN_CARD_WIDTH + self.COL_SPACING)),
         )
         if columns != self._current_columns:
             self._relayout(columns)
 
     def _relayout(self, columns: int) -> None:
         self._current_columns = columns
-        while self.grid.count():
-            self.grid.takeAt(0)
-        for col in range(self.MAX_COLUMNS):
-            self.grid.setColumnStretch(col, 1 if col < columns else 0)
-        for i, card in enumerate(self._cards):
-            row, col = divmod(i, columns)
-            self.grid.addWidget(card, row, col)
+
+        # Destrói o container antigo por completo (widget + layout), em
+        # vez de tentar limpar o layout existente item por item.
+        if self._inner is not None:
+            self._outer.removeWidget(self._inner)
+            self._inner.setParent(None)
+            self._inner.deleteLater()
+
+        new_inner = QWidget()
+        inner_vbox = QVBoxLayout(new_inner)
+        inner_vbox.setContentsMargins(0, 0, 0, 0)
+        inner_vbox.setSpacing(self.ROW_SPACING)
+
+        for start in range(0, len(self._cards), columns):
+            row_cards = self._cards[start:start + columns]
+            row_layout = QHBoxLayout()
+            row_layout.setSpacing(self.COL_SPACING)
+            for card in row_cards:
+                card.setParent(new_inner)
+                row_layout.addWidget(card, 1)
+            for _ in range(columns - len(row_cards)):
+                row_layout.addStretch(1)
+            inner_vbox.addLayout(row_layout)
+
+        self._outer.addWidget(new_inner)
+        self._inner = new_inner
 
 
 class _CloseLabel(QLabel):
@@ -740,11 +766,14 @@ class _EggsOptionButton(QFrame):
 
     clicked = Signal()
 
-    def __init__(self, glyph: str, title: str, desc: str, color: str, parent=None, badge: str = "", action_label: str = ""):
+    def __init__(self, glyph: str, title: str, desc: str, color: str, parent=None, badge: str = "", action_label: str = "", compact: bool = False):
         super().__init__(parent)
         self.setCursor(Qt.PointingHandCursor)
         self.setObjectName("EggsOptionBtn")
-        self.setFixedHeight(128)
+        # setMinimumHeight (não setFixedHeight): se a descrição quebrar em
+        # mais linhas do que o previsto numa largura muito estreita, o
+        # card cresce em vez de sobrepor/vazar texto pra fora da borda.
+        self.setMinimumHeight(108 if compact else 128)
         self.setStyleSheet(f"""
             QFrame#EggsOptionBtn {{
                 background: rgba(255, 255, 255, 5);
@@ -762,32 +791,34 @@ class _EggsOptionButton(QFrame):
         """)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(24, 0, 24, 0)
-        layout.setSpacing(18)
+        layout.setContentsMargins(6, 0, 6, 0) if compact else layout.setContentsMargins(24, 0, 24, 0)
+        layout.setSpacing(6 if compact else 18)
         layout.setAlignment(Qt.AlignVCenter)
 
+        icon_size = 32 if compact else 48
+        pixmap_size = 16 if compact else 24
         ico_lbl = QLabel()
-        ico_lbl.setFixedSize(48, 48)
+        ico_lbl.setFixedSize(icon_size, icon_size)
         ico_lbl.setAlignment(Qt.AlignCenter)
-        ico_lbl.setPixmap(qta.icon(glyph, color=color).pixmap(24, 24))
+        ico_lbl.setPixmap(qta.icon(glyph, color=color).pixmap(pixmap_size, pixmap_size))
         h = color.lstrip("#")
         r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
         ico_lbl.setStyleSheet(
             f"QLabel {{ background: rgba({r},{g},{b},40); "
-            f"border-radius: 14px; border: 1px solid rgba({r},{g},{b},90); }}"
+            f"border-radius: {10 if compact else 14}px; border: 1px solid rgba({r},{g},{b},90); }}"
         )
 
         text = QVBoxLayout()
-        text.setSpacing(4)
+        text.setSpacing(3 if compact else 4)
         text.setContentsMargins(0, 0, 0, 0)
         text.setAlignment(Qt.AlignVCenter)
 
         title_row = QHBoxLayout()
-        title_row.setSpacing(10)
+        title_row.setSpacing(8 if compact else 10)
         title_row.setContentsMargins(0, 0, 0, 0)
 
         self.title_lbl = _ElideLabel(title)
-        self.title_lbl.setFont(QFont("DejaVu Sans Mono", 12, QFont.Bold))
+        self.title_lbl.setFont(QFont("DejaVu Sans Mono", 10 if compact else 12, QFont.Bold))
         self.title_lbl.setStyleSheet(f"color: {color}; background: transparent; border: none;")
         title_row.addWidget(self.title_lbl, 1)
 
@@ -795,19 +826,19 @@ class _EggsOptionButton(QFrame):
             h = color.lstrip("#")
             r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
             badge_lbl = QLabel(badge.upper())
-            badge_lbl.setFont(QFont("DejaVu Sans Mono", 8, QFont.Bold))
+            badge_lbl.setFont(QFont("DejaVu Sans Mono", 7 if compact else 8, QFont.Bold))
             badge_lbl.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
             badge_lbl.setStyleSheet(
                 f"color: {color}; background: rgba({r},{g},{b},22); "
                 f"border: 1px solid rgba({r},{g},{b},70); border-radius: 5px; "
-                "padding: 2px 8px;"
+                f"padding: {1 if compact else 2}px {6 if compact else 8}px;"
             )
             title_row.addWidget(badge_lbl)
 
         title_row.addStretch()
 
         self.desc_lbl = QLabel(desc)
-        self.desc_lbl.setFont(QFont("DejaVu Sans Mono", 10))
+        self.desc_lbl.setFont(QFont("DejaVu Sans Mono", 9 if compact else 10))
         self.desc_lbl.setWordWrap(True)
         self.desc_lbl.setStyleSheet("color: #6b7a8d; background: transparent; border: none;")
 
@@ -883,6 +914,14 @@ class EggsPage(QWidget):
         self._stats_refresh_timer.setInterval(8000)
         self._stats_refresh_timer.timeout.connect(self.refresh_stats)
 
+        # Checagem de monitor separada, bem mais rápida (1s) — é uma
+        # verificação leve (só geometria de janela, sem subprocess), então
+        # não tem custo em rodar com frequência alta. Separado do refresh
+        # de stats (8s) porque aquele chama df/pacman/etc., mais pesado.
+        self._screen_check_timer = QTimer(self)
+        self._screen_check_timer.setInterval(200)
+        self._screen_check_timer.timeout.connect(self._check_screen_and_maybe_rebuild)
+
         # Garante que nenhum pkexec fique órfão rodando em segundo plano
         # se o app for fechado com uma operação (Create/Check/Install)
         # ainda em andamento.
@@ -891,16 +930,8 @@ class EggsPage(QWidget):
         if app is not None:
             app.aboutToQuit.connect(self._terminate_pending_operation)
 
-        # Abaixo dessa largura, o combo de destino + card ÚLTIMA ISO no
-        # cabeçalho e o grid de 3 colunas começam a sobrepor texto (título
-        # e badge cortados sem reticências, descrição por cima do título)
-        # — visto na prática num monitor menor. Trava a largura mínima em
-        # vez de tentar redesenhar tudo pra ser fluido até qualquer tamanho.
-        # O grid de cards de ação agora reflui sozinho (_ResponsiveCardGrid),
-        # então essa largura mínima só existe por causa do cabeçalho
-        # (título + card ÚLTIMA ISO lado a lado) e do combo de destino +
-        # card Ventoy, que ainda não são responsivos.
-        self.setMinimumWidth(1050)
+        # A largura mínima da página é decidida em _build_ui(), depois de
+        # detectar o monitor atual (precisa ser menor no Dell 1280x1024).
 
         self.setStyleSheet(
             """
@@ -920,10 +951,43 @@ class EggsPage(QWidget):
         )
         self._build_ui()
 
+    def _detect_compact_mode(self) -> bool:
+        """Único ponto de detecção de monitor — usado tanto na construção
+        inicial quanto na checagem periódica (_check_screen_and_maybe_rebuild).
+        As duas chamadas PRECISAM usar exatamente o mesmo critério: usar
+        critérios diferentes (cursor vs centro da janela) causava um loop
+        infinito de reconstrução, já que os dois métodos podiam discordar
+        pra sempre se o cursor estivesse num monitor diferente da janela.
+
+        Prioriza o centro da janela (mais correto: "em qual monitor a
+        janela está", não "onde está o mouse agora") — self.screen() fica
+        de fora por já ter se mostrado não confiável nesse WM customizado
+        (ficava preso no monitor errado mesmo depois de arrastar)."""
+        from PySide6.QtGui import QCursor
+        from PySide6.QtWidgets import QApplication
+
+        window = self.window()
+        window_center = window.geometry().center() if window else None
+        screen = (
+            (QApplication.screenAt(window_center) if window_center is not None else None)
+            or QApplication.screenAt(QCursor.pos())
+            or QApplication.primaryScreen()
+        )
+        return bool(screen and screen.geometry().width() < 1400)
+
     def _build_ui(self) -> None:
         from ui.main_window import TopHeader  # import adiado — evita import circular
 
-        root = QVBoxLayout(self)
+        self._compact_cards = self._detect_compact_mode()
+
+        # Abaixo dessa largura, o cabeçalho/combo começam a sobrepor
+        # conteúdo — no modo compacto (monitor menor), os elementos do
+        # cabeçalho também ficam mais estreitos (ver mais abaixo), então
+        # a largura mínima necessária cai bastante também.
+        self.setMinimumWidth(820 if self._compact_cards else 1050)
+
+        self._page_content = QWidget()
+        root = QVBoxLayout(self._page_content)
         root.setContentsMargins(32, 24, 32, 24)
         root.setSpacing(22)
 
@@ -962,6 +1026,7 @@ class EggsPage(QWidget):
         title.setStyleSheet("color: #23a6ff;")
 
         subtitle = QLabel("Create, check and install Arch Linux live ISOs")
+        self.subtitle_lbl = subtitle
         subtitle.setFont(QFont("DejaVu Sans Mono", 10))
         subtitle.setStyleSheet("color: #9aa6b2;")
 
@@ -980,7 +1045,7 @@ class EggsPage(QWidget):
         # topo da página, canto superior direito, junto do título, em vez
         # de ocupar espaço na grade de cards de ação.
         self.stat_last_iso = _IsoCard()
-        self.stat_last_iso.setFixedWidth(520)
+        self.stat_last_iso.setFixedWidth(360 if self._compact_cards else 520)
         title_row.addWidget(self.stat_last_iso)
 
         h_layout.addLayout(title_row)
@@ -1005,7 +1070,7 @@ class EggsPage(QWidget):
         self.cmb_iso_destination.setMaxVisibleItems(8)
         self.cmb_iso_destination.setFocusPolicy(Qt.StrongFocus)
         self.cmb_iso_destination.setView(QListView())
-        self.cmb_iso_destination.setMinimumWidth(420)
+        self.cmb_iso_destination.setMinimumWidth(300 if self._compact_cards else 420)
         self.cmb_iso_destination.setStyleSheet("""
             QComboBox {
                 background: rgba(10, 15, 25, 230);
@@ -1079,6 +1144,7 @@ class EggsPage(QWidget):
             parent=self,
             badge="requer root",
             action_label=install_action,
+            compact=self._compact_cards,
         )
         self.btn_install.clicked.connect(self._on_install)
 
@@ -1090,6 +1156,7 @@ class EggsPage(QWidget):
             color="#9bf0bd",
             parent=self,
             badge="requer root",
+            compact=self._compact_cards,
         )
         self.btn_create.clicked.connect(self._on_create)
 
@@ -1100,6 +1167,7 @@ class EggsPage(QWidget):
             color="#23a6ff",
             parent=self,
             badge="requer root",
+            compact=self._compact_cards,
         )
         self.btn_check.clicked.connect(self._on_check)
 
@@ -1109,6 +1177,7 @@ class EggsPage(QWidget):
             desc="Abre o diretório do Ventoy (destino final da ISO) no broot.",
             color="#c8a2ff",
             parent=self,
+            compact=self._compact_cards,
         )
         self.btn_broot.clicked.connect(lambda: self._open_files("broot"))
 
@@ -1118,16 +1187,17 @@ class EggsPage(QWidget):
             desc="Abre o diretório do Ventoy (destino final da ISO) no Nautilus.",
             color="#ffb86b",
             parent=self,
+            compact=self._compact_cards,
         )
         self.btn_nautilus.clicked.connect(lambda: self._open_files("nautilus"))
 
         # Reflui pra 2 ou 1 coluna conforme a largura disponível — não tem
         # equivalente nativo a media query no Qt, então isso recalcula
         # sozinho a cada resize (ver _ResponsiveCardGrid).
-        cards = _ResponsiveCardGrid([
-            self.btn_create, self.btn_check, self.btn_install,
-            self.btn_broot, self.btn_nautilus,
-        ])
+        cards = _ResponsiveCardGrid(
+            [self.btn_create, self.btn_check, self.btn_install, self.btn_broot, self.btn_nautilus],
+            min_card_width=260 if self._compact_cards else None,
+        )
 
         root.addWidget(header)
         root.addLayout(dest_row)
@@ -1159,6 +1229,22 @@ class EggsPage(QWidget):
         self.iso_scroll.setWidget(self.iso_scroll_content)
 
         root.addWidget(self.iso_scroll, 1)
+
+        # Envolve a página inteira num QScrollArea — sem isso, numa tela
+        # de menor resolução (ex: Dell 1280x1024) ou com o grid refluindo
+        # pra mais linhas, o conteúdo podia ficar mais alto que a janela
+        # e simplesmente cortar o(s) último(s) card(s) sem nenhuma forma
+        # de rolar até eles.
+        page_scroll = QScrollArea()
+        page_scroll.setWidgetResizable(True)
+        page_scroll.setFrameShape(QFrame.NoFrame)
+        page_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        page_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        page_scroll.setWidget(self._page_content)
+
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.addWidget(page_scroll)
 
         self.refresh_stats()
         self.rebuild_iso_list()
@@ -1319,6 +1405,36 @@ class EggsPage(QWidget):
             f"Atual: {current} — já está na versão mais recente.",
             "Verificar",
         )
+
+    def _check_screen_and_maybe_rebuild(self) -> bool:
+        """Retorna True se a UI foi reconstruída (monitor mudou de
+        categoria compacto/normal), False se não precisou."""
+        # Trava de reentrância: se por qualquer motivo _build_ui() já
+        # estiver em andamento (ex: chamado a partir de si mesmo), nunca
+        # mais entra em loop — só ignora essa checagem e tenta de novo no
+        # próximo tick do timer (8s depois). Foi um loop assim (duas
+        # detecções discordando pra sempre) que travou o app antes.
+        if getattr(self, "_rebuilding_ui", False):
+            return False
+
+        now_compact = self._detect_compact_mode()
+
+        if now_compact == getattr(self, "_compact_cards", now_compact):
+            return False
+
+        self._rebuilding_ui = True
+        try:
+            # Descarta o layout e todos os widgets filhos (idioma comum do
+            # Qt pra limpar um layout: reatribui pra um widget descartável,
+            # que leva tudo junto pro garbage collector) e reconstrói do
+            # zero.
+            old_layout = self.layout()
+            if old_layout is not None:
+                QWidget().setLayout(old_layout)
+            self._build_ui()
+        finally:
+            self._rebuilding_ui = False
+        return True
 
     def refresh_stats(self) -> None:
         from core.eggs.eggs import get_dashboard_stats, get_disk_stats, get_last_iso_for
@@ -1492,8 +1608,10 @@ class EggsPage(QWidget):
         # visível.
         self.refresh_stats()
         self._stats_refresh_timer.start()
+        self._screen_check_timer.start()
         super().showEvent(event)
 
     def hideEvent(self, event):
         self._stats_refresh_timer.stop()
+        self._screen_check_timer.stop()
         super().hideEvent(event)
