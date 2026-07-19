@@ -88,7 +88,11 @@ class _ElideLabel(QLabel):
     def __init__(self, text: str = "", parent=None):
         super().__init__(parent)
         self._full_text = text
-        self.setMinimumWidth(0)
+        # Mínimo real (não 0): sem isso, se a linha ficar apertada e esse
+        # for o único item "espremível" (badge tem tamanho fixo), o Qt
+        # jogava 100% do aperto aqui, esmagando até sobrar só "..." —
+        # aconteceu de verdade com o padding reduzido de um ajuste anterior.
+        self.setMinimumWidth(60)
 
     def setText(self, text: str) -> None:
         self._full_text = text
@@ -791,8 +795,8 @@ class _EggsOptionButton(QFrame):
         """)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(6, 0, 6, 0) if compact else layout.setContentsMargins(24, 0, 24, 0)
-        layout.setSpacing(6 if compact else 18)
+        layout.setContentsMargins(6, 0, 6, 0) if compact else layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(6 if compact else 12)
         layout.setAlignment(Qt.AlignVCenter)
 
         icon_size = 32 if compact else 48
@@ -809,43 +813,52 @@ class _EggsOptionButton(QFrame):
         )
 
         text = QVBoxLayout()
-        text.setSpacing(3 if compact else 4)
+        text.setSpacing(2 if compact else 1)
         text.setContentsMargins(0, 0, 0, 0)
         text.setAlignment(Qt.AlignVCenter)
-
-        title_row = QHBoxLayout()
-        title_row.setSpacing(8 if compact else 10)
-        title_row.setContentsMargins(0, 0, 0, 0)
 
         self.title_lbl = _ElideLabel(title)
         self.title_lbl.setFont(QFont("DejaVu Sans Mono", 10 if compact else 12, QFont.Bold))
         self.title_lbl.setStyleSheet(f"color: {color}; background: transparent; border: none;")
-        title_row.addWidget(self.title_lbl, 1)
 
+        badge_lbl = None
         if badge:
             h = color.lstrip("#")
             r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
-            badge_lbl = QLabel(badge.upper())
-            badge_lbl.setFont(QFont("DejaVu Sans Mono", 7 if compact else 8, QFont.Bold))
+            lock_icon = qta.icon("mdi6.lock-outline", color=color).pixmap(18, 18)
+            badge_lbl = QWidget()
             badge_lbl.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+            badge_row_inner = QHBoxLayout(badge_lbl)
+            badge_row_inner.setContentsMargins(6, 4, 6, 4)
+            badge_icon_lbl = QLabel()
+            badge_icon_lbl.setPixmap(lock_icon)
+            badge_row_inner.addWidget(badge_icon_lbl)
             badge_lbl.setStyleSheet(
-                f"color: {color}; background: rgba({r},{g},{b},22); "
-                f"border: 1px solid rgba({r},{g},{b},70); border-radius: 5px; "
-                f"padding: {1 if compact else 2}px {6 if compact else 8}px;"
+                f"background: rgba({r},{g},{b},22); "
+                f"border: 1px solid rgba({r},{g},{b},70); border-radius: 5px;"
             )
-            title_row.addWidget(badge_lbl)
 
-        title_row.addStretch()
 
         self.desc_lbl = QLabel(desc)
         self.desc_lbl.setFont(QFont("DejaVu Sans Mono", 9 if compact else 10))
         self.desc_lbl.setWordWrap(True)
         self.desc_lbl.setStyleSheet("color: #6b7a8d; background: transparent; border: none;")
 
+        # Título sozinho na própria linha (largura toda disponível, sem
+        # concorrência) — badge numa linha abaixo, dele, à esquerda. Título
+        # e badge disputando a mesma linha nunca cabia direito em 3
+        # colunas: ou o título cortava (sem stretch) ou o badge ficava
+        # longe do texto (com stretch). Separar em linhas resolve de vez.
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
+        title_row.setSpacing(8)
+        title_row.addWidget(self.title_lbl, 1)
+        if badge_lbl is not None:
+            title_row.addWidget(badge_lbl, 0, Qt.AlignTop)
         text.addLayout(title_row)
         text.addWidget(self.desc_lbl)
         layout.addWidget(ico_lbl, 0, Qt.AlignVCenter)
-        layout.addLayout(text)
+        layout.addLayout(text, 1)
         layout.addStretch()
 
         self.action_btn = None
@@ -1152,7 +1165,7 @@ class EggsPage(QWidget):
         self.btn_create = _EggsOptionButton(
             glyph="mdi6.egg-easter",
             title="Create Penguin's Eggs",
-            desc="Gera uma nova ISO live (ou move uma já pronta para o Ventoy).",
+            desc="Gera uma ISO live (ou move a já pronta pro Ventoy).",
             color="#9bf0bd",
             parent=self,
             badge="requer root",
@@ -1163,7 +1176,7 @@ class EggsPage(QWidget):
         self.btn_check = _EggsOptionButton(
             glyph="mdi6.file-search-outline",
             title="Check Penguin's Eggs .iso",
-            desc="Verifica se há uma .iso pendente e move/faz backup automaticamente.",
+            desc="Verifica .iso pendente e faz backup automático.",
             color="#23a6ff",
             parent=self,
             badge="requer root",
@@ -1174,7 +1187,7 @@ class EggsPage(QWidget):
         self.btn_broot = _EggsOptionButton(
             glyph="mdi6.folder-search-outline",
             title="Open files — broot",
-            desc="Abre o diretório do Ventoy (destino final da ISO) no broot.",
+            desc="Abre o Ventoy (destino da ISO) no broot.",
             color="#c8a2ff",
             parent=self,
             compact=self._compact_cards,
@@ -1184,7 +1197,7 @@ class EggsPage(QWidget):
         self.btn_nautilus = _EggsOptionButton(
             glyph="mdi6.folder-open-outline",
             title="Open files — Nautilus",
-            desc="Abre o diretório do Ventoy (destino final da ISO) no Nautilus.",
+            desc="Abre o Ventoy (destino da ISO) no Nautilus.",
             color="#ffb86b",
             parent=self,
             compact=self._compact_cards,
