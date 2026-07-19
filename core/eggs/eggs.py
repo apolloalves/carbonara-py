@@ -787,6 +787,47 @@ def check_eggs(dialog, parent=None, destination: str | None = None) -> None:
     _finish(dialog, True, "Diretório limpo — nada para fazer.", "")
 
 
+_PACMAN_LOCK = Path("/var/lib/pacman/db.lck")
+
+
+def _clear_stale_pacman_lock(dialog) -> None:
+    """Detecta e remove o lock órfão do pacman (mesma lógica do alias
+    `pacrm` do Apollo) — só remove se confirmar que não existe nenhum
+    processo pacman/paru/yay REALMENTE rodando. Remover o lock com um
+    desses processos genuinamente ativo corrompe o banco de dados."""
+    if not _PACMAN_LOCK.exists():
+        return
+
+    # pgrep -x "pacman|paru|yay" tem um bug de precedência de regex: o -x
+    # ancora só as pontas do padrão INTEIRO (^pacman|paru|yay$), não cada
+    # alternativa — "paru" fica sem âncora nenhuma e pode casar com
+    # qualquer processo que contenha esse texto em qualquer lugar do
+    # nome. Chamadas separadas evitam essa ambiguidade por completo.
+    real_process_running = any(
+        subprocess.run(
+            ["pgrep", "-x", name],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        ).returncode == 0
+        for name in ("pacman", "paru", "yay")
+    )
+
+    if real_process_running:
+        dialog.append_log(
+            "AVISO: /var/lib/pacman/db.lck existe e há um processo "
+            "pacman/paru/yay rodando de verdade — não mexendo nele."
+        )
+        return
+
+    try:
+        _PACMAN_LOCK.unlink()
+        dialog.append_log(
+            "Lock órfão do pacman removido (/var/lib/pacman/db.lck) — "
+            "nenhum processo pacman/paru/yay estava rodando de verdade."
+        )
+    except OSError as exc:
+        dialog.append_log(f"AVISO: falha ao remover lock do pacman: {exc}")
+
+
 def install_eggs(dialog, parent=None) -> None:
     """Instala o penguins-eggs e o módulo Calamares, se necessário."""
     require_root()
@@ -796,6 +837,8 @@ def install_eggs(dialog, parent=None) -> None:
     dialog.set_status("Verificando instalação...")
     dialog.set_current_file("—")
     dialog.append_log("=== INSTALL PENGUIN'S EGGS ===")
+
+    _clear_stale_pacman_lock(dialog)
 
     eggs_installed = subprocess.run(
         ["pacman", "-Q", "penguins-eggs"],
@@ -878,11 +921,22 @@ def install_eggs(dialog, parent=None) -> None:
 
     steps.append(["eggs", "calamares", "--install"])
 
+    # Detecta se o pacman realmente não tinha nada pra atualizar (marcador
+    # "is up to date -- skipping" ou "there is nothing to do") — usado só
+    # pra ajustar a mensagem final, não afeta o resultado (sucesso é
+    # sucesso de qualquer jeito).
+    nothing_to_update = {"flag": False}
+    _NOTHING_TO_UPDATE_MARKERS = ("is up to date -- skipping", "there is nothing to do")
+
     def run_next(index: int = 0) -> None:
         if index >= len(steps):
             action = "Atualização" if eggs_installed else "Instalação"
             dialog.append_log(f"--- {action.lower()} concluída ---")
-            _finish(dialog, True, f"{action} concluída com sucesso.", "")
+            if eggs_installed and nothing_to_update["flag"]:
+                dialog.append_log("Nenhuma atualização disponível.")
+                _finish(dialog, True, "Nenhuma atualização disponível.", "")
+            else:
+                _finish(dialog, True, f"{action} concluída com sucesso.", "")
             return
 
         cmd = steps[index]
@@ -904,6 +958,11 @@ def install_eggs(dialog, parent=None) -> None:
         else:
             dialog._worker = worker
 
+        def _watch_for_nothing_to_update(line: str) -> None:
+            if any(marker in line for marker in _NOTHING_TO_UPDATE_MARKERS):
+                nothing_to_update["flag"] = True
+
+        worker.log_line.connect(_watch_for_nothing_to_update)
         worker.log_line.connect(dialog.append_log)
         worker.file_changed.connect(dialog.set_current_file)
 

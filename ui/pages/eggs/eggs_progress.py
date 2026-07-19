@@ -5,7 +5,7 @@ from PySide6.QtCore import Qt, QTimer, QSize
 from PySide6.QtGui import QFont, QMouseEvent
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout,
-    QLabel, QProgressBar, QPlainTextEdit, QPushButton, QFrame, QWidget,
+    QLabel, QProgressBar, QPlainTextEdit, QPushButton, QFrame,
 )
 
 
@@ -696,6 +696,30 @@ class EggsProgressDialog(QDialog):
             btn.clicked.connect(_make_pick(c["mountpoint"]))
             btn_row.addWidget(btn)
 
+        btn_cancel_alt = QPushButton("Cancelar")
+        btn_cancel_alt.setStyleSheet("""
+            QPushButton {
+                background: rgba(200,60,60,20);
+                border: 1px solid rgba(200,60,60,90);
+                border-radius: 8px;
+                color: #ecf4ff;
+                font-family: "DejaVu Sans Mono";
+                font-size: 9pt;
+                padding: 8px 14px;
+            }
+            QPushButton:hover {
+                background: rgba(200,60,60,50);
+                border: 1px solid rgba(255,100,100,180);
+            }
+        """)
+
+        def _cancel_pick():
+            result["choice"] = None
+            loop.quit()
+
+        btn_cancel_alt.clicked.connect(_cancel_pick)
+        btn_row.addWidget(btn_cancel_alt)
+
         panel_layout.addLayout(btn_row)
 
         # Insere logo acima do log — bem visível, sem atrapalhar o resto
@@ -703,32 +727,17 @@ class EggsProgressDialog(QDialog):
         log_index = self._body_layout.indexOf(self.log_view)
         self._body_layout.insertWidget(log_index, panel)
 
-        # Espaçador dedicado entre o painel e o log — o body_layout tem
-        # spacing=0 (as outras seções usam addSpacing() explícito em vez
-        # de spacing padrão), então sem isso o painel encosta direto no
-        # log. Criado e removido junto com o painel, sem sobrar órfão.
-        spacer = QWidget()
-        spacer.setFixedHeight(14)
-        self._body_layout.insertWidget(log_index + 1, spacer)
-
-        def _cancel_pick():
-            result["choice"] = None
-            loop.quit()
-
-        # Sem botão de cancelar dentro do painel — reaproveita o Cancelar
-        # do rodapé (já existente), conectado só enquanto o painel está
-        # aberto. Nada de confirmação em 2 cliques aqui: cancelar a
-        # escolha do disco não interrompe nada destrutivo em andamento.
-        self.btn_cancel.clicked.disconnect()
-        self.btn_cancel.clicked.connect(_cancel_pick)
-        self.btn_cancel.setEnabled(True)
+        # Desabilita o Cancelar do rodapé enquanto o painel está aberto —
+        # nesse momento ele não cancela nada de verdade (ainda não existe
+        # worker rodando, só esse loop local esperando a escolha), então
+        # deixá-lo ativo só criava confusão de ter "dois Cancelar" na tela.
+        footer_cancel_was_enabled = self.btn_cancel.isEnabled()
+        self.btn_cancel.setEnabled(False)
 
         loop.exec()
 
-        self.btn_cancel.clicked.disconnect()
-        self.btn_cancel.clicked.connect(self._on_cancel_clicked)
+        self.btn_cancel.setEnabled(footer_cancel_was_enabled)
         panel.deleteLater()
-        spacer.deleteLater()
         return result["choice"]
 
     def _tick_elapsed(self) -> None:
@@ -764,10 +773,7 @@ class EggsProgressDialog(QDialog):
                 self.append_log(f"ERRO: {status}")
                 self.append_log(f"Tempo decorrido: {elapsed}")
         else:
-            if "nenhuma atualização disponível" in status.lower():
-                self.lbl_status.setStyleSheet("color: #ffb86b; font-weight: bold;")
-            else:
-                self.lbl_status.setStyleSheet("color: #9bf0bd; font-weight: bold;")
+            self.lbl_status.setStyleSheet("color: #9bf0bd; font-weight: bold;")
             self.append_log(f"✓ {status}")
             self.append_log(f"Tempo decorrido: {elapsed}")
 
