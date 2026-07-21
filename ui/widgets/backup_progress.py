@@ -1009,6 +1009,16 @@ class PairCheckProgressDialog(QDialog):
         self._timer.stop()
         super().closeEvent(event)
 
+    def reject(self) -> None:
+        # QDialog trata ESC chamando reject() diretamente (via done()/
+        # hide()), sem passar pelo closeEvent — esse diálogo não tem
+        # nenhum botão de cancelar (é só um "aguarde" enquanto o processo
+        # elevado faz a checagem via rsync --dry-run), então não existe
+        # forma legítima de fechá-lo pela UI. ESC é sempre ignorado; só o
+        # código externo que o controla fecha de verdade (accept/close)
+        # quando a checagem termina.
+        pass
+
     def showEvent(self, event):
         """Centraliza na tela primária ao exibir."""
         super().showEvent(event)

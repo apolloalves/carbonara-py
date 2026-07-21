@@ -203,7 +203,7 @@ class BackupProgressDialog(QDialog):
         btn_row.setSpacing(10)
 
         self.btn_cancel = QPushButton("Cancelar")
-        self.btn_cancel.setMinimumWidth(130)
+        self.btn_cancel.setMinimumWidth(160)
         self.btn_cancel.setFixedHeight(40)
         self.btn_cancel.setObjectName("BtnCancel")
         self.btn_cancel.clicked.connect(self._on_cancel_clicked)
@@ -376,6 +376,7 @@ class BackupProgressDialog(QDialog):
                 color: #c8d4e0;
                 font-family: "DejaVu Sans Mono";
                 font-size: 11px;
+                padding: 8px 36px;
             }
             QPushButton#BtnCancel:hover {
                 background: rgba(200, 60, 60, 40);
@@ -411,6 +412,9 @@ class BackupProgressDialog(QDialog):
 
     def _on_cancel_clicked(self) -> None:
         """Inicia contagem regressiva de 5s. Segunda clicada cancela imediatamente."""
+        if getattr(self, "_is_cancelling", False):
+            return  # já está cancelando — ignora cliques extras sem mudar a aparência
+
         if self._cancel_countdown > 0:
             # segundo clique — cancela agora
             self._cancel_timer.stop()
@@ -435,10 +439,37 @@ class BackupProgressDialog(QDialog):
 
     def _do_cancel(self) -> None:
         """Mata os processos rsync via PID e remove snapshots incompletos em background."""
-        self.btn_cancel.setEnabled(False)
+        # Guarda por flag, não setEnabled(False) — assim o botão mantém a
+        # cor/aparência normal (ativa) durante o cancelamento, em vez de
+        # ficar com o visual "desabilitado" (apagado) enquanto ainda está
+        # de fato trabalhando. Só fica realmente desabilitado (escondido)
+        # quando _on_cleanup_done() confirma que tudo terminou.
+        self._is_cancelling = True
+        self.btn_cancel.setEnabled(True)
         self.btn_cancel.setText("Cancelando...")
         self.set_status("Interrompendo backup...")
         self.set_current_file("—")
+
+        # Aplica a cor "viva" (mesma do :hover) direto, sem depender do
+        # mouse estar em cima — deixa claro visualmente que a ação está
+        # em andamento, o tempo todo, até _on_cleanup_done() confirmar.
+        self.btn_cancel.setStyleSheet("""
+            QPushButton {
+                background: rgba(200, 60, 60, 40);
+                border: 1px solid rgba(255, 100, 100, 180);
+                border-radius: 10px;
+                color: #ffaaaa;
+                font-family: "DejaVu Sans Mono";
+                font-size: 11px;
+                padding: 8px 36px;
+            }
+        """)
+
+        # Força desabilitado aqui — o on_fail() do backup.py roda quando o
+        # rsync morre (matado por nós) e reabilita o Fechar sozinho, antes
+        # da nossa limpeza abaixo sequer começar. Precisa ficar desabilitado
+        # até _on_cleanup_done() confirmar que a limpeza terminou de vez.
+        self.btn_close.setEnabled(False)
 
         # Animação de pontos enquanto limpa
         self._cancel_dots = 0
@@ -447,9 +478,16 @@ class BackupProgressDialog(QDialog):
         self._cancel_anim.timeout.connect(self._cancel_anim_tick)
         self._cancel_anim.start()
 
-        # Mata os processos rsync via SIGKILL — não bloqueia, não usa wait()
+        # Mata os processos rsync via SIGKILL. Espera (com timeout curto)
+        # a QThread de cada worker perceber a morte do processo e emitir
+        # failed/finished_ok — sem isso, a limpeza abaixo corre o risco de
+        # rodar ANTES do snapshot.json ser marcado como "failed" pelo
+        # backup.py, deixando um snapshot incompleto sem status reconhecido
+        # (o que aparecia como "unknown" na lista, sem nunca ser removido).
         for worker in list(self._workers):
             worker.kill()
+        for worker in list(self._workers):
+            worker.wait(3000)  # até 3s — não trava a UI pra sempre se emperrar
         self._workers.clear()
 
         # Limpeza de disco em thread separada — rmtree pode demorar
@@ -473,22 +511,70 @@ class BackupProgressDialog(QDialog):
         self._cleanup_thread.finished.connect(self._on_cleanup_done)
         self._cleanup_thread.start()
 
+        # Timeout de segurança: se a limpeza travar por qualquer motivo
+        # (ex: rmtree preso num disco lento/com problema), o botão não
+        # fica em "Cancelando..." pra sempre — força o fechamento depois
+        # de um tempo razoável.
+        self._cancel_safety_timer = QTimer(self)
+        self._cancel_safety_timer.setSingleShot(True)
+        self._cancel_safety_timer.setInterval(15000)  # 15s
+        self._cancel_safety_timer.timeout.connect(self._on_cancel_timeout)
+        self._cancel_safety_timer.start()
+
+    def _on_cancel_timeout(self) -> None:
+        """Chamado se a limpeza não terminar em 15s — evita ficar travado
+        em 'Cancelando...' pra sempre."""
+        if not hasattr(self, "_cleanup_thread") or not self._cleanup_thread.isRunning():
+            return
+        self.append_log("— Limpeza demorou mais que o esperado, encerrando mesmo assim. —")
+        self._on_cleanup_done()
+
     def _cancel_anim_tick(self) -> None:
         self._cancel_dots = (self._cancel_dots + 1) % 4
         dots = "." * self._cancel_dots
         self.btn_cancel.setText(f"Cancelando{dots}")
+        # Reforça os dois a cada tick — o on_fail() do backup.py roda de
+        # forma assíncrona (sinal entre threads) e chama set_running(False),
+        # que desabilita o btn_cancel (deixando-o cinza/apagado) e habilita
+        # o btn_close sozinho, antes da nossa limpeza terminar de verdade.
+        self.btn_cancel.setEnabled(True)
+        self.btn_close.setEnabled(False)
 
     def _on_cleanup_done(self) -> None:
+        if getattr(self, "_cancel_finalized", False):
+            return  # já finalizado (normal ou via timeout) — evita chamada dupla
+        self._cancel_finalized = True
+        self._is_cancelling = False
+
         self._cancel_anim.stop()
+        if hasattr(self, "_cancel_safety_timer"):
+            self._cancel_safety_timer.stop()
+
         self.append_log("— Backup cancelado. Snapshot incompleto removido. —")
-        # Fecha com código 2 → snapshots_page identifica cancelamento intencional
-        self.done(2)
+        self.set_status("Cancelado pelo usuário.")
+        self.lbl_status.setStyleSheet("color: #ffb86b; font-weight: bold;")
+        self.set_current_file("—")
+
+        # Fica com o log visível na tela em vez de fechar sozinho — o
+        # usuário fecha manualmente quando quiser, no próprio ritmo.
+        self.btn_cancel.setVisible(False)
+        self.btn_close.setEnabled(True)
+        self._timer_active = False
+        self._elapsed_timer.stop()
 
     def _cleanup_incomplete_snapshots(self) -> list[str]:
-        """Remove snapshots com status 'running' ou 'failed'. Retorna paths removidos."""
+        """Remove snapshots com status 'running'/'failed', ou com
+        snapshot.json corrompido/incompleto (comum quando o processo é
+        morto no meio da escrita do metadata) — nesse último caso, só
+        remove se o arquivo for recente (poucos minutos), pra nunca
+        arriscar apagar algum snapshot antigo não relacionado por causa
+        de um problema de leitura transitório."""
         import json
         import shutil
+        import time
         from pathlib import Path
+
+        RECENT_SECONDS = 600  # 10 minutos
 
         removed = []
         for base in (Path("/mnt"), Path("/media")):
@@ -502,6 +588,17 @@ class BackupProgressDialog(QDialog):
                         shutil.rmtree(target, ignore_errors=True)
                         removed.append(str(target))
                 except Exception:
+                    # JSON corrompido/incompleto — só remove se for recente,
+                    # pra não arriscar apagar algo antigo sem relação com
+                    # este cancelamento.
+                    try:
+                        age = time.time() - snap_json.stat().st_mtime
+                        if age <= RECENT_SECONDS:
+                            target = snap_json.parent
+                            shutil.rmtree(target, ignore_errors=True)
+                            removed.append(str(target))
+                    except Exception:
+                        pass
                     continue
         return removed
 
@@ -527,11 +624,18 @@ class BackupProgressDialog(QDialog):
         self.accept()
 
     def _toggle_maximize(self) -> None:
-        """Janela frameless não tem controle nativo de maximizar do WM —
-        alterna manualmente entre o tamanho normal e a área disponível
-        da tela (guardando geometria original para poder restaurar)."""
+        """Usa o maximize nativo do Qt (showMaximized/showNormal) — isso
+        registra o estado de "maximizado" junto ao gerenciador de janelas,
+        que é o que faz docks com auto-hide (ex: no GNOME) reconhecerem a
+        janela e se esconderem corretamente. Mas alguns WMs (ex: mutter
+        customizado sem decoração) simplesmente ignoram o estado
+        "maximizado" para janelas frameless e não redimensionam nada —
+        por isso também força o setGeometry manual como garantia de que
+        o redimensionamento acontece de verdade, independente do WM
+        aplicar o estado ou não."""
         if not self._is_maximized:
             self._normal_geometry = self.geometry()
+            self.showMaximized()
             from PySide6.QtWidgets import QApplication
             screen = self.screen() or QApplication.primaryScreen()
             if screen:
@@ -540,6 +644,7 @@ class BackupProgressDialog(QDialog):
             self._btn_header_maximize.setToolTip("Restaurar")
             self._is_maximized = True
         else:
+            self.showNormal()
             if self._normal_geometry is not None:
                 self.setGeometry(self._normal_geometry)
             self._btn_header_maximize.setIcon(qta.icon("mdi6.window-maximize", color="#9aa6b2"))
@@ -663,6 +768,17 @@ class BackupProgressDialog(QDialog):
             self.set_status("Backup em execução. Use Cancelar para interromper.")
             return
         super().closeEvent(event)
+
+    def reject(self) -> None:
+        # QDialog trata ESC chamando reject() diretamente (via done()/hide()),
+        # sem passar pelo closeEvent — por isso o "X" da janela já ficava
+        # bloqueado com processo rodando, mas o ESC escapava e fechava o
+        # diálogo sem avisar nada, deixando o worker órfão. Replica aqui a
+        # mesma trava do closeEvent.
+        if any(w.isRunning() for w in self._workers):
+            self.set_status("Backup em execução. Use Cancelar para interromper.")
+            return
+        super().reject()
 
 
 # ── Dialog de sucesso ────────────────────────────────────────────────────────
@@ -892,6 +1008,16 @@ class PairCheckProgressDialog(QDialog):
     def closeEvent(self, event) -> None:
         self._timer.stop()
         super().closeEvent(event)
+
+    def reject(self) -> None:
+        # QDialog trata ESC chamando reject() diretamente (via done()/
+        # hide()), sem passar pelo closeEvent — esse diálogo não tem
+        # nenhum botão de cancelar (é só um "aguarde" enquanto o processo
+        # elevado faz a checagem via rsync --dry-run), então não existe
+        # forma legítima de fechá-lo pela UI. ESC é sempre ignorado; só o
+        # código externo que o controla fecha de verdade (accept/close)
+        # quando a checagem termina.
+        pass
 
     def showEvent(self, event):
         """Centraliza na tela primária ao exibir."""
