@@ -695,7 +695,7 @@ class _IsoListCard(QFrame):
         """)
 
         root = QHBoxLayout(self)
-        root.setContentsMargins(18, 14, 18, 14)
+        root.setContentsMargins(18, 8, 18, 8)
         root.setSpacing(16)
 
         icon_lbl = QLabel()
@@ -852,7 +852,7 @@ class _EggsOptionButton(QFrame):
         title_row = QHBoxLayout()
         title_row.setContentsMargins(0, 0, 0, 0)
         title_row.setSpacing(8)
-        title_row.addWidget(self.title_lbl, 1)
+        title_row.addWidget(self.title_lbl)
         if badge_lbl is not None:
             title_row.addWidget(badge_lbl, 0, Qt.AlignTop)
         text.addLayout(title_row)
@@ -865,33 +865,39 @@ class _EggsOptionButton(QFrame):
         if action_label:
             h = color.lstrip("#")
             r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
-            self.action_btn = QPushButton(action_label)
+            # Laranja escuro fixo — independente da cor semântica do card
+            # (verde/azul/laranja) — pra se destacar do cadeado, que já
+            # usa a cor do card e ficava confundindo com o botão.
+            ar, ag, ab = 0xcc, 0x5a, 0x1e
+            self.action_btn = QPushButton()
+            self.action_btn.setIcon(qta.icon("mdi6.update", color="#ffb380"))
+            self.action_btn.setIconSize(QSize(18, 18))
+            self.action_btn.setToolTip(action_label)
             self.action_btn.setCursor(Qt.PointingHandCursor)
-            self.action_btn.setFixedHeight(34)
+            self.action_btn.setFixedSize(34, 34)
             self.action_btn.setStyleSheet(f"""
                 QPushButton {{
-                    background: rgba({r},{g},{b},18);
-                    border: 1px solid rgba({r},{g},{b},110);
+                    background: rgba({ar},{ag},{ab},50);
+                    border: 1px solid rgba({ar},{ag},{ab},200);
                     border-radius: 8px;
-                    color: {color};
-                    font-family: "DejaVu Sans Mono";
-                    font-size: 10px;
-                    font-weight: bold;
-                    padding: 0 16px;
                 }}
                 QPushButton:hover {{
-                    background: rgba({r},{g},{b},35);
-                    border: 1px solid {color};
+                    background: rgba({ar},{ag},{ab},80);
+                    border: 1px solid #ffb380;
                 }}
             """)
             # O botão dispara a mesma ação do card inteiro — clicar em
             # qualquer lugar do card ou só no botão tem o mesmo efeito.
             self.action_btn.clicked.connect(self.clicked.emit)
-            layout.addWidget(self.action_btn, 0, Qt.AlignVCenter)
+            # AlignTop (não AlignVCenter): o cadeado alinha no topo do
+            # title_row, então o botão precisa da mesma referência pra
+            # ficar na mesma linha visual, não centralizado na altura
+            # do card inteiro (que inclui a descrição embaixo).
+            layout.addWidget(self.action_btn, 0, Qt.AlignTop)
 
     def set_action_label(self, text: str) -> None:
         if self.action_btn is not None:
-            self.action_btn.setText(text)
+            self.action_btn.setToolTip(text)
 
     def set_title(self, title: str) -> None:
         self.title_lbl.setText(title)
@@ -1137,6 +1143,8 @@ class EggsPage(QWidget):
 
         dest_row.addLayout(dest_col, 5)
         dest_row.addWidget(self.stat_ventoy, 4)
+        dest_row.setAlignment(dest_col, Qt.AlignTop)
+        dest_row.setAlignment(self.stat_ventoy, Qt.AlignTop)
 
         # ── Faixa de status ──────────────────────────────────────────────
         from core.eggs.eggs import get_dashboard_stats
@@ -1241,7 +1249,13 @@ class EggsPage(QWidget):
         self.iso_scroll_layout.addStretch(1)
         self.iso_scroll.setWidget(self.iso_scroll_content)
 
-        root.addWidget(self.iso_scroll, 1)
+        root.addWidget(self.iso_scroll)
+        # Espaçador dedicado, único item com stretch em toda a página —
+        # absorve 100% da sobra de altura (a página vive dentro de um
+        # QScrollArea externo que força ela a preencher a janela). Sem
+        # isso, o Qt jogava a sobra em cima do dest_row (Ventoy/combo),
+        # inflando aquela linha em vez de deixar o espaço vazio no fim.
+        root.addStretch(1)
 
         # Envolve a página inteira num QScrollArea — sem isso, numa tela
         # de menor resolução (ex: Dell 1280x1024) ou com o grid refluindo
@@ -1305,12 +1319,20 @@ class EggsPage(QWidget):
 
     def rebuild_iso_list(self) -> None:
         """Repopula a listagem de ISOs existentes — mesmo padrão de
-        rebuild_snapshot_view em snapshots_page.py."""
+        rebuild_snapshot_view em snapshots_page.py. Usa o mesmo
+        _ResponsiveCardGrid dos cards de ação: cada ISO card fica mais
+        estreito, cabendo mais de um por linha conforme a largura da
+        janela, em vez de cada ISO ocupar 100% da largura sozinha."""
         from core.eggs.eggs import list_existing_isos
 
         _clear_layout(self.iso_scroll_layout)
 
         entries = list_existing_isos()
+
+        MAX_LIST_HEIGHT = 360   # teto — acima disso, rola internamente
+        ROW_HEIGHT = 72         # altura real de uma linha do grid
+        ROW_SPACING = _ResponsiveCardGrid.ROW_SPACING
+        ISO_CARD_MIN_WIDTH = 420  # espaço mínimo pra nome+data+tamanho+DELETE não apertar
 
         if not entries:
             empty = QLabel("Nenhuma ISO gerada ainda.")
@@ -1319,14 +1341,26 @@ class EggsPage(QWidget):
             empty.setStyleSheet("color: #6b7a8d; padding: 24px;")
             self.iso_scroll_layout.addWidget(empty)
             self.iso_scroll_layout.addStretch(1)
+            self.iso_scroll.setMaximumHeight(80)
             return
 
+        cards = []
         for entry in entries:
             card = _IsoListCard(entry)
             card.btn_delete.clicked.connect(lambda _, e=entry: self._delete_iso(e))
-            self.iso_scroll_layout.addWidget(card)
+            cards.append(card)
 
+        grid = _ResponsiveCardGrid(cards, min_card_width=ISO_CARD_MIN_WIDTH)
+        self.iso_scroll_layout.addWidget(grid)
         self.iso_scroll_layout.addStretch(1)
+
+        # Estimativa conservadora de linhas (2 cards por linha) pra
+        # calcular a altura — o número real de colunas só se sabe em
+        # tempo de execução (depende da largura da janela), então isso é
+        # só uma folga razoável, não um valor exato.
+        estimated_rows = max(1, -(-len(entries) // 2))  # ceil(len/2)
+        content_height = estimated_rows * ROW_HEIGHT + max(0, estimated_rows - 1) * ROW_SPACING + 6
+        self.iso_scroll.setMaximumHeight(min(content_height, MAX_LIST_HEIGHT))
 
     def refresh_list(self) -> None:
         """Mesmo padrão do snapshots_page.py: um único ponto de entrada
