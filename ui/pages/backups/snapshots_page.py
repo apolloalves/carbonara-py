@@ -1024,6 +1024,15 @@ class SnapshotsPage(QWidget):
         self.scroll.setEnabled(not busy)
         for card in self.scope_cards.values():
             card.setEnabled(not busy)
+        # Trava a janela principal inteira (não só os controles dessa
+        # página) enquanto o processo elevado (pkexec) roda em segundo
+        # plano — inclui o diálogo "Verificando Snapshot Irmão", que roda
+        # num processo do SO separado e por isso não consegue travar o
+        # Carbonara principal sozinho via modalidade do Qt (modalidade só
+        # funciona dentro do mesmo processo/QApplication).
+        window = self.window()
+        if window is not None:
+            window.setEnabled(not busy)
 
     def rebuild_snapshot_view(self):
         clear_layout(self.scroll_layout)
