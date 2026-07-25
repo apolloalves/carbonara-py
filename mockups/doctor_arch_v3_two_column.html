@@ -1,0 +1,149 @@
+<div style="background:#0a0b0f; padding:24px; border-radius:14px; font-family:'DejaVu Sans Mono', monospace; color:#e4e7ec;">
+
+  <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:20px;">
+    <div>
+      <div style="font-size:12px; color:#6b7280; margin-bottom:6px;">&#8249; Dashboard</div>
+      <div style="display:flex; align-items:center; gap:10px;">
+        <i class="mdi mdi-stethoscope" style="font-size:22px; color:#8b5cf6;" aria-hidden="true"></i>
+        <span style="font-size:22px; font-weight:bold; color:#e4e7ec;">Doctor Arch</span>
+      </div>
+      <div style="font-size:12px; color:#8b92a3; margin-top:2px;">Diagnose, clean and repair your Arch install</div>
+    </div>
+    <button style="background:transparent; border:1px solid rgba(255,255,255,0.15); color:#8b92a3; border-radius:9px; padding:8px 16px; font-size:12px; font-family:inherit; cursor:pointer;">
+      <i class="mdi mdi-refresh" style="font-size:13px; vertical-align:-2px;" aria-hidden="true"></i> Rodar checkup
+    </button>
+  </div>
+
+  <div style="display:grid; grid-template-columns:2.1fr 1fr; gap:16px;">
+
+    <!-- COLUNA ESQUERDA -->
+    <div>
+      <div style="background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.12); border-radius:14px; padding:20px; margin-bottom:16px; display:flex; align-items:center; gap:22px;">
+        <div style="position:relative; width:80px; height:80px; flex-shrink:0;">
+          <svg width="80" height="80" viewBox="0 0 80 80">
+            <circle cx="40" cy="40" r="34" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="8"/>
+            <circle cx="40" cy="40" r="34" fill="none" stroke="#fbbf24" stroke-width="8"
+              stroke-dasharray="214" stroke-dashoffset="53" stroke-linecap="round"
+              transform="rotate(-90 40 40)"/>
+          </svg>
+          <div style="position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;">
+            <span style="font-size:22px; font-weight:bold; color:#e4e7ec;">75</span>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:14px; font-weight:bold; color:#e4e7ec; margin-bottom:6px;">1 crítico e 2 avisos encontrados</div>
+          <div style="font-size:11px; color:#6b7280;">Última verificação: agora</div>
+        </div>
+      </div>
+
+      <div style="font-size:12px; color:#6b7280; margin-bottom:8px; letter-spacing:0.5px;">ENCONTRADOS</div>
+      <div style="border:1px solid rgba(255,255,255,0.12); border-radius:14px; overflow:hidden; margin-bottom:16px;">
+        <div style="background:#0d0e13; padding:14px 16px; display:flex; align-items:center; gap:12px; border-bottom:1px solid rgba(255,255,255,0.06);">
+          <i class="mdi mdi-circle" style="font-size:8px; color:#f87171;" aria-hidden="true"></i>
+          <div style="flex:1;">
+            <div style="font-size:13px; color:#e4e7ec;">1 serviço com falha</div>
+            <div style="font-size:11px; color:#6b7280;">systemd &middot; hddtemp.service</div>
+          </div>
+          <button style="background:transparent; border:1px solid rgba(248,113,113,0.4); color:#f87171; border-radius:7px; padding:5px 12px; font-size:11px; font-family:inherit;">Ver</button>
+        </div>
+        <div style="background:#0d0e13; padding:14px 16px; display:flex; align-items:center; gap:12px; border-bottom:1px solid rgba(255,255,255,0.06);">
+          <i class="mdi mdi-circle" style="font-size:8px; color:#fbbf24;" aria-hidden="true"></i>
+          <div style="flex:1;">
+            <div style="font-size:13px; color:#e4e7ec;">9 arquivos pacnew/pacsave</div>
+            <div style="font-size:11px; color:#6b7280;">Configs pendentes de merge</div>
+          </div>
+          <button style="background:transparent; border:1px solid rgba(251,191,36,0.4); color:#fbbf24; border-radius:7px; padding:5px 12px; font-size:11px; font-family:inherit;">Revisar</button>
+        </div>
+        <div style="background:#0d0e13; padding:14px 16px; display:flex; align-items:center; gap:12px;">
+          <i class="mdi mdi-circle" style="font-size:8px; color:#fbbf24;" aria-hidden="true"></i>
+          <div style="flex:1;">
+            <div style="font-size:13px; color:#e4e7ec;">12 pacotes órfãos</div>
+            <div style="font-size:11px; color:#6b7280;">Sem dependentes</div>
+          </div>
+          <button style="background:transparent; border:1px solid rgba(251,191,36,0.4); color:#fbbf24; border-radius:7px; padding:5px 12px; font-size:11px; font-family:inherit;">Remover</button>
+        </div>
+      </div>
+
+      <div style="font-size:12px; color:#6b7280; margin-bottom:8px; letter-spacing:0.5px;">ACOES RAPIDAS</div>
+      <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:12px;">
+        <div style="background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.12); border-radius:14px; padding:14px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <i class="mdi mdi-broom" style="font-size:14px; color:#8b92a3;" aria-hidden="true"></i>
+            <button style="background:rgba(255,255,255,0.08); border:none; color:#e4e7ec; border-radius:7px; padding:4px 9px; font-size:10px; font-family:inherit;">Limpar</button>
+          </div>
+          <div style="font-size:12px; font-weight:bold;">Limpeza</div>
+          <div style="font-size:10px; color:#6b7280;">~2.4 GB</div>
+        </div>
+        <div style="background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.12); border-radius:14px; padding:14px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <i class="mdi mdi-harddisk" style="font-size:14px; color:#8b92a3;" aria-hidden="true"></i>
+            <span style="font-size:10px; color:#34d399;">ok</span>
+          </div>
+          <div style="font-size:12px; font-weight:bold;">Volumes</div>
+          <div style="font-size:10px; color:#6b7280;">fsck ok</div>
+        </div>
+        <div style="background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.12); border-radius:14px; padding:14px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <i class="mdi mdi-timer-check-outline" style="font-size:14px; color:#8b92a3;" aria-hidden="true"></i>
+            <span style="font-size:10px; color:#34d399;">3/3</span>
+          </div>
+          <div style="font-size:12px; font-weight:bold;">Automação</div>
+          <div style="font-size:10px; color:#6b7280;">timers ok</div>
+        </div>
+        <div style="background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.12); border-radius:14px; padding:14px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <i class="mdi mdi-eye-outline" style="font-size:14px; color:#8b92a3;" aria-hidden="true"></i>
+            <span style="font-size:10px; color:#60a5fa;">1 pkg</span>
+          </div>
+          <div style="font-size:12px; font-weight:bold;">Watchlist</div>
+          <div style="font-size:10px; color:#6b7280;">nvidia-470xx</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SIDEBAR DIREITA -->
+    <div>
+      <div style="font-size:12px; color:#6b7280; margin-bottom:8px; letter-spacing:0.5px;">VITALS DO SISTEMA</div>
+      <div style="display:flex; flex-direction:column; gap:10px;">
+
+        <div style="background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.12); border-radius:14px; padding:14px 16px;">
+          <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+            <i class="mdi mdi-server-network" style="font-size:14px; color:#34d399;" aria-hidden="true"></i>
+            <span style="font-size:12px; font-weight:bold;">RAID0</span>
+            <span style="margin-left:auto; font-size:10px; color:#34d399;">clean</span>
+          </div>
+          <div style="font-size:10px; color:#6b7280;">md127 &middot; sda2 + sdb2</div>
+        </div>
+
+        <div style="background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.12); border-radius:14px; padding:14px 16px;">
+          <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+            <i class="mdi mdi-harddisk" style="font-size:14px; color:#34d399;" aria-hidden="true"></i>
+            <span style="font-size:12px; font-weight:bold;">SMART</span>
+            <span style="margin-left:auto; font-size:10px; color:#34d399;">5/5 ok</span>
+          </div>
+          <div style="font-size:10px; color:#6b7280;">Todos os discos passaram</div>
+        </div>
+
+        <div style="background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.12); border-radius:14px; padding:14px 16px;">
+          <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+            <i class="mdi mdi-timer-outline" style="font-size:14px; color:#8b92a3;" aria-hidden="true"></i>
+            <span style="font-size:12px; font-weight:bold;">Boot time</span>
+            <span style="margin-left:auto; font-size:10px; color:#e4e7ec;">18.2s</span>
+          </div>
+          <div style="font-size:10px; color:#6b7280;">systemd-analyze</div>
+        </div>
+
+        <div style="background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.12); border-radius:14px; padding:14px 16px;">
+          <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+            <i class="mdi mdi-linux" style="font-size:14px; color:#8b92a3;" aria-hidden="true"></i>
+            <span style="font-size:12px; font-weight:bold;">Kernel</span>
+          </div>
+          <div style="font-size:10px; color:#6b7280;">7.1.2-zen3-1-zen</div>
+          <div style="font-size:10px; color:#6b7280;">initramfs: hoje</div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+</div>

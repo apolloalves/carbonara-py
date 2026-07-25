@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
+from core.system.disks import get_raid_info
+
 Level = Literal["critical", "warning", "ok"]
 
 # Timers que já resolvem manutenção automática — o Doctor Arch só verifica
@@ -16,20 +18,21 @@ CRITICAL_TIMERS = [
     "archlinux-keyring-wkd-sync.timer",
 ]
 
-# Diretórios de log que pacotes esperam existir (origem: FixArch.sh) —
-# ausência costuma aparecer como "missing file" em pacman -Qk sem ser
-# corrupção real.
-EXPECTED_LOG_DIRS = [
-    "/var/log/httpd",
-    "/var/log/glusterfs",
-    "/var/log/libvirt/ch",
-    "/var/log/libvirt/lxc",
-    "/var/log/libvirt/qemu",
-    "/var/log/swtpm/libvirt",
-    "/var/log/swtpm/libvirt/qemu",
-    "/var/log/journal",
-    "/var/log/old",
-]
+# Diretórios de log que certos pacotes esperam existir (origem: FixArch.sh)
+# — a ausência aparece como "missing file" em pacman -Qk sem ser corrupção
+# real. Só faz sentido checar o diretório se o pacote dono estiver
+# instalado; senão gera falso positivo (ex: sistema sem httpd/libvirt).
+EXPECTED_LOG_DIRS_BY_PACKAGE = {
+    "apache": ["/var/log/httpd"],
+    "glusterfs": ["/var/log/glusterfs"],
+    "libvirt": [
+        "/var/log/libvirt/ch",
+        "/var/log/libvirt/lxc",
+        "/var/log/libvirt/qemu",
+        "/var/log/swtpm/libvirt",
+        "/var/log/swtpm/libvirt/qemu",
+    ],
+}
 
 # Pacotes AUR observados por atualização — hoje só o driver legado do
 # GTX 780 Ti, mas a lista é pensada pra crescer sem mudar o código.
@@ -53,9 +56,22 @@ class Finding:
 
 
 @dataclass(frozen=True)
+class SystemVitals:
+    raid_device: str = "-"
+    raid_level: str = "-"
+    raid_state: str = "n/a"
+    smart_ok: int = 0
+    smart_total: int = 0
+    boot_time: str = "desconhecido"
+    kernel: str = "-"
+    initramfs_date: str = "desconhecido"
+
+
+@dataclass(frozen=True)
 class DoctorReport:
     findings: list[Finding] = field(default_factory=list)
     score: int = 100
+    vitals: SystemVitals = field(default_factory=SystemVitals)
 
     @property
     def critical_count(self) -> int:
@@ -72,6 +88,14 @@ def _run(cmd: list[str], timeout: int = 10) -> str:
         return result.stdout.strip()
     except Exception:
         return ""
+
+
+def _is_installed(package: str) -> bool:
+    try:
+        result = subprocess.run(["pacman", "-Qq", package], capture_output=True, timeout=5)
+        return result.returncode == 0
+    except Exception:
+        return False
 
 
 # ────────────────────────────────────────────────────────────── diagnósticos --
@@ -124,13 +148,17 @@ def check_orphan_kernels() -> Finding:
                         "ok", "diagnostico")
     return Finding("orphan_kernels", "Kernels órfãos",
                     f"{', '.join(idle)} instalado(s) sem uso — ocupam /boot",
-                    "warning", "diagnostico", count=len(idle), fixable=True)
+                    "warning", "diagnostico", count=len(idle), fixable=False)
 
 
 def check_missing_log_dirs() -> Finding:
-    missing = [d for d in EXPECTED_LOG_DIRS if not Path(d).is_dir()]
+    missing = []
+    for package, dirs in EXPECTED_LOG_DIRS_BY_PACKAGE.items():
+        if not _is_installed(package):
+            continue
+        missing.extend(d for d in dirs if not Path(d).is_dir())
     if not missing:
-        return Finding("log_dirs", "Diretórios de log", "Todos presentes",
+        return Finding("log_dirs", "Diretórios de log", "Todos presentes (pacotes instalados)",
                         "ok", "diagnostico")
     return Finding("log_dirs", "Diretórios de log ausentes",
                     f"{len(missing)} diretório(s) faltando (causa comum de 'missing file' falso positivo)",
@@ -140,9 +168,8 @@ def check_missing_log_dirs() -> Finding:
 def check_critical_timers() -> Finding:
     broken = []
     for timer in CRITICAL_TIMERS:
-        state = _run(["systemctl", "is-enabled", timer])
         active = _run(["systemctl", "is-active", timer])
-        if "enabled" not in state or active != "active" and active != "waiting":
+        if active != "active":
             broken.append(timer)
     if not broken:
         return Finding("critical_timers", "Automação essencial",
@@ -196,6 +223,57 @@ def check_aur_watchlist() -> list[Finding]:
     return findings
 
 
+# ────────────────────────────────────────────────────────────── vitals --
+
+def check_raid() -> tuple[dict, Finding | None]:
+    """Reaproveita get_raid_info() do disks.py em vez de reimplementar a
+    leitura de /proc/mdstat."""
+    info = get_raid_info()
+    if info is None:
+        return {"device": "-", "level": "-", "state": "n/a"}, None
+    data = {"device": info.device, "level": info.level, "state": info.state}
+    if info.state == "degraded":
+        return data, Finding("raid", "RAID degradado", f"{info.device} está degradado",
+                              "critical", "sistema")
+    return data, None
+
+
+def check_smart() -> tuple[dict, Finding | None]:
+    disks = sorted(Path("/dev").glob("sd[a-z]"))
+    total = len(disks)
+    failed = []
+    for dev in disks:
+        out = _run(["sudo", "-n", "smartctl", "-H", str(dev)])
+        if out and "PASSED" not in out:
+            failed.append(str(dev))
+    data = {"ok": total - len(failed), "total": total}
+    if failed:
+        return data, Finding("smart", "SMART com falha", f"{', '.join(failed)}",
+                              "critical", "sistema", count=len(failed))
+    return data, None
+
+
+def check_boot_time() -> str:
+    out = _run(["systemd-analyze"])
+    if not out:
+        return "desconhecido"
+    match = re.search(r"=\s*([\d.a-z\s]+)$", out.splitlines()[0])
+    return match.group(1).strip() if match else "desconhecido"
+
+
+def check_kernel_initramfs() -> tuple[str, str]:
+    kernel = _run(["uname", "-r"])
+    candidates = sorted(Path("/boot").glob("initramfs-*.img"))
+    non_fallback = [p for p in candidates if "fallback" not in p.name]
+    target = non_fallback[0] if non_fallback else (candidates[0] if candidates else None)
+    if not target or not target.exists():
+        return kernel, "desconhecido"
+    import datetime
+    mtime = target.stat().st_mtime
+    date_str = datetime.datetime.fromtimestamp(mtime).strftime("%d/%m")
+    return kernel, date_str
+
+
 # ────────────────────────────────────────────────────────────── agregação --
 
 def compute_score(findings: list[Finding]) -> int:
@@ -205,6 +283,11 @@ def compute_score(findings: list[Finding]) -> int:
 
 
 def run_full_checkup() -> DoctorReport:
+    raid_data, raid_finding = check_raid()
+    smart_data, smart_finding = check_smart()
+    boot_time = check_boot_time()
+    kernel, initramfs_date = check_kernel_initramfs()
+
     findings = [
         check_failed_services(),
         check_pacnew_pacsave(),
@@ -215,4 +298,20 @@ def run_full_checkup() -> DoctorReport:
         check_volumes_integrity(),
         *check_aur_watchlist(),
     ]
-    return DoctorReport(findings=findings, score=compute_score(findings))
+    if raid_finding:
+        findings.append(raid_finding)
+    if smart_finding:
+        findings.append(smart_finding)
+
+    vitals = SystemVitals(
+        raid_device=raid_data["device"],
+        raid_level=raid_data["level"],
+        raid_state=raid_data["state"],
+        smart_ok=smart_data["ok"],
+        smart_total=smart_data["total"],
+        boot_time=boot_time,
+        kernel=kernel,
+        initramfs_date=initramfs_date,
+    )
+
+    return DoctorReport(findings=findings, score=compute_score(findings), vitals=vitals)

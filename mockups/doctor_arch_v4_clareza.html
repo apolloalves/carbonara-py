@@ -1,0 +1,118 @@
+<div style="background:#0a0b0f; padding:24px; border-radius:14px; font-family:'DejaVu Sans Mono', monospace; color:#e4e7ec;">
+
+  <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:18px;">
+    <div>
+      <div style="font-size:12px; color:#6b7280; margin-bottom:6px;">&#8249; Dashboard</div>
+      <div style="display:flex; align-items:center; gap:10px;">
+        <i class="mdi mdi-stethoscope" style="font-size:22px; color:#8b5cf6;" aria-hidden="true"></i>
+        <span style="font-size:22px; font-weight:bold; color:#e4e7ec;">Doctor Arch</span>
+      </div>
+    </div>
+    <button style="background:transparent; border:1px solid rgba(255,255,255,0.15); color:#8b92a3; border-radius:9px; padding:8px 16px; font-size:12px; font-family:inherit;">
+      <i class="mdi mdi-refresh" style="font-size:13px; vertical-align:-2px;" aria-hidden="true"></i> Rodar checkup
+    </button>
+  </div>
+
+  <!-- HERO redesenhado: score com label explicito + status textual grande -->
+  <div style="background:linear-gradient(135deg, rgba(251,191,36,0.08), rgba(255,255,255,0.03)); border:1px solid rgba(251,191,36,0.3); border-radius:14px; padding:22px 26px; margin-bottom:18px; display:flex; align-items:center; gap:26px;">
+    <div style="position:relative; width:88px; height:88px; flex-shrink:0;">
+      <svg width="88" height="88" viewBox="0 0 88 88">
+        <circle cx="44" cy="44" r="37" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="9"/>
+        <circle cx="44" cy="44" r="37" fill="none" stroke="#fbbf24" stroke-width="9"
+          stroke-dasharray="232" stroke-dashoffset="12" stroke-linecap="round"
+          transform="rotate(-90 44 44)"/>
+      </svg>
+      <div style="position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;">
+        <span style="font-size:24px; font-weight:bold; color:#e4e7ec; line-height:1;">95</span>
+        <span style="font-size:8px; color:#fbbf24; letter-spacing:0.5px; margin-top:2px;">SCORE</span>
+      </div>
+    </div>
+    <div>
+      <div style="font-size:16px; font-weight:bold; color:#e4e7ec; margin-bottom:4px;">Seu sistema está quase perfeito</div>
+      <div style="font-size:12px; color:#c9a961;">1 aviso pendente &middot; nada crítico agora</div>
+      <div style="font-size:11px; color:#6b7280; margin-top:6px;">Última verificação: agora</div>
+    </div>
+  </div>
+
+  <div style="font-size:12px; color:#6b7280; margin-bottom:8px; letter-spacing:0.5px;">O QUE PRECISA DE ATENCAO</div>
+  <div style="border-radius:14px; overflow:hidden; margin-bottom:20px;">
+    <div style="background:#17140a; border-left:3px solid #fbbf24; padding:14px 18px; display:flex; align-items:center; gap:14px;">
+      <i class="mdi mdi-file-multiple-outline" style="font-size:18px; color:#fbbf24;" aria-hidden="true"></i>
+      <div style="flex:1;">
+        <div style="font-size:13px; color:#e4e7ec; font-weight:bold;">9 arquivos pacnew/pacsave pendentes</div>
+        <div style="font-size:11px; color:#8a7a50;">Configs de pacotes que foram atualizadas — vale revisar o que mudou</div>
+      </div>
+      <button style="background:transparent; border:1px solid rgba(251,191,36,0.4); color:#fbbf24; border-radius:7px; padding:6px 14px; font-size:11px; font-family:inherit;">Revisar</button>
+    </div>
+  </div>
+
+  <div style="font-size:12px; color:#6b7280; margin-bottom:8px; letter-spacing:0.5px;">MANUTENCAO</div>
+  <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:12px; margin-bottom:20px;">
+
+    <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:16px;">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+        <div style="width:30px; height:30px; border-radius:8px; background:rgba(52,211,153,0.12); display:flex; align-items:center; justify-content:center;">
+          <i class="mdi mdi-broom" style="font-size:15px; color:#34d399;" aria-hidden="true"></i>
+        </div>
+        <i class="mdi mdi-check-circle" style="font-size:14px; color:#34d399;" aria-hidden="true"></i>
+      </div>
+      <div style="font-size:13px; font-weight:bold; color:#e4e7ec;">Limpeza</div>
+      <div style="font-size:11px; color:#6b7280; margin-bottom:10px;">Nada a limpar</div>
+    </div>
+
+    <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:16px;">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+        <div style="width:30px; height:30px; border-radius:8px; background:rgba(52,211,153,0.12); display:flex; align-items:center; justify-content:center;">
+          <i class="mdi mdi-harddisk" style="font-size:15px; color:#34d399;" aria-hidden="true"></i>
+        </div>
+        <i class="mdi mdi-check-circle" style="font-size:14px; color:#34d399;" aria-hidden="true"></i>
+      </div>
+      <div style="font-size:13px; font-weight:bold; color:#e4e7ec;">Volumes</div>
+      <div style="font-size:11px; color:#6b7280;">fsck sem erros</div>
+    </div>
+
+    <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:16px;">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+        <div style="width:30px; height:30px; border-radius:8px; background:rgba(52,211,153,0.12); display:flex; align-items:center; justify-content:center;">
+          <i class="mdi mdi-timer-check-outline" style="font-size:15px; color:#34d399;" aria-hidden="true"></i>
+        </div>
+        <i class="mdi mdi-check-circle" style="font-size:14px; color:#34d399;" aria-hidden="true"></i>
+      </div>
+      <div style="font-size:13px; font-weight:bold; color:#e4e7ec;">Automação</div>
+      <div style="font-size:11px; color:#6b7280;">3 timers ativos</div>
+    </div>
+
+    <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:16px;">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+        <div style="width:30px; height:30px; border-radius:8px; background:rgba(96,165,250,0.12); display:flex; align-items:center; justify-content:center;">
+          <i class="mdi mdi-eye-outline" style="font-size:15px; color:#60a5fa;" aria-hidden="true"></i>
+        </div>
+        <span style="font-size:10px; color:#60a5fa;">1 pkg</span>
+      </div>
+      <div style="font-size:13px; font-weight:bold; color:#e4e7ec;">Watchlist AUR</div>
+      <div style="font-size:11px; color:#6b7280;">nvidia-470xx</div>
+    </div>
+
+  </div>
+
+  <div style="font-size:12px; color:#6b7280; margin-bottom:8px; letter-spacing:0.5px;">VITALS DO SISTEMA</div>
+  <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:12px;">
+    <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:14px 16px;">
+      <div style="font-size:10px; color:#6b7280; margin-bottom:4px;">RAID0</div>
+      <div style="font-size:14px; color:#34d399; font-weight:bold;">clean</div>
+    </div>
+    <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:14px 16px;">
+      <div style="font-size:10px; color:#6b7280; margin-bottom:4px;">SMART</div>
+      <div style="font-size:14px; color:#34d399; font-weight:bold;">5/5 ok</div>
+    </div>
+    <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:14px 16px;">
+      <div style="font-size:10px; color:#6b7280; margin-bottom:4px;">BOOT TIME</div>
+      <div style="font-size:14px; color:#e4e7ec; font-weight:bold;">11.2s</div>
+    </div>
+    <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:14px 16px;">
+      <div style="font-size:10px; color:#6b7280; margin-bottom:4px;">KERNEL</div>
+      <div style="font-size:14px; color:#e4e7ec; font-weight:bold;">zen3-1-zen</div>
+    </div>
+  </div>
+
+</div>

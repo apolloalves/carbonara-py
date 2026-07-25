@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 import qtawesome as qta
 from PySide6.QtCore import Qt, QTimer, Signal, QSize, QThread
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QIcon
 
 from PySide6.QtWidgets import (
     QWidget,
@@ -929,6 +929,12 @@ class SnapshotsPage(QWidget):
             f"{dest.mountpoint}  •  {dest.fs_type}"
         )
 
+    def _combo_item_icon(self, dest: StorageDestination) -> QIcon:
+        # Mesmo ícone pra todos os destinos — fs_type não indica
+        # confiavelmente se é pendrive ou não (ex: Ventoy é uma partição,
+        # não um dispositivo removível, mesmo com fs vfat/exfat).
+        return qta.icon("mdi6.harddisk", color="#ecf4ff")
+
     def refresh_destinations(self):
         current_mount = None
         current = self.current_destination()
@@ -941,7 +947,7 @@ class SnapshotsPage(QWidget):
         self.cmb_destination.clear()
 
         for dest in self.destinations:
-            self.cmb_destination.addItem(self._format_combo_item(dest), dest)
+            self.cmb_destination.addItem(self._combo_item_icon(dest), self._format_combo_item(dest), dest)
 
         self.cmb_destination.blockSignals(False)
 
