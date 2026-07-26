@@ -470,6 +470,27 @@ class HeroCard(QFrame):
             return
         super().mousePressEvent(event)
 
+    def set_active(self, value: bool):
+        border = f"1px solid {ACCENT_BLUE_LIGHT}" if value else "1px solid rgba(99, 140, 255, 65)"
+        self.setStyleSheet(f"""
+            QFrame#HeroCard {{
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(59, 130, 246, 30),
+                    stop:1 rgba(139, 92, 246, 20)
+                );
+                border: {border};
+                border-radius: 18px;
+            }}
+            QFrame#HeroCard:hover {{
+                border: 1px solid rgba(99, 140, 255, 130);
+            }}
+            QLabel {{
+                background: transparent;
+                border: none;
+            }}
+        """)
+
 
 class MidCard(QFrame):
     clicked = Signal()
@@ -546,6 +567,25 @@ class MidCard(QFrame):
             event.accept()
             return
         super().mousePressEvent(event)
+
+    def set_active(self, value: bool):
+        border = f"1px solid {ACCENT_BLUE_LIGHT}" if value else "1px solid rgba(255, 255, 255, 12)"
+        bg = "rgba(255, 255, 255, 12)" if value else "rgba(255, 255, 255, 6)"
+        self.setStyleSheet(f"""
+            QFrame#MidCard {{
+                background: {bg};
+                border: {border};
+                border-radius: 18px;
+            }}
+            QFrame#MidCard:hover {{
+                background: rgba(255, 255, 255, 9);
+                border: 1px solid rgba(255, 255, 255, 22);
+            }}
+            QLabel {{
+                background: transparent;
+                border: none;
+            }}
+        """)
 
 
 class SmallCard(QFrame):
@@ -830,10 +870,17 @@ class MenuPage(QWidget):
     exit_requested = Signal()
     exit_requested_confirm = Signal()
 
+    # Número de colunas do grid de cards pequenos — usado tanto pra
+    # montar o QGridLayout quanto pra navegação 2D real por teclado
+    # (Esquerda/Direita andam na linha, Cima/Baixo pulam ±GRID_COLUMNS).
+    GRID_COLUMNS = 5
+
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        self.current_index = 0
+        self.nav_row = 0
+        self.nav_col = 0
+        self.top_cards: list[tuple[QFrame, int]] = []
         self.small_cards: list[SmallCard] = []
 
         self.setStyleSheet(
@@ -868,7 +915,7 @@ class MenuPage(QWidget):
         hero_row.setSpacing(14)
 
         self.hero_backups = HeroCard()
-        self.hero_backups.clicked.connect(self.backups_requested.emit)
+        self.hero_backups.clicked.connect(lambda: self._go_to(4))
         hero_row.addWidget(self.hero_backups, 14)
 
         self.mid_eggs = MidCard(
@@ -884,6 +931,10 @@ class MenuPage(QWidget):
         self.mid_doctor.clicked.connect(lambda: self._go_to(7))
         hero_row.addWidget(self.mid_doctor, 10)
 
+        # Linha de cima também entra na navegação por teclado — antes só
+        # dava pra clicar nela com o mouse, setas não alcançavam.
+        self.top_cards = [(self.hero_backups, 4), (self.mid_eggs, 9), (self.mid_doctor, 7)]
+
         outer.addLayout(hero_row)
 
         small_entries = [e for e in MENU_ENTRIES if e.number not in (4,)]
@@ -894,7 +945,7 @@ class MenuPage(QWidget):
             card = SmallCard(entry)
             card.clicked.connect(self._on_card_clicked)
             self.small_cards.append(card)
-            row, col = divmod(i, 5)
+            row, col = divmod(i, self.GRID_COLUMNS)
             grid.addWidget(card, row, col)
 
         outer.addLayout(grid)
@@ -943,6 +994,7 @@ class MenuPage(QWidget):
 
         self.input_box.setFocus()
         self._refresh_selection()
+        self._refresh_selection()
 
     def _request_exit(self):
         self.exit_requested_confirm.emit()
@@ -950,37 +1002,72 @@ class MenuPage(QWidget):
     def _go_to(self, number: int):
         self._on_card_clicked(number)
 
-    def _index_of(self, number: int) -> int:
-        small_entries = [e for e in MENU_ENTRIES if e.number not in (4,)]
-        for idx, entry in enumerate(small_entries):
-            if entry.number == number:
-                return idx
-        return -1
+    def _nav_rows(self) -> list[list[tuple[QFrame, int]]]:
+        """Todas as linhas navegáveis por teclado: a linha de cima
+        (Timeshift/Eggs/Doctor Arch) + as linhas do grid de baixo,
+        cada uma com o número de colunas que ela realmente tem (a linha
+        de cima tem 3, o grid tem até GRID_COLUMNS)."""
+        rows = [self.top_cards]
+        for i in range(0, len(self.small_cards), self.GRID_COLUMNS):
+            chunk = self.small_cards[i:i + self.GRID_COLUMNS]
+            rows.append([(card, card.entry.number) for card in chunk])
+        return rows
+
+    def _pos_of(self, number: int) -> tuple[int, int] | None:
+        for r, row in enumerate(self._nav_rows()):
+            for c, (_widget, num) in enumerate(row):
+                if num == number:
+                    return (r, c)
+        return None
 
     def _refresh_selection(self):
-        for i, card in enumerate(self.small_cards):
-            card.set_active(i == self.current_index)
+        rows = self._nav_rows()
+        for r, row in enumerate(rows):
+            for c, (widget, _num) in enumerate(row):
+                widget.set_active(r == self.nav_row and c == self.nav_col)
 
     def _on_card_clicked(self, number: int):
-        idx = self._index_of(number)
-        if idx >= 0:
-            self.current_index = idx
+        pos = self._pos_of(number)
+        if pos is not None:
+            self.nav_row, self.nav_col = pos
             self._refresh_selection()
         self._confirm(number)
 
-    def _move(self, step: int):
-        if not self.small_cards:
+    def _move(self, dx: int = 0, dy: int = 0):
+        rows = self._nav_rows()
+        if not rows or not rows[self.nav_row]:
             return
-        self.current_index = (self.current_index + step) % len(self.small_cards)
+        row, col = self.nav_row, self.nav_col
+
+        if dx != 0:
+            # Esquerda/Direita andam só dentro da linha atual — não
+            # pulam pra linha de cima/baixo mesmo perto da borda.
+            new_col = col + dx
+            if 0 <= new_col < len(rows[row]):
+                col = new_col
+
+        if dy != 0:
+            new_row = row + dy
+            if 0 <= new_row < len(rows) and rows[new_row]:
+                # A linha de destino pode ter menos colunas (ex: linha
+                # de cima tem 3, grid tem 5) — trava na última válida
+                # em vez de sair da área navegável.
+                col = min(col, len(rows[new_row]) - 1)
+                row = new_row
+
+        self.nav_row, self.nav_col = row, col
         self._refresh_selection()
-        entry = self.small_cards[self.current_index].entry
-        self.status.setText(f"Selected: {entry.number} — {entry.title}")
+        _widget, number = rows[row][col]
+        entry = next((e for e in MENU_ENTRIES if e.number == number), None)
+        if entry is not None:
+            self.status.setText(f"Selected: {entry.number} — {entry.title}")
 
     def _confirm_current(self):
-        if not self.small_cards:
+        rows = self._nav_rows()
+        if not rows or not rows[self.nav_row]:
             return
-        entry = self.small_cards[self.current_index].entry
-        self._confirm(entry.number)
+        _widget, number = rows[self.nav_row][self.nav_col]
+        self._confirm(number)
 
     def _confirm(self, number: int):
         entry = next((e for e in MENU_ENTRIES if e.number == number), None)
@@ -1017,9 +1104,9 @@ class MenuPage(QWidget):
             self.input_box.selectAll()
             return
 
-        idx = self._index_of(choice)
-        if idx >= 0:
-            self.current_index = idx
+        pos = self._pos_of(choice)
+        if pos is not None:
+            self.nav_row, self.nav_col = pos
             self._refresh_selection()
         self.input_box.clear()
         self._confirm(choice)
@@ -1028,10 +1115,16 @@ class MenuPage(QWidget):
         if obj is self.input_box and event.type() == QEvent.KeyPress:
             key = event.key()
             if key in (Qt.Key_Up, Qt.Key_W):
-                self._move(-1)
+                self._move(dy=-1)
                 return True
             if key in (Qt.Key_Down, Qt.Key_S):
-                self._move(1)
+                self._move(dy=1)
+                return True
+            if key in (Qt.Key_Left, Qt.Key_A):
+                self._move(dx=-1)
+                return True
+            if key in (Qt.Key_Right, Qt.Key_D):
+                self._move(dx=1)
                 return True
             if key in (Qt.Key_Return, Qt.Key_Enter):
                 self._accept_typed_choice()
@@ -1044,10 +1137,16 @@ class MenuPage(QWidget):
     def keyPressEvent(self, event: QKeyEvent):
         key = event.key()
         if key in (Qt.Key_Up, Qt.Key_W):
-            self._move(-1)
+            self._move(dy=-1)
             return
         if key in (Qt.Key_Down, Qt.Key_S):
-            self._move(1)
+            self._move(dy=1)
+            return
+        if key in (Qt.Key_Left, Qt.Key_A):
+            self._move(dx=-1)
+            return
+        if key in (Qt.Key_Right, Qt.Key_D):
+            self._move(dx=1)
             return
         if key in (Qt.Key_Return, Qt.Key_Enter):
             self._confirm_current()
