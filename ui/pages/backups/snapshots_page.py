@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 import qtawesome as qta
 from PySide6.QtCore import Qt, QTimer, Signal, QSize, QThread
-from PySide6.QtGui import QFont, QIcon
+from PySide6.QtGui import QFont
 
 from PySide6.QtWidgets import (
     QWidget,
@@ -426,7 +426,11 @@ class SnapshotCard(QFrame):
         if entry.synced_at:
             try:
                 self_dt = datetime.strptime(entry.synced_at, "%Y-%m-%dT%H:%M:%S")
-                elapsed_days = (datetime.now() - self_dt).days
+                # Compara datas de calendário, não 24h corridas — se
+                # sincronizou às 08:41 do dia 28 e você abre antes das
+                # 08:41 do dia 29, timedelta.days ainda dá 0 (não
+                # completou 24h), mas já é "ontem" no calendário.
+                elapsed_days = (datetime.now().date() - self_dt.date()).days
             except ValueError:
                 elapsed_days = None
 
@@ -929,12 +933,6 @@ class SnapshotsPage(QWidget):
             f"{dest.mountpoint}  •  {dest.fs_type}"
         )
 
-    def _combo_item_icon(self, dest: StorageDestination) -> QIcon:
-        # Mesmo ícone pra todos os destinos — fs_type não indica
-        # confiavelmente se é pendrive ou não (ex: Ventoy é uma partição,
-        # não um dispositivo removível, mesmo com fs vfat/exfat).
-        return qta.icon("mdi6.harddisk", color="#ecf4ff")
-
     def refresh_destinations(self):
         current_mount = None
         current = self.current_destination()
@@ -947,7 +945,7 @@ class SnapshotsPage(QWidget):
         self.cmb_destination.clear()
 
         for dest in self.destinations:
-            self.cmb_destination.addItem(self._combo_item_icon(dest), self._format_combo_item(dest), dest)
+            self.cmb_destination.addItem(self._format_combo_item(dest), dest)
 
         self.cmb_destination.blockSignals(False)
 
@@ -2017,7 +2015,8 @@ class _RestoreDialog(QDialog):
         self.entry = entry
         self.setWindowTitle("Restore Snapshot")
         self.setModal(True)
-        self.setFixedSize(880, 514)
+        extra_height = 92 if entry.path.parent.name.upper() == "HOME" else 0
+        self.setFixedSize(880, 514 + extra_height)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_StyledBackground, True)
         self._build_ui()
@@ -2152,6 +2151,18 @@ class _RestoreDialog(QDialog):
         )
         btn3.clicked.connect(self._on_alt_restore)
 
+        is_home = self.entry.path.parent.name.upper() == "HOME"
+        btn4 = None
+        if is_home:
+            btn4 = _RestoreOptionButton(
+                glyph="mdi6.home-import-outline",
+                title="Restaurar HOME sem reboot",
+                desc="Restaura a HOME inteira no sistema rodando agora — sem live ISO. Encerra a sessão ao final (logout).",
+                color="#4ade80",
+                parent=self,
+            )
+            btn4.clicked.connect(self._on_home_live_restore)
+
         b_layout.addLayout(snap_row)
         b_layout.addSpacing(24)
         b_layout.addWidget(lbl_choose)
@@ -2173,6 +2184,15 @@ class _RestoreDialog(QDialog):
         b_layout.addWidget(sep2)
 
         b_layout.addWidget(btn3)
+
+        if btn4 is not None:
+            sep3 = QFrame()
+            sep3.setFrameShape(QFrame.HLine)
+            sep3.setStyleSheet("border: none; border-top: 1px solid rgba(255,255,255,10);")
+            sep3.setFixedHeight(1)
+            b_layout.addWidget(sep3)
+            b_layout.addWidget(btn4)
+
         b_layout.addStretch()
 
         root.addWidget(header)
@@ -2220,6 +2240,12 @@ class _RestoreDialog(QDialog):
     def _on_alt_restore(self) -> None:
         self.hide()
         dlg = _AltRestoreDialog(self.entry, parent=self.parent())
+        dlg.exec()
+        self.show()
+
+    def _on_home_live_restore(self) -> None:
+        self.hide()
+        dlg = _HomeLiveRestoreDialog(self.entry, parent=self.parent())
         dlg.exec()
         self.show()
 
@@ -3650,6 +3676,201 @@ class _AltRestoreDialog(QDialog):
         painter.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 14, 14)
 
 # ── Sync helpers ─────────────────────────────────────────────────────────────
+
+class _HomeLiveRestoreDialog(QDialog):
+    """Confirmação pro restore de HOME sem reboot — checkbox obrigatório
+    (o Confirmar só habilita depois de marcado), dispara e esquece igual
+    ao _AltRestoreDialog (o próprio processo pkexec abre o
+    BackupProgressDialog como root na tela do usuário)."""
+
+    def __init__(self, entry: SnapshotEntry, parent=None):
+        super().__init__(parent)
+        self.entry = entry
+        self.setWindowTitle("Restaurar HOME sem reboot")
+        self.setModal(True)
+        self.setFixedSize(560, 300)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self._build_ui(entry)
+        self._apply_styles()
+
+    def _build_ui(self, entry: SnapshotEntry) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        header = QFrame()
+        header.setObjectName("HomeRestoreHeader")
+        header.setFixedHeight(56)
+        h_layout = QHBoxLayout(header)
+        h_layout.setContentsMargins(20, 0, 18, 0)
+
+        icon = QLabel()
+        icon.setFixedSize(36, 36)
+        icon.setAlignment(Qt.AlignCenter)
+        icon.setPixmap(qta.icon("mdi6.home-import-outline", color="#ffcf8f").pixmap(22, 22))
+        icon.setStyleSheet("QLabel { background: rgba(224,168,64,40); border-radius: 9px; }")
+
+        lbl = QLabel("Restaurar HOME sem reboot")
+        lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+        lbl.setStyleSheet("color: #ecf4ff;")
+
+        btn_x = _CloseLabel(self)
+        btn_x.mousePressEvent = lambda e: self.reject()
+
+        h_layout.addWidget(icon)
+        h_layout.addSpacing(10)
+        h_layout.addWidget(lbl)
+        h_layout.addStretch()
+        h_layout.addWidget(btn_x)
+
+        body = QFrame()
+        body.setObjectName("HomeRestoreBody")
+        b_layout = QVBoxLayout(body)
+        b_layout.setContentsMargins(28, 22, 28, 22)
+        b_layout.setSpacing(12)
+
+        warn = QLabel(
+            "Isso substitui os arquivos atuais de /home pelos deste "
+            "snapshot, no sistema já rodando (sem live ISO). Ao final, "
+            "a sessão gráfica é encerrada (logout) — feche seu trabalho "
+            "antes de continuar."
+        )
+        warn.setWordWrap(True)
+        warn.setFont(QFont("DejaVu Sans Mono", 9))
+        warn.setStyleSheet("color: #c8d4e0;")
+
+        snap_label = QLabel(entry.path.name)
+        snap_label.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+        snap_label.setStyleSheet(
+            "color: #ffcf8f; background: #101115; "
+            "border-radius: 6px; padding: 10px 12px;"
+        )
+
+        self.chk_confirm = QCheckBox("Entendo que a sessão será encerrada e os arquivos atuais de /home serão substituídos")
+        self.chk_confirm.setObjectName("HomeRestoreCheck")
+        self.chk_confirm.setFont(QFont("DejaVu Sans Mono", 9))
+        self.chk_confirm.toggled.connect(self._on_checkbox_toggled)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
+
+        btn_cancel = QPushButton("Cancelar")
+        btn_cancel.setObjectName("HomeRestoreBtnCancel")
+        btn_cancel.setFixedSize(110, 40)
+        btn_cancel.clicked.connect(self.reject)
+
+        self.btn_confirm = QPushButton("Restaurar")
+        self.btn_confirm.setObjectName("HomeRestoreBtnConfirm")
+        self.btn_confirm.setFixedSize(130, 40)
+        self.btn_confirm.setEnabled(False)
+        self.btn_confirm.clicked.connect(self._on_confirm)
+
+        btn_row.addStretch()
+        btn_row.addWidget(btn_cancel)
+        btn_row.addWidget(self.btn_confirm)
+
+        b_layout.addWidget(warn)
+        b_layout.addSpacing(6)
+        b_layout.addWidget(snap_label)
+        b_layout.addSpacing(6)
+        b_layout.addWidget(self.chk_confirm)
+        b_layout.addStretch()
+        b_layout.addLayout(btn_row)
+
+        root.addWidget(header)
+        root.addWidget(body, stretch=1)
+
+    def _on_checkbox_toggled(self, checked: bool) -> None:
+        self.btn_confirm.setEnabled(checked)
+
+    def _on_confirm(self) -> None:
+        if not self.chk_confirm.isChecked():
+            return
+        self.accept()
+
+        args_json = json.dumps({"home_snapshot_path": str(self.entry.path)})
+        cmd_pkexec = [
+            "pkexec",
+            "/usr/local/bin/carbonara-helper",
+            os.environ.get("DISPLAY", ""),
+            os.environ.get("XAUTHORITY", ""),
+            "restore.home_live",
+            args_json,
+        ]
+
+        try:
+            subprocess.Popen(cmd_pkexec)
+        except Exception as e:
+            _show_error("Restaurar HOME", str(e), parent=self.parent())
+
+    def _apply_styles(self) -> None:
+        self.setStyleSheet("""
+            QDialog {
+                background: #131417;
+                border-radius: 14px;
+            }
+            QFrame#HomeRestoreHeader {
+                background: rgba(224, 168, 64, 35);
+                border-bottom: 1px solid rgba(224, 168, 64, 25);
+                border-top-left-radius: 14px;
+                border-top-right-radius: 14px;
+            }
+            QFrame#HomeRestoreBody {
+                background: #131417;
+                border-bottom-left-radius: 14px;
+                border-bottom-right-radius: 14px;
+            }
+            QCheckBox#HomeRestoreCheck {
+                color: #c8d4e0;
+                spacing: 8px;
+            }
+            QCheckBox#HomeRestoreCheck::indicator {
+                width: 16px; height: 16px;
+                border: 1px solid rgba(224,168,64,120);
+                border-radius: 4px;
+                background: rgba(255,255,255,6);
+            }
+            QCheckBox#HomeRestoreCheck::indicator:checked {
+                background: rgba(224,168,64,200);
+                border: 1px solid rgba(224,168,64,220);
+            }
+            QPushButton#HomeRestoreBtnCancel {
+                background: rgba(255,255,255,8);
+                border: 1px solid rgba(255,255,255,20);
+                border-radius: 10px;
+                color: #c8d4e0;
+                font-family: "DejaVu Sans Mono";
+                font-size: 11px;
+            }
+            QPushButton#HomeRestoreBtnCancel:hover {
+                background: rgba(255,255,255,14);
+            }
+            QPushButton#HomeRestoreBtnConfirm {
+                background: rgba(224, 168, 64, 180);
+                border: 1px solid rgba(224, 168, 64, 220);
+                border-radius: 10px;
+                color: #1a1200;
+                font-family: "DejaVu Sans Mono";
+                font-size: 11px;
+                font-weight: 700;
+            }
+            QPushButton#HomeRestoreBtnConfirm:hover {
+                background: rgba(240, 190, 90, 220);
+            }
+            QPushButton#HomeRestoreBtnConfirm:disabled {
+                background: rgba(224, 168, 64, 40);
+                color: rgba(26, 18, 0, 140);
+            }
+        """)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.LeftButton and hasattr(self, "_drag"):
+            self.move(event.globalPosition().toPoint() - self._drag)
+
 
 class _SyncConfirmDialog(QDialog):
     """Dialog de confirmação estilizado para sync de snapshot."""

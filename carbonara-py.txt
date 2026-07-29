@@ -37,10 +37,17 @@
 │   │   │   └── restore.cpython-313.pyc
 │   │   └── restore.py
 │   ├── system
+│   │   ├── cleanup.py
+│   │   ├── cleanup_v2.py
 │   │   ├── disks.py
+│   │   ├── doctor.py
+│   │   ├── helper_client.py
 │   │   ├── __init__.py
 │   │   ├── __pycache__
+│   │   │   ├── cleanup.cpython-313.pyc
 │   │   │   ├── disks.cpython-313.pyc
+│   │   │   ├── doctor.cpython-313.pyc
+│   │   │   ├── helper_client.cpython-313.pyc
 │   │   │   ├── __init__.cpython-313.pyc
 │   │   │   ├── storage.cpython-313.pyc
 │   │   │   └── sysinfo.cpython-313.pyc
@@ -87,9 +94,18 @@
 │   ├── backup-02.png
 │   ├── backup-progress.png
 │   ├── backups.png
+│   ├── carbonara_dashboard_doctor_arch.html
 │   ├── carbonara_wow_v1.html
+│   ├── doctor_arch_page_mockup.html
+│   ├── doctor_arch_v3_two_column.html
+│   ├── doctor_arch_v4_clareza.html
+│   ├── eggs_page_grid_mockup.html
+│   ├── opcao1_minima.html
+│   ├── opcao2_icones.html
+│   ├── opcao3_dashboard.html
 │   ├── penguins_eggs_mockup_options.html
 │   ├── snapshots.png
+│   ├── timeshift_snapshot_compacto.html
 │   └── timeshift_ui_improvements.html
 ├── path
 │   └── to
@@ -689,8 +705,13 @@
     │   │   └── __pycache__
     │   │       ├── disks_page.cpython-313.pyc
     │   │       └── __init__.cpython-313.pyc
+    │   ├── doctor
+    │   │   ├── doctor_arch_page.py
+    │   │   └── __pycache__
+    │   │       └── doctor_arch_page.cpython-313.pyc
     │   ├── eggs
     │   │   ├── eggs_page.py
+    │   │   ├── eggs_progress.py
     │   │   ├── __init__.py
     │   │   └── __pycache__
     │   │       ├── eggs_page.cpython-313.pyc
@@ -723,6 +744,7 @@
         ├── __init__.py
         └── __pycache__
             ├── backup_progress.cpython-313.pyc
+            ├── eggs_progress.cpython-313.pyc
             └── __init__.cpython-313.pyc
 
-150 directories, 576 files
+152 directories, 596 files
