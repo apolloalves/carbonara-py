@@ -968,12 +968,12 @@ def install_eggs(dialog, parent=None) -> None:
 
     def run_next(index: int = 0) -> None:
         if index >= len(steps):
-            action = "Atualização" if eggs_installed else "Instalação"
-            dialog.append_log(f"--- {action.lower()} concluída ---")
             if eggs_installed and nothing_to_update["flag"]:
-                dialog.append_log("Nenhuma atualização disponível.")
+                dialog.append_log("--- verificação concluída ---")
                 _finish(dialog, True, "Nenhuma atualização disponível.", "")
             else:
+                action = "Atualização" if eggs_installed else "Instalação"
+                dialog.append_log(f"--- {action.lower()} concluída ---")
                 _finish(dialog, True, f"{action} concluída com sucesso.", "")
             return
 
