@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime
 from pathlib import Path
 
 import qtawesome as qta
@@ -451,13 +452,15 @@ def _badge_style(color_hex: str, radius: int = 10) -> str:
 
 
 class _VentoyCard(QFrame):
-    """Card do Ventoy no mesmo estilo do card de destino do Timeshift —
-    ícone, título + detalhes, barra de progresso com % livre."""
+    """Card do disco (Ventoy/MDSATA/etc) — ícone, título + detalhes,
+    barra de progresso com % livre, e (fundido aqui, opção B) a última
+    ISO gerada nesse disco, separada por um divisor. Evitava duplicar o
+    mesmo path/disco em dois cards diferentes na tela."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("VentoyCard")
-        self.setFixedHeight(110)
+        self.setFixedHeight(178)
         self.setStyleSheet("""
             QFrame#VentoyCard {
                 background: rgba(255, 255, 255, 5);
@@ -467,9 +470,8 @@ class _VentoyCard(QFrame):
         """)
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(18, 16, 18, 16)
+        outer.setContentsMargins(18, 16, 18, 14)
         outer.setSpacing(10)
-        outer.setAlignment(Qt.AlignVCenter)
 
         top_row = QHBoxLayout()
         top_row.setSpacing(14)
@@ -525,6 +527,54 @@ class _VentoyCard(QFrame):
         outer.addLayout(top_row)
         outer.addLayout(bar_wrap)
 
+        # ── Divisor + última ISO desse disco (fundido do antigo _IsoCard) ──
+        divider = QFrame()
+        divider.setFixedHeight(1)
+        divider.setStyleSheet("background: rgba(255,255,255,8); border: none;")
+        outer.addSpacing(4)
+        outer.addWidget(divider)
+        outer.addSpacing(4)
+
+        iso_row = QHBoxLayout()
+        iso_row.setSpacing(10)
+
+        self.iso_icon_lbl = QLabel()
+        self.iso_icon_lbl.setFixedSize(30, 30)
+        self.iso_icon_lbl.setAlignment(Qt.AlignCenter)
+        self.iso_icon_lbl.setPixmap(qta.icon("mdi6.disc", color="#9bf0bd").pixmap(20, 20))
+
+        iso_text_col = QVBoxLayout()
+        iso_text_col.setSpacing(5)
+
+        self.iso_name_lbl = QLabel("Nenhuma ISO gerada ainda")
+        self.iso_name_lbl.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
+        self.iso_name_lbl.setStyleSheet("color: #ecf4ff; background: transparent; border: none;")
+
+        self.iso_meta_lbl = QLabel("")
+        self.iso_meta_lbl.setFont(QFont("DejaVu Sans Mono", 8))
+        self.iso_meta_lbl.setStyleSheet("color: #5eea95; background: transparent; border: none;")
+
+        iso_text_col.addWidget(self.iso_name_lbl)
+        iso_text_col.addWidget(self.iso_meta_lbl)
+
+        iso_row.addWidget(self.iso_icon_lbl)
+        iso_row.addLayout(iso_text_col, 1)
+
+        outer.addLayout(iso_row)
+
+    def set_iso(self, name: str | None, date_str: str | None, size_gb: float | None) -> None:
+        """Última ISO encontrada NESTE disco (mesmo disco do card, então
+        não precisa repetir o path/disco de novo aqui embaixo)."""
+        if not name:
+            self.iso_name_lbl.setText("Sem ISO neste disco")
+            self.iso_meta_lbl.setText("")
+            return
+        self.iso_name_lbl.setText(name)
+        if date_str and size_gb is not None:
+            self.iso_meta_lbl.setText(f"{date_str}  •  {size_gb:.2f} GB")
+        else:
+            self.iso_meta_lbl.setText("")
+
     def set_stats(
         self,
         free_gb: float | None,
@@ -575,90 +625,6 @@ class _VentoyCard(QFrame):
                 pass
 
 
-class _IsoCard(QFrame):
-    """Card da última ISO gerada, no mesmo estilo visual do _VentoyCard —
-    ícone, título e linha de detalhe (sem barra de progresso, que não
-    se aplica a um arquivo único)."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setObjectName("IsoCard")
-        self.setFixedHeight(110)
-        self.setStyleSheet("""
-            QFrame#IsoCard {
-                background: rgba(255, 255, 255, 5);
-                border: 1px solid rgba(255, 255, 255, 8);
-                border-radius: 14px;
-            }
-        """)
-
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(18, 16, 18, 16)
-        outer.setSpacing(10)
-        outer.setAlignment(Qt.AlignVCenter)
-
-        top_row = QHBoxLayout()
-        top_row.setSpacing(14)
-
-        self.icon_lbl = QLabel()
-        self.icon_lbl.setFixedSize(48, 48)
-        self.icon_lbl.setAlignment(Qt.AlignCenter)
-        self.icon_lbl.setPixmap(qta.icon("mdi6.disc", color="#9bf0bd").pixmap(24, 24))
-        self.icon_lbl.setStyleSheet(_badge_style("#9bf0bd", radius=14))
-
-        text_col = QVBoxLayout()
-        text_col.setSpacing(2)
-
-        title_row = QHBoxLayout()
-        title_row.setSpacing(10)
-        title_row.setContentsMargins(0, 0, 0, 0)
-
-        title_lbl = QLabel("ÚLTIMA ISO")
-        title_lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
-        title_lbl.setStyleSheet("color: #ecf4ff; background: transparent; border: none;")
-        self.title_lbl = title_lbl
-
-        self.meta_lbl = QLabel("")
-        self.meta_lbl.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
-        self.meta_lbl.setStyleSheet("color: #5eea95; background: transparent; border: none;")
-
-        title_row.addWidget(title_lbl)
-        title_row.addStretch(1)
-        title_row.addWidget(self.meta_lbl)
-
-        self.name_lbl = QLabel("Nenhuma ISO gerada ainda")
-        self.name_lbl.setFont(QFont("DejaVu Sans Mono", 9))
-        self.name_lbl.setStyleSheet("color: #7d8a99; background: transparent; border: none;")
-        self.name_lbl.setWordWrap(True)
-
-        text_col.addLayout(title_row)
-        text_col.addWidget(self.name_lbl)
-
-        top_row.addWidget(self.icon_lbl)
-        top_row.addLayout(text_col, 1)
-
-        outer.addLayout(top_row)
-
-    def set_iso(
-        self,
-        name: str | None,
-        date_str: str | None,
-        size_gb: float | None,
-        disk_label: str | None = None,
-    ) -> None:
-        if not name:
-            self.title_lbl.setText("Sem ISO neste disco")
-            self.name_lbl.setText(disk_label or "—")
-            self.meta_lbl.setText("")
-            return
-        self.title_lbl.setText("ÚLTIMA ISO")
-        self.name_lbl.setText(name)
-        if date_str and size_gb is not None:
-            self.meta_lbl.setText(f"{date_str}  •  {size_gb:.2f} GB")
-        else:
-            self.meta_lbl.setText("")
-
-
 class _IsoListCard(QFrame):
     """Card de uma linha na listagem de ISOs existentes (item 3 do pedido
     do Apollo) — mesmo padrão visual do SnapshotCard em snapshots_page.py:
@@ -701,8 +667,7 @@ class _IsoListCard(QFrame):
         icon_lbl = QLabel()
         icon_lbl.setFixedSize(48, 48)
         icon_lbl.setAlignment(Qt.AlignCenter)
-        icon_lbl.setPixmap(qta.icon("mdi6.disc", color="#9bf0bd").pixmap(24, 24))
-        icon_lbl.setStyleSheet(_badge_style("#9bf0bd", radius=14))
+        icon_lbl.setPixmap(qta.icon("mdi6.disc", color="#9bf0bd").pixmap(44, 44))
 
         text_col = QVBoxLayout()
         text_col.setSpacing(4)
@@ -921,6 +886,7 @@ class EggsPage(QWidget):
         # principal + QTimer de polling, sem QThread própria — elimina
         # qualquer diferença arquitetural entre as duas telas.
         self._proc = None
+        self._pending_after_action: tuple | None = None
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(300)
         self._poll_timer.timeout.connect(self._poll_process)
@@ -1059,13 +1025,6 @@ class EggsPage(QWidget):
         title_row.setAlignment(icon, Qt.AlignVCenter)
         title_row.setAlignment(title_text_col, Qt.AlignVCenter)
         title_row.addStretch()
-
-        # ÚLTIMA ISO é só informação (não é uma ação clicável) — sobe pro
-        # topo da página, canto superior direito, junto do título, em vez
-        # de ocupar espaço na grade de cards de ação.
-        self.stat_last_iso = _IsoCard()
-        self.stat_last_iso.setFixedWidth(360 if self._compact_cards else 520)
-        title_row.addWidget(self.stat_last_iso)
 
         h_layout.addLayout(title_row)
 
@@ -1224,6 +1183,25 @@ class EggsPage(QWidget):
         root.addLayout(dest_row)
         root.addSpacing(14)
         root.addWidget(cards)
+
+        # Só aparece enquanto uma operação pkexec está rodando. Existe
+        # porque o "Force Quit" do GNOME não consegue matar um processo
+        # do root (a janela de progresso roda dentro do pkexec) — sem
+        # isso, um xorriso travado deixava os cards desabilitados pra
+        # sempre, obrigando a fechar e reabrir o Carbonara inteiro.
+        self.btn_force_kill = QPushButton("A operação parece travada? Forçar encerramento")
+        self.btn_force_kill.setObjectName("ForceKillLink")
+        self.btn_force_kill.setCursor(Qt.PointingHandCursor)
+        self.btn_force_kill.setStyleSheet(
+            "QPushButton#ForceKillLink { background: transparent; border: none; "
+            "color: #ff9966; font-family: 'DejaVu Sans Mono'; font-size: 10px; "
+            "text-decoration: underline; padding: 4px 0px; }"
+            "QPushButton#ForceKillLink:hover { color: #ffb388; }"
+        )
+        self.btn_force_kill.clicked.connect(self._on_force_kill)
+        self.btn_force_kill.hide()
+        root.addWidget(self.btn_force_kill)
+
         root.addSpacing(18)
 
         # ── Listagem de ISOs existentes (estilo Timeshift, item 3) ───────
@@ -1420,6 +1398,7 @@ class EggsPage(QWidget):
 
     def _on_update_check_done(self, update_version: str | None) -> None:
         self._last_update_version = update_version
+        self._last_update_check_time = datetime.now()
         from core.eggs.eggs import get_dashboard_stats
 
         stats = get_dashboard_stats()
@@ -1440,16 +1419,21 @@ class EggsPage(QWidget):
                 "Instala o penguins-eggs e o módulo Calamares, se necessário.",
                 "Instalar",
             )
+        check_time = getattr(self, "_last_update_check_time", None)
+        checked_suffix = (
+            f' — <span style="color:#60a5fa;">verificado às {check_time.strftime("%d-%m-%Y - %H:%M")}</span>'
+            if check_time else ""
+        )
         current = f"v{version}" if version else "versão instalada"
         if update_version:
             return (
                 "Update Penguin's Eggs",
-                f"Atual: {current} — nova versão v{update_version} disponível no AUR.",
+                f"Atual: {current} — nova versão v{update_version} disponível no AUR.{checked_suffix}",
                 "Atualizar",
             )
         return (
             "Update Penguin's Eggs",
-            f"Atual: {current} — já está na versão mais recente.",
+            f"Atual: {current} — já está na versão mais recente.{checked_suffix}",
             "Verificar",
         )
 
@@ -1485,7 +1469,6 @@ class EggsPage(QWidget):
 
     def refresh_stats(self) -> None:
         from core.eggs.eggs import get_dashboard_stats, get_disk_stats, get_last_iso_for
-        from core.system.disks import list_disks
 
         # eggs_installed/version não dependem do disco escolhido — segue
         # vindo do get_dashboard_stats geral.
@@ -1503,15 +1486,9 @@ class EggsPage(QWidget):
             free_pct=disk_stats["free_pct"], label=dest_label, mountpoint=dest_mount,
         )
 
-        # Descrição completa do disco (mesma formatação do combo) —
-        # usada pelo card "ÚLTIMA ISO" quando o disco selecionado não
-        # tem nenhuma ISO salva.
-        disk_info = next((d for d in list_disks() if d.mountpoint == dest_mount), None)
-        dest_full_label = _format_disk_label(disk_info) if disk_info else dest_mount
-
         last_iso = get_last_iso_for(dest_mount)
-        self.stat_last_iso.set_iso(
-            last_iso["name"], last_iso["date_str"], last_iso["size_gb"], dest_full_label
+        self.stat_ventoy.set_iso(
+            last_iso["name"], last_iso["date_str"], last_iso["size_gb"]
         )
 
         # Reaproveita o resultado da última checagem de update (feita em
@@ -1545,6 +1522,37 @@ class EggsPage(QWidget):
                 self._proc.terminate()
             except Exception:
                 pass
+
+    def _on_force_kill(self) -> None:
+        """Mata via root o processo travado (xorriso/eggs) e destrava a
+        UI na hora — sem isso, um travamento exigia fechar e reabrir o
+        Carbonara inteiro, porque o processo preso roda como root e o
+        usuário normal não consegue matá-lo (nem via Force Quit do GNOME)."""
+        import json
+        import subprocess as _sp
+
+        cmd = [
+            "pkexec",
+            "/usr/local/bin/carbonara-helper",
+            os.environ.get("DISPLAY", ""),
+            os.environ.get("XAUTHORITY", ""),
+            "eggs.force_kill",
+            json.dumps({}),
+        ]
+        try:
+            _sp.run(cmd, capture_output=True, timeout=30)
+        except Exception:
+            pass  # mesmo se falhar aqui, ainda destravamos a UI local abaixo
+
+        # Não espera o pkexec original (self._proc) resolver sozinho —
+        # o processo raiz pode nunca mais notificar. Destrava na marra.
+        self._poll_timer.stop()
+        self._proc = None
+        self._pending_after_action = None
+        self._set_cards_enabled(True)
+        self.btn_force_kill.hide()
+        self.refresh_stats()
+        self.rebuild_iso_list()
 
     def _run_with_progress(self, func_name: str, dialog_title: str, preparing_text: str = "Aguardando...", icon_glyph: str = "mdi6.egg-outline", extra_kwargs: dict | None = None) -> None:
         # Evita disparar uma segunda execução em paralelo se o usuário
@@ -1583,6 +1591,7 @@ class EggsPage(QWidget):
             return
 
         self._set_cards_enabled(False)
+        self.btn_force_kill.show()
         self._poll_timer.start()
 
     def _poll_process(self) -> None:
@@ -1601,16 +1610,27 @@ class EggsPage(QWidget):
         self._proc = None
 
         self._set_cards_enabled(True)
+        self.btn_force_kill.hide()
         self.refresh_stats()
         self.rebuild_iso_list()
         self._check_for_update()
 
         output = stderr or stdout or ""
         if rc == 126 or "dismissed" in output.lower():
+            self._pending_after_action = None
             return
         if rc != 0:
+            self._pending_after_action = None
             err = (output or f"exit code {rc}").strip()
             _show_error("Penguin's Eggs", f"Erro ao executar:\n\n{err}", parent=self)
+            return
+
+        # Sucesso — se tinha uma ação encadeada (ex: create_eggs depois
+        # de um install_eggs de atualização), dispara agora.
+        if self._pending_after_action is not None:
+            func_name, title, prep, icon, extra = self._pending_after_action
+            self._pending_after_action = None
+            self._run_with_progress(func_name, title, prep, icon, extra_kwargs=extra)
 
     def _set_cards_enabled(self, enabled: bool) -> None:
         """Desabilita visualmente os cards de ação enquanto uma operação
@@ -1622,10 +1642,25 @@ class EggsPage(QWidget):
         self.cmb_iso_destination.setEnabled(enabled)
 
     def _on_create(self) -> None:
-        self._run_with_progress(
+        # Se já sabemos (via _check_for_update, rodado no boot da página e
+        # após cada operação) que existe uma versão nova do penguins-eggs,
+        # atualiza primeiro e só depois cria a ISO — encadeado via
+        # _pending_after_action, pra sempre gerar com a versão mais nova
+        # em vez de checar só depois que a ISO já foi criada.
+        create_action = (
             "create_eggs", "Criando Penguin's Eggs...", "Criando ISO...", "mdi6.egg-easter",
-            extra_kwargs={"destination": self.current_iso_destination()},
+            {
+                "destination": self.current_iso_destination(),
+                "update_check_version": self._last_update_version,
+            },
         )
+        if self._last_update_version:
+            self._pending_after_action = create_action
+            self._run_with_progress(
+                "install_eggs", "Atualizando Penguin's Eggs...", "Atualizando antes de criar...", "mdi6.download-circle-outline",
+            )
+        else:
+            self._run_with_progress(create_action[0], create_action[1], create_action[2], create_action[3], extra_kwargs=create_action[4])
 
     def _on_check(self) -> None:
         self._run_with_progress(
@@ -1634,7 +1669,17 @@ class EggsPage(QWidget):
         )
 
     def _on_install(self) -> None:
-        self._run_with_progress("install_eggs", "Instalando Penguin's Eggs...", "Instalando...", "mdi6.download-circle-outline")
+        from core.eggs.eggs import get_dashboard_stats
+        # Reaproveita a mesma lógica que já decide o texto do card —
+        # antes o diálogo sempre abria com "Instalando Penguin's Eggs..."
+        # mesmo quando ia só checar e não tinha nada pra instalar de
+        # verdade.
+        stats = get_dashboard_stats()
+        install_title, _, _ = self._install_card_texts(
+            stats["eggs_installed"], stats["eggs_version"], self._last_update_version
+        )
+        preparing = "Instalando..." if not stats["eggs_installed"] else "Verificando atualizações..."
+        self._run_with_progress("install_eggs", install_title, preparing, "mdi6.download-circle-outline")
 
     def _open_files(self, kind: str) -> None:
         from core.eggs.eggs import open_file_manager

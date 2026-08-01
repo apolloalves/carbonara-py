@@ -4,8 +4,8 @@ import qtawesome as qta
 from PySide6.QtCore import Qt, QTimer, QSize
 from PySide6.QtGui import QFont, QMouseEvent
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout,
-    QLabel, QProgressBar, QPlainTextEdit, QPushButton, QFrame,
+    QApplication, QDialog, QVBoxLayout, QHBoxLayout,
+    QLabel, QProgressBar, QPlainTextEdit, QPushButton, QFrame, QWidget,
 )
 
 
@@ -538,13 +538,32 @@ class EggsProgressDialog(QDialog):
         Apollo, o estado "maximizado" nativo registrado junto ao WM fazia
         essa janela (frameless) empilhar ATRÁS do dock depois de
         maximizar — usar só setGeometry(availableGeometry()) evita entrar
-        nesse estado do WM e resolve o empilhamento."""
+        nesse estado do WM e resolve o empilhamento na maioria dos casos.
+
+        self.screen() pode ficar desatualizado numa janela frameless que
+        acabou de ser arrastada pra outro monitor (Qt só reatribui o
+        screen "oficial" da janela em certos eventos, que uma janela sem
+        decoração às vezes não dispara a tempo) — isso fazia a largura
+        vazar pro monitor vizinho quando maximizada logo após arrastar
+        pro Dell menor. screenAt(centro real da janela) pergunta pro Qt
+        qual monitor está fisicamente sob a janela agora, sem depender
+        desse cache."""
         if not self._is_maximized:
             self._normal_geometry = self.geometry()
-            from PySide6.QtWidgets import QApplication
-            screen = self.screen() or QApplication.primaryScreen()
+            screen = (
+                QApplication.screenAt(self.frameGeometry().center())
+                or self.screen()
+                or QApplication.primaryScreen()
+            )
             if screen:
-                self.setGeometry(screen.availableGeometry())
+                target = screen.availableGeometry()
+                self.setGeometry(target)
+            # Força a janela pra frente — alguns docks/painéis customizados
+            # não são um _NET_WM_STRUT real reconhecido pelo WM, então
+            # availableGeometry() não os exclui e a janela pode nascer
+            # atrás deles; raise_()+activateWindow() briga por cima disso.
+            self.raise_()
+            self.activateWindow()
             self._btn_header_maximize.setIcon(qta.icon("mdi6.window-restore", color="#9aa6b2"))
             self._btn_header_maximize.setToolTip("Restaurar")
             self._is_maximized = True
@@ -627,6 +646,21 @@ class EggsProgressDialog(QDialog):
     def set_status(self, text: str) -> None:
         self.lbl_status.setText(text)
 
+    def set_title(self, text: str) -> None:
+        """Texto central grande (ex: 'Instalando...') — antes só dava pra
+        definir na criação do diálogo (preparing_text) e ficava preso
+        naquilo pro resto da operação, mesmo quando o que realmente
+        estava acontecendo mudava (ex: virava só uma checagem sem nada
+        pra instalar)."""
+        self.lbl_title.setText(text)
+
+    def set_header_title(self, text: str) -> None:
+        """Título mostrado na barra de cabeçalho customizada (frameless,
+        sem titlebar nativa) — mesma limitação do set_title: antes só
+        dava pra definir na criação."""
+        self.setWindowTitle(text)
+        self.lbl_header.setText(text)
+
     def set_current_file(self, text: str) -> None:
         self.lbl_current.set_text(f"Arquivo atual: {text}")
 
@@ -696,30 +730,6 @@ class EggsProgressDialog(QDialog):
             btn.clicked.connect(_make_pick(c["mountpoint"]))
             btn_row.addWidget(btn)
 
-        btn_cancel_alt = QPushButton("Cancelar")
-        btn_cancel_alt.setStyleSheet("""
-            QPushButton {
-                background: rgba(200,60,60,20);
-                border: 1px solid rgba(200,60,60,90);
-                border-radius: 8px;
-                color: #ecf4ff;
-                font-family: "DejaVu Sans Mono";
-                font-size: 9pt;
-                padding: 8px 14px;
-            }
-            QPushButton:hover {
-                background: rgba(200,60,60,50);
-                border: 1px solid rgba(255,100,100,180);
-            }
-        """)
-
-        def _cancel_pick():
-            result["choice"] = None
-            loop.quit()
-
-        btn_cancel_alt.clicked.connect(_cancel_pick)
-        btn_row.addWidget(btn_cancel_alt)
-
         panel_layout.addLayout(btn_row)
 
         # Insere logo acima do log — bem visível, sem atrapalhar o resto
@@ -727,17 +737,32 @@ class EggsProgressDialog(QDialog):
         log_index = self._body_layout.indexOf(self.log_view)
         self._body_layout.insertWidget(log_index, panel)
 
-        # Desabilita o Cancelar do rodapé enquanto o painel está aberto —
-        # nesse momento ele não cancela nada de verdade (ainda não existe
-        # worker rodando, só esse loop local esperando a escolha), então
-        # deixá-lo ativo só criava confusão de ter "dois Cancelar" na tela.
-        footer_cancel_was_enabled = self.btn_cancel.isEnabled()
-        self.btn_cancel.setEnabled(False)
+        # Espaçador dedicado entre o painel e o log — o body_layout tem
+        # spacing=0 (as outras seções usam addSpacing() explícito em vez
+        # de spacing padrão), então sem isso o painel encosta direto no
+        # log. Criado e removido junto com o painel, sem sobrar órfão.
+        spacer = QWidget()
+        spacer.setFixedHeight(14)
+        self._body_layout.insertWidget(log_index + 1, spacer)
+
+        def _cancel_pick():
+            result["choice"] = None
+            loop.quit()
+
+        # Sem botão de cancelar dentro do painel — reaproveita o Cancelar
+        # do rodapé (já existente), conectado só enquanto o painel está
+        # aberto. Nada de confirmação em 2 cliques aqui: cancelar a
+        # escolha do disco não interrompe nada destrutivo em andamento.
+        self.btn_cancel.clicked.disconnect()
+        self.btn_cancel.clicked.connect(_cancel_pick)
+        self.btn_cancel.setEnabled(True)
 
         loop.exec()
 
-        self.btn_cancel.setEnabled(footer_cancel_was_enabled)
+        self.btn_cancel.clicked.disconnect()
+        self.btn_cancel.clicked.connect(self._on_cancel_clicked)
         panel.deleteLater()
+        spacer.deleteLater()
         return result["choice"]
 
     def _tick_elapsed(self) -> None:
@@ -773,7 +798,10 @@ class EggsProgressDialog(QDialog):
                 self.append_log(f"ERRO: {status}")
                 self.append_log(f"Tempo decorrido: {elapsed}")
         else:
-            self.lbl_status.setStyleSheet("color: #9bf0bd; font-weight: bold;")
+            if "nenhuma atualização disponível" in status.lower():
+                self.lbl_status.setStyleSheet("color: #ffb86b; font-weight: bold;")
+            else:
+                self.lbl_status.setStyleSheet("color: #9bf0bd; font-weight: bold;")
             self.append_log(f"✓ {status}")
             self.append_log(f"Tempo decorrido: {elapsed}")
 

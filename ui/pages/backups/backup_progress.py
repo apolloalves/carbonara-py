@@ -57,7 +57,7 @@ class BackupProgressDialog(QDialog):
 
         # Transparência do log — aplicada APÓS o stylesheet para não ser sobrescrita
         from PySide6.QtGui import QPalette, QColor
-        palette = self.log_view.palette()
+        palette = self.log_view.palette()\
         palette.setColor(QPalette.Base, QColor(0, 0, 0, 50))
         self.log_view.setPalette(palette)
 

@@ -4,7 +4,7 @@ import qtawesome as qta
 from PySide6.QtCore import Qt, QTimer, QSize
 from PySide6.QtGui import QFont, QMouseEvent
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout,
+    QApplication, QDialog, QVBoxLayout, QHBoxLayout,
     QLabel, QProgressBar, QPlainTextEdit, QPushButton, QFrame, QWidget,
 )
 
@@ -538,13 +538,32 @@ class EggsProgressDialog(QDialog):
         Apollo, o estado "maximizado" nativo registrado junto ao WM fazia
         essa janela (frameless) empilhar ATRÁS do dock depois de
         maximizar — usar só setGeometry(availableGeometry()) evita entrar
-        nesse estado do WM e resolve o empilhamento."""
+        nesse estado do WM e resolve o empilhamento na maioria dos casos.
+
+        self.screen() pode ficar desatualizado numa janela frameless que
+        acabou de ser arrastada pra outro monitor (Qt só reatribui o
+        screen "oficial" da janela em certos eventos, que uma janela sem
+        decoração às vezes não dispara a tempo) — isso fazia a largura
+        vazar pro monitor vizinho quando maximizada logo após arrastar
+        pro Dell menor. screenAt(centro real da janela) pergunta pro Qt
+        qual monitor está fisicamente sob a janela agora, sem depender
+        desse cache."""
         if not self._is_maximized:
             self._normal_geometry = self.geometry()
-            from PySide6.QtWidgets import QApplication
-            screen = self.screen() or QApplication.primaryScreen()
+            screen = (
+                QApplication.screenAt(self.frameGeometry().center())
+                or self.screen()
+                or QApplication.primaryScreen()
+            )
             if screen:
-                self.setGeometry(screen.availableGeometry())
+                target = screen.availableGeometry()
+                self.setGeometry(target)
+            # Força a janela pra frente — alguns docks/painéis customizados
+            # não são um _NET_WM_STRUT real reconhecido pelo WM, então
+            # availableGeometry() não os exclui e a janela pode nascer
+            # atrás deles; raise_()+activateWindow() briga por cima disso.
+            self.raise_()
+            self.activateWindow()
             self._btn_header_maximize.setIcon(qta.icon("mdi6.window-restore", color="#9aa6b2"))
             self._btn_header_maximize.setToolTip("Restaurar")
             self._is_maximized = True
@@ -626,6 +645,21 @@ class EggsProgressDialog(QDialog):
 
     def set_status(self, text: str) -> None:
         self.lbl_status.setText(text)
+
+    def set_title(self, text: str) -> None:
+        """Texto central grande (ex: 'Instalando...') — antes só dava pra
+        definir na criação do diálogo (preparing_text) e ficava preso
+        naquilo pro resto da operação, mesmo quando o que realmente
+        estava acontecendo mudava (ex: virava só uma checagem sem nada
+        pra instalar)."""
+        self.lbl_title.setText(text)
+
+    def set_header_title(self, text: str) -> None:
+        """Título mostrado na barra de cabeçalho customizada (frameless,
+        sem titlebar nativa) — mesma limitação do set_title: antes só
+        dava pra definir na criação."""
+        self.setWindowTitle(text)
+        self.lbl_header.setText(text)
 
     def set_current_file(self, text: str) -> None:
         self.lbl_current.set_text(f"Arquivo atual: {text}")

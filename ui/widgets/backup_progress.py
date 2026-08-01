@@ -4,29 +4,32 @@ import qtawesome as qta
 from PySide6.QtCore import Qt, QTimer, QSize
 from PySide6.QtGui import QFont, QMouseEvent
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout,
-    QLabel, QProgressBar, QPlainTextEdit, QPushButton, QFrame,
+    QApplication, QDialog, QVBoxLayout, QHBoxLayout,
+    QLabel, QProgressBar, QPlainTextEdit, QPushButton, QFrame, QWidget,
 )
 
 
-class BackupProgressDialog(QDialog):
-    def __init__(self, title: str = "Carbonara Backup", preparing_text: str | None = None, icon_glyph: str = "mdi6.harddisk", parent=None):
+class EggsProgressDialog(QDialog):
+    def __init__(self, title: str = "Penguin's Eggs", preparing_text: str = "Iniciando...", icon_glyph: str = "mdi6.egg-outline", parent=None):
         super().__init__(parent)
         self.setWindowTitle(title)
-        # Por padrão, o texto acima da barra de progresso reflete a própria
-        # ação em curso (ex: "Criando Snapshot...", "Sincronizando
-        # Snapshot..."), em vez de um "Preparando snapshot..." genérico que
-        # fica factualmente errado assim que a cópia real começa.
-        self._preparing_text = preparing_text if preparing_text is not None else f"{title}..."
+        self._preparing_text = preparing_text
         self._icon_glyph = icon_glyph
         self.setModal(True)
-        self.setMinimumSize(900, 640)
-        self.resize(960, 700)
+        self.setMinimumSize(1000, 700)
+        self.resize(1060, 760)
 
         # Remove titlebar nativa — usamos header customizado
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
 
         self._workers: list = []
+        # Flag independente de _workers: cobre o período em que a operação
+        # está tecnicamente "em andamento" mas ainda não existe nenhum
+        # QThread rodando — ex: durante o painel de escolha de disco
+        # alternativo (prompt_alternative_destination), que bloqueia com
+        # um QEventLoop local antes de qualquer worker ser criado. Sem
+        # essa flag, ESC escapava exatamente nessa janela de tempo.
+        self._is_running = False
         self._cancel_countdown = 0
         self._cancel_timer = QTimer(self)
         self._cancel_timer.setInterval(1000)
@@ -39,10 +42,7 @@ class BackupProgressDialog(QDialog):
         self._elapsed_timer.setInterval(1000)
         self._elapsed_timer.timeout.connect(self._tick_elapsed)
 
-        # Buffer de log — evita travar a UI quando o rsync despeja muitas
-        # linhas rapidamente (ex: milhares de arquivos pequenos de runtime
-        # Flatpak). Sem isso, cada linha faz cursor+scrollbar update
-        # síncrono, e uma rajada alta trava o event loop do Qt.
+        # Buffer de log — descarrega no widget a cada 300ms para não afogar o event loop
         self._log_buffer: list[str] = []
         self._log_flush_timer = QTimer(self)
         self._log_flush_timer.setInterval(300)
@@ -54,12 +54,7 @@ class BackupProgressDialog(QDialog):
 
         self._build_ui()
         self._apply_styles()
-
-        # Transparência do log — aplicada APÓS o stylesheet para não ser sobrescrita
-        from PySide6.QtGui import QPalette, QColor
-        palette = self.log_view.palette()
-        palette.setColor(QPalette.Base, QColor(0, 0, 0, 50))
-        self.log_view.setPalette(palette)
+        self.log_view.viewport().setStyleSheet("background: rgba(0, 0, 0, 60);")
 
     def showEvent(self, event):
         """Centraliza na tela primária ao exibir — evita aparecer no monitor errado."""
@@ -127,8 +122,10 @@ class BackupProgressDialog(QDialog):
         header_layout.addWidget(self.elapsed_badge)
         header_layout.addSpacing(12)
 
-        # Botão maximizar/restaurar — janela é frameless, então não tem
-        # controle nativo do WM; alterna entre tamanho normal e maximizado.
+        # Botão maximizar/restaurar — usa o mecanismo nativo do Qt
+        # (showMaximized/showNormal) para o gerenciador de janelas (GNOME
+        # Shell) reconhecer o estado corretamente (ex: esconder dock
+        # com auto-hide quando a janela está maximizada de verdade).
         self._is_maximized = False
         self._normal_geometry = None
         self._btn_header_maximize = QPushButton()
@@ -156,6 +153,7 @@ class BackupProgressDialog(QDialog):
         body_layout = QVBoxLayout(body)
         body_layout.setContentsMargins(24, 26, 24, 20)
         body_layout.setSpacing(0)
+        self._body_layout = body_layout
 
         # Status principal
         self.lbl_title = QLabel(self._preparing_text)
@@ -203,7 +201,7 @@ class BackupProgressDialog(QDialog):
         btn_row.setSpacing(10)
 
         self.btn_cancel = QPushButton("Cancelar")
-        self.btn_cancel.setMinimumWidth(160)
+        self.btn_cancel.setMinimumWidth(130)
         self.btn_cancel.setFixedHeight(40)
         self.btn_cancel.setObjectName("BtnCancel")
         self.btn_cancel.clicked.connect(self._on_cancel_clicked)
@@ -223,7 +221,7 @@ class BackupProgressDialog(QDialog):
 
     def _apply_styles(self) -> None:
         self.setStyleSheet("""
-            BackupProgressDialog {
+            EggsProgressDialog {
                 background: #131417;
                 border-radius: 14px;
             }
@@ -259,7 +257,7 @@ class BackupProgressDialog(QDialog):
             QPushButton#HeaderClose {
                 background: transparent;
                 border: none;
-                color: #9aa6b2;
+                color: #dce6f0;
                 font-size: 15px;
                 border-radius: 6px;
             }
@@ -289,7 +287,7 @@ class BackupProgressDialog(QDialog):
             }
 
             QLabel#ProgressCurrentFile {
-                color: #9aa6b2;
+                color: #dce6f0;
                 font-family: "DejaVu Sans Mono";
                 font-size: 10px;
                 font-style: italic;
@@ -325,14 +323,18 @@ class BackupProgressDialog(QDialog):
             }
 
             QPlainTextEdit#BackupLog {
+                background: transparent;
                 border: 1px solid rgba(255,255,255,16);
                 border-radius: 10px;
-                color: #9aa6b2;
+                color: #dce6f0;
                 font-family: "DejaVu Sans Mono";
                 font-size: 12px;
                 line-height: 180%;
                 padding: 10px;
                 selection-background-color: rgba(35, 166, 255, 80);
+            }
+            QPlainTextEdit#BackupLog > QWidget {
+                background: transparent;
             }
             QPlainTextEdit#BackupLog QScrollBar:vertical {
                 background: transparent;
@@ -376,7 +378,7 @@ class BackupProgressDialog(QDialog):
                 color: #c8d4e0;
                 font-family: "DejaVu Sans Mono";
                 font-size: 11px;
-                padding: 8px 36px;
+                padding: 8px 24px;
             }
             QPushButton#BtnCancel:hover {
                 background: rgba(200, 60, 60, 40);
@@ -412,9 +414,6 @@ class BackupProgressDialog(QDialog):
 
     def _on_cancel_clicked(self) -> None:
         """Inicia contagem regressiva de 5s. Segunda clicada cancela imediatamente."""
-        if getattr(self, "_is_cancelling", False):
-            return  # já está cancelando — ignora cliques extras sem mudar a aparência
-
         if self._cancel_countdown > 0:
             # segundo clique — cancela agora
             self._cancel_timer.stop()
@@ -438,143 +437,64 @@ class BackupProgressDialog(QDialog):
             self.btn_cancel.setText(f"Cancelar ({self._cancel_countdown}s) — clique p/ confirmar")
 
     def _do_cancel(self) -> None:
-        """Mata os processos rsync via PID e remove snapshots incompletos em background."""
-        # Guarda por flag, não setEnabled(False) — assim o botão mantém a
-        # cor/aparência normal (ativa) durante o cancelamento, em vez de
-        # ficar com o visual "desabilitado" (apagado) enquanto ainda está
-        # de fato trabalhando. Só fica realmente desabilitado (escondido)
-        # quando _on_cleanup_done() confirma que tudo terminou.
-        self._is_cancelling = True
-        self.btn_cancel.setEnabled(True)
+        """Mata o processo eggs produce via PID e limpa /home/eggs com segurança."""
+        self.btn_cancel.setEnabled(False)
         self.btn_cancel.setText("Cancelando...")
-        self.set_status("Interrompendo backup...")
+        self.set_status("Cancelando operação...")
         self.set_current_file("—")
+        self._had_failure = True
 
-        # Aplica a cor "viva" (mesma do :hover) direto, sem depender do
-        # mouse estar em cima — deixa claro visualmente que a ação está
-        # em andamento, o tempo todo, até _on_cleanup_done() confirmar.
-        self.btn_cancel.setStyleSheet("""
-            QPushButton {
-                background: rgba(200, 60, 60, 40);
-                border: 1px solid rgba(255, 100, 100, 180);
-                border-radius: 10px;
-                color: #ffaaaa;
-                font-family: "DejaVu Sans Mono";
-                font-size: 11px;
-                padding: 8px 36px;
-            }
-        """)
-
-        # Força desabilitado aqui — o on_fail() do backup.py roda quando o
-        # rsync morre (matado por nós) e reabilita o Fechar sozinho, antes
-        # da nossa limpeza abaixo sequer começar. Precisa ficar desabilitado
-        # até _on_cleanup_done() confirmar que a limpeza terminou de vez.
-        self.btn_close.setEnabled(False)
-
-        # Animação de pontos enquanto limpa
-        self._cancel_dots = 0
-        self._cancel_anim = QTimer(self)
-        self._cancel_anim.setInterval(400)
-        self._cancel_anim.timeout.connect(self._cancel_anim_tick)
-        self._cancel_anim.start()
-
-        # Mata os processos rsync via SIGKILL. Espera (com timeout curto)
-        # a QThread de cada worker perceber a morte do processo e emitir
-        # failed/finished_ok — sem isso, a limpeza abaixo corre o risco de
-        # rodar ANTES do snapshot.json ser marcado como "failed" pelo
-        # backup.py, deixando um snapshot incompleto sem status reconhecido
-        # (o que aparecia como "unknown" na lista, sem nunca ser removido).
+        # Cancela todos os ShellWorkers ativos
         for worker in list(self._workers):
-            worker.kill()
-        for worker in list(self._workers):
-            worker.wait(3000)  # até 3s — não trava a UI pra sempre se emperrar
+            try:
+                worker.cancel()
+            except Exception:
+                pass
         self._workers.clear()
 
-        # Limpeza de disco em thread separada — rmtree pode demorar
+        # Limpeza em thread separada (umount + rmtree pode demorar)
         from PySide6.QtCore import QThread, Signal as QSignal
+        from core.eggs.eggs import _safe_remove_eggs_dir
 
-        class _CleanupThread(QThread):
-            log_msg = QSignal(str)
-
-            def __init__(self, dialog):
-                super().__init__(dialog)
-                self._dialog = dialog
-                self._removed: list[str] = []
+        class _EggsCleanup(QThread):
+            done_sig = QSignal()
 
             def run(self):
-                self._removed = self._dialog._cleanup_incomplete_snapshots()
-                for path in self._removed:
-                    self.log_msg.emit(f"Removido snapshot incompleto: {path}")
+                _safe_remove_eggs_dir()
+                self.done_sig.emit()
 
-        self._cleanup_thread = _CleanupThread(self)
-        self._cleanup_thread.log_msg.connect(self.append_log)
-        self._cleanup_thread.finished.connect(self._on_cleanup_done)
+        self._cleanup_thread = _EggsCleanup(self)
+        self._cleanup_thread.done_sig.connect(self._on_eggs_cleanup_done)
         self._cleanup_thread.start()
 
-        # Timeout de segurança: se a limpeza travar por qualquer motivo
-        # (ex: rmtree preso num disco lento/com problema), o botão não
-        # fica em "Cancelando..." pra sempre — força o fechamento depois
-        # de um tempo razoável.
-        self._cancel_safety_timer = QTimer(self)
-        self._cancel_safety_timer.setSingleShot(True)
-        self._cancel_safety_timer.setInterval(15000)  # 15s
-        self._cancel_safety_timer.timeout.connect(self._on_cancel_timeout)
-        self._cancel_safety_timer.start()
-
-    def _on_cancel_timeout(self) -> None:
-        """Chamado se a limpeza não terminar em 15s — evita ficar travado
-        em 'Cancelando...' pra sempre."""
-        if not hasattr(self, "_cleanup_thread") or not self._cleanup_thread.isRunning():
-            return
-        self.append_log("— Limpeza demorou mais que o esperado, encerrando mesmo assim. —")
-        self._on_cleanup_done()
+    def _on_eggs_cleanup_done(self) -> None:
+        self.lbl_status.setText("Operação cancelada pelo usuário.")
+        self.lbl_status.setStyleSheet("color: #ffb86b; font-weight: bold;")
+        self.append_log("")
+        self.append_log("--- Operação cancelada. Diretório /home/eggs removido. ---")
+        self._timer_active = False
+        self._elapsed_timer.stop()
+        self.btn_cancel.setEnabled(False)
+        self.btn_close.setEnabled(True)
+        # Forçar flush do buffer antes de finalizar
+        self._flush_log_buffer()
 
     def _cancel_anim_tick(self) -> None:
         self._cancel_dots = (self._cancel_dots + 1) % 4
         dots = "." * self._cancel_dots
         self.btn_cancel.setText(f"Cancelando{dots}")
-        # Reforça os dois a cada tick — o on_fail() do backup.py roda de
-        # forma assíncrona (sinal entre threads) e chama set_running(False),
-        # que desabilita o btn_cancel (deixando-o cinza/apagado) e habilita
-        # o btn_close sozinho, antes da nossa limpeza terminar de verdade.
-        self.btn_cancel.setEnabled(True)
-        self.btn_close.setEnabled(False)
 
     def _on_cleanup_done(self) -> None:
-        if getattr(self, "_cancel_finalized", False):
-            return  # já finalizado (normal ou via timeout) — evita chamada dupla
-        self._cancel_finalized = True
-        self._is_cancelling = False
-
         self._cancel_anim.stop()
-        if hasattr(self, "_cancel_safety_timer"):
-            self._cancel_safety_timer.stop()
-
         self.append_log("— Backup cancelado. Snapshot incompleto removido. —")
-        self.set_status("Cancelado pelo usuário.")
-        self.lbl_status.setStyleSheet("color: #ffb86b; font-weight: bold;")
-        self.set_current_file("—")
-
-        # Fica com o log visível na tela em vez de fechar sozinho — o
-        # usuário fecha manualmente quando quiser, no próprio ritmo.
-        self.btn_cancel.setVisible(False)
-        self.btn_close.setEnabled(True)
-        self._timer_active = False
-        self._elapsed_timer.stop()
+        # Fecha com código 2 → snapshots_page identifica cancelamento intencional
+        self.done(2)
 
     def _cleanup_incomplete_snapshots(self) -> list[str]:
-        """Remove snapshots com status 'running'/'failed', ou com
-        snapshot.json corrompido/incompleto (comum quando o processo é
-        morto no meio da escrita do metadata) — nesse último caso, só
-        remove se o arquivo for recente (poucos minutos), pra nunca
-        arriscar apagar algum snapshot antigo não relacionado por causa
-        de um problema de leitura transitório."""
+        """Remove snapshots com status 'running' ou 'failed'. Retorna paths removidos."""
         import json
         import shutil
-        import time
         from pathlib import Path
-
-        RECENT_SECONDS = 600  # 10 minutos
 
         removed = []
         for base in (Path("/mnt"), Path("/media")):
@@ -588,17 +508,6 @@ class BackupProgressDialog(QDialog):
                         shutil.rmtree(target, ignore_errors=True)
                         removed.append(str(target))
                 except Exception:
-                    # JSON corrompido/incompleto — só remove se for recente,
-                    # pra não arriscar apagar algo antigo sem relação com
-                    # este cancelamento.
-                    try:
-                        age = time.time() - snap_json.stat().st_mtime
-                        if age <= RECENT_SECONDS:
-                            target = snap_json.parent
-                            shutil.rmtree(target, ignore_errors=True)
-                            removed.append(str(target))
-                    except Exception:
-                        pass
                     continue
         return removed
 
@@ -624,22 +533,37 @@ class BackupProgressDialog(QDialog):
         self.accept()
 
     def _toggle_maximize(self) -> None:
-        """Usa o maximize nativo do Qt (showMaximized/showNormal) — isso
-        registra o estado de "maximizado" junto ao gerenciador de janelas,
-        que é o que faz docks com auto-hide (ex: no GNOME) reconhecerem a
-        janela e se esconderem corretamente. Mas alguns WMs (ex: mutter
-        customizado sem decoração) simplesmente ignoram o estado
-        "maximizado" para janelas frameless e não redimensionam nada —
-        por isso também força o setGeometry manual como garantia de que
-        o redimensionamento acontece de verdade, independente do WM
-        aplicar o estado ou não."""
+        """Redimensionamento manual pra tela toda (via setGeometry), sem
+        usar o showMaximized() nativo do Qt. No dock customizado do
+        Apollo, o estado "maximizado" nativo registrado junto ao WM fazia
+        essa janela (frameless) empilhar ATRÁS do dock depois de
+        maximizar — usar só setGeometry(availableGeometry()) evita entrar
+        nesse estado do WM e resolve o empilhamento na maioria dos casos.
+
+        self.screen() pode ficar desatualizado numa janela frameless que
+        acabou de ser arrastada pra outro monitor (Qt só reatribui o
+        screen "oficial" da janela em certos eventos, que uma janela sem
+        decoração às vezes não dispara a tempo) — isso fazia a largura
+        vazar pro monitor vizinho quando maximizada logo após arrastar
+        pro Dell menor. screenAt(centro real da janela) pergunta pro Qt
+        qual monitor está fisicamente sob a janela agora, sem depender
+        desse cache."""
         if not self._is_maximized:
             self._normal_geometry = self.geometry()
-            self.showMaximized()
-            from PySide6.QtWidgets import QApplication
-            screen = self.screen() or QApplication.primaryScreen()
+            screen = (
+                QApplication.screenAt(self.frameGeometry().center())
+                or self.screen()
+                or QApplication.primaryScreen()
+            )
             if screen:
-                self.setGeometry(screen.availableGeometry())
+                target = screen.availableGeometry()
+                self.setGeometry(target)
+            # Força a janela pra frente — alguns docks/painéis customizados
+            # não são um _NET_WM_STRUT real reconhecido pelo WM, então
+            # availableGeometry() não os exclui e a janela pode nascer
+            # atrás deles; raise_()+activateWindow() briga por cima disso.
+            self.raise_()
+            self.activateWindow()
             self._btn_header_maximize.setIcon(qta.icon("mdi6.window-restore", color="#9aa6b2"))
             self._btn_header_maximize.setToolTip("Restaurar")
             self._is_maximized = True
@@ -690,27 +614,30 @@ class BackupProgressDialog(QDialog):
         cursor.movePosition(QTextCursor.End)
 
         for text in lines:
-            # Paleta por tipo de linha
             if any(text.startswith(p) for p in ("ERRO:", "ERRO ", "✗")):
                 color = "#ff8888"
             elif any(text.startswith(p) for p in ("✓", "--- ", "=== ")):
                 color = "#9bf0bd"
+            elif text.startswith("INFO:"):
+                color = "#8fd4ff"
+            elif text.startswith("INICIANDO:"):
+                color = "#ffda6b"
             elif any(text.startswith(p) for p in ("AVISO:", "AVISO ", "  ✗")):
                 color = "#ffb86b"
             elif text.startswith("$"):
                 color = "#8fd4ff"
             elif text.startswith("Copiando:"):
-                color = "#c8d4e0"       # branco suave — legível mas não dominante
+                color = "#c8d4e0"
             elif text.startswith("Tempo decorrido:"):
                 color = "#6b7a8d"
             elif not text.strip():
                 color = "#000000"
             else:
-                color = "#9aa6b2"
+                color = "#dce6f0"
 
-            char_fmt = QTextCharFormat()
-            char_fmt.setForeground(QColor(color))
-            cursor.insertText(("\n" if cursor.position() > 0 else "") + text, char_fmt)
+            fmt = QTextCharFormat()
+            fmt.setForeground(QColor(color))
+            cursor.insertText(("\n" if cursor.position() > 0 else "") + text, fmt)
 
         self.log_view.setTextCursor(cursor)
         sb = self.log_view.verticalScrollBar()
@@ -722,6 +649,107 @@ class BackupProgressDialog(QDialog):
     def set_current_file(self, text: str) -> None:
         self.lbl_current.set_text(f"Arquivo atual: {text}")
 
+    def prompt_alternative_destination(self, candidates: list[dict], estimated_gb: float) -> str | None:
+        """Mostra, na mesma janela (sem popup separado), uma lista de
+        discos alternativos com espaço suficiente e espera o usuário
+        escolher um ou cancelar. Bloqueia com um QEventLoop local — não
+        precisa de dialog.exec() aninhado, já que a QApplication já existe
+        nesse ponto (roda dentro do processo privilegiado do helper).
+        Retorna o mountpoint escolhido, ou None se cancelado."""
+        from PySide6.QtCore import QEventLoop
+
+        if not self.isVisible():
+            self.show()
+
+        panel = QFrame()
+        panel.setObjectName("AltDestPanel")
+        panel.setStyleSheet("""
+            QFrame#AltDestPanel {
+                border: 1px solid rgba(255, 184, 107, 90);
+                border-radius: 10px;
+                background: rgba(255, 184, 107, 14);
+            }
+        """)
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(16, 14, 16, 14)
+        panel_layout.setSpacing(10)
+
+        title = QLabel(
+            f"Espaço insuficiente no destino escolhido "
+            f"(necessário ~{estimated_gb:.1f} GB). Escolha outro disco:"
+        )
+        title.setWordWrap(True)
+        title.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
+        title.setStyleSheet("color: #ffb86b; background: transparent; border: none;")
+        panel_layout.addWidget(title)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+
+        result = {"choice": None}
+        loop = QEventLoop()
+
+        def _make_pick(mountpoint: str):
+            def _pick():
+                result["choice"] = mountpoint
+                loop.quit()
+            return _pick
+
+        for c in candidates:
+            btn = QPushButton(f"{c['mountpoint']}\n{c['label']} • {c['free_gb']:.1f} GB livres")
+            btn.setStyleSheet("""
+                QPushButton {
+                    background: rgba(255,255,255,8);
+                    border: 1px solid rgba(255, 184, 107, 110);
+                    border-radius: 8px;
+                    color: #ecf4ff;
+                    font-family: "DejaVu Sans Mono";
+                    font-size: 9pt;
+                    padding: 8px 14px;
+                }
+                QPushButton:hover {
+                    background: rgba(255, 184, 107, 35);
+                    border: 1px solid rgba(255, 184, 107, 200);
+                }
+            """)
+            btn.clicked.connect(_make_pick(c["mountpoint"]))
+            btn_row.addWidget(btn)
+
+        panel_layout.addLayout(btn_row)
+
+        # Insere logo acima do log — bem visível, sem atrapalhar o resto
+        # do layout (barra de progresso, título, etc. continuam no lugar).
+        log_index = self._body_layout.indexOf(self.log_view)
+        self._body_layout.insertWidget(log_index, panel)
+
+        # Espaçador dedicado entre o painel e o log — o body_layout tem
+        # spacing=0 (as outras seções usam addSpacing() explícito em vez
+        # de spacing padrão), então sem isso o painel encosta direto no
+        # log. Criado e removido junto com o painel, sem sobrar órfão.
+        spacer = QWidget()
+        spacer.setFixedHeight(14)
+        self._body_layout.insertWidget(log_index + 1, spacer)
+
+        def _cancel_pick():
+            result["choice"] = None
+            loop.quit()
+
+        # Sem botão de cancelar dentro do painel — reaproveita o Cancelar
+        # do rodapé (já existente), conectado só enquanto o painel está
+        # aberto. Nada de confirmação em 2 cliques aqui: cancelar a
+        # escolha do disco não interrompe nada destrutivo em andamento.
+        self.btn_cancel.clicked.disconnect()
+        self.btn_cancel.clicked.connect(_cancel_pick)
+        self.btn_cancel.setEnabled(True)
+
+        loop.exec()
+
+        self.btn_cancel.clicked.disconnect()
+        self.btn_cancel.clicked.connect(self._on_cancel_clicked)
+        panel.deleteLater()
+        spacer.deleteLater()
+        return result["choice"]
+
     def _tick_elapsed(self) -> None:
         self._elapsed_seconds += 1
         h, rem = divmod(self._elapsed_seconds, 3600)
@@ -730,6 +758,7 @@ class BackupProgressDialog(QDialog):
         self.lbl_elapsed.setText(text)
 
     def set_running(self, running: bool) -> None:
+        self._is_running = running
         self.btn_cancel.setEnabled(running)
         self.btn_close.setEnabled(not running)
 
@@ -744,17 +773,20 @@ class BackupProgressDialog(QDialog):
             self._show_result_inline()
 
     def _show_result_inline(self) -> None:
-        """Exibe o resultado (sucesso ou falha) diretamente no dialog, sem abrir nova janela."""
         elapsed = self.lbl_elapsed.text()
-        status = self.lbl_status.text() or ("Operação concluída com sucesso." if not self._had_failure else "Operação concluída com erros.")
+        status = self.lbl_status.text()
 
-        self.append_log("")
         if self._had_failure:
-            self.lbl_status.setStyleSheet("color: #ff8888; font-weight: bold;")
-            self.append_log(f"ERRO: {status}")
-            self.append_log(f"Tempo decorrido: {elapsed}")
+            # Só exibe ERRO se não foi cancelamento intencional (status já foi setado no cancel)
+            if "cancelada" not in status.lower():
+                self.lbl_status.setStyleSheet("color: #ff8888; font-weight: bold;")
+                self.append_log(f"ERRO: {status}")
+                self.append_log(f"Tempo decorrido: {elapsed}")
         else:
-            self.lbl_status.setStyleSheet("color: #9bf0bd; font-weight: bold;")
+            if "nenhuma atualização disponível" in status.lower():
+                self.lbl_status.setStyleSheet("color: #ffb86b; font-weight: bold;")
+            else:
+                self.lbl_status.setStyleSheet("color: #9bf0bd; font-weight: bold;")
             self.append_log(f"✓ {status}")
             self.append_log(f"Tempo decorrido: {elapsed}")
 
@@ -763,7 +795,7 @@ class BackupProgressDialog(QDialog):
         self._flush_log_buffer()
 
     def closeEvent(self, event) -> None:
-        if any(w.isRunning() for w in self._workers):
+        if self._is_running or any(w.isRunning() for w in self._workers):
             event.ignore()
             self.set_status("Backup em execução. Use Cancelar para interromper.")
             return
@@ -773,9 +805,12 @@ class BackupProgressDialog(QDialog):
         # QDialog trata ESC chamando reject() diretamente (via done()/hide()),
         # sem passar pelo closeEvent — por isso o "X" da janela já ficava
         # bloqueado com processo rodando, mas o ESC escapava e fechava o
-        # diálogo sem avisar nada, deixando o worker órfão. Replica aqui a
-        # mesma trava do closeEvent.
-        if any(w.isRunning() for w in self._workers):
+        # diálogo sem avisar nada, deixando o worker órfão (foi assim que a
+        # ISO em andamento se perdeu). Replica aqui a mesma trava do closeEvent.
+        # Checa _is_running também, não só _workers: durante o painel de
+        # escolha de disco alternativo ainda não existe worker nenhum, só
+        # o QEventLoop local — sem isso o ESC escapava bem nessa janela.
+        if self._is_running or any(w.isRunning() for w in self._workers):
             self.set_status("Backup em execução. Use Cancelar para interromper.")
             return
         super().reject()
@@ -886,286 +921,6 @@ class _SuccessDialog(QDialog):
                 background: rgba(94, 234, 149, 220);
             }
         """)
-
-
-class HomeRestoreDoneDialog(QDialog):
-    """Variante do _SuccessDialog específica pro restore de HOME sem
-    reboot: em vez de só 'OK', oferece logout imediato (a sessão gráfica
-    tem que ser reaberta pra tudo ficar consistente) ou adiar."""
-
-    def __init__(self, message: str, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("HOME restaurada")
-        self.setModal(True)
-        self.setFixedSize(460, 230)
-        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
-        self._build_ui(message)
-        self._apply_styles()
-
-    def _build_ui(self, message: str) -> None:
-        root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
-
-        header = QFrame()
-        header.setObjectName("SuccessHeader")
-        header.setFixedHeight(56)
-        h_layout = QHBoxLayout(header)
-        h_layout.setContentsMargins(20, 0, 18, 0)
-
-        icon = QLabel()
-        icon.setFixedSize(36, 36)
-        icon.setAlignment(Qt.AlignCenter)
-        icon.setPixmap(qta.icon("mdi6.check-circle", color="#9bf0bd").pixmap(22, 22))
-        icon.setStyleSheet(
-            "QLabel { background: rgba(74,222,128,40); border-radius: 9px; }"
-        )
-
-        lbl_title = QLabel("HOME restaurada com sucesso")
-        lbl_title.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
-        lbl_title.setStyleSheet("color: #ffffff; background: transparent;")
-
-        h_layout.addWidget(icon)
-        h_layout.addSpacing(10)
-        h_layout.addWidget(lbl_title)
-        h_layout.addStretch()
-
-        body = QFrame()
-        body.setObjectName("SuccessBody")
-        b_layout = QVBoxLayout(body)
-        b_layout.setContentsMargins(28, 22, 28, 22)
-        b_layout.setSpacing(10)
-
-        lbl_msg = QLabel(message)
-        lbl_msg.setWordWrap(True)
-        lbl_msg.setFont(QFont("DejaVu Sans Mono", 10))
-        lbl_msg.setStyleSheet("color: #c8d4e0;")
-        b_layout.addWidget(lbl_msg)
-
-        lbl_hint = QLabel(
-            "Recomendado: faça logout agora pra sessão atual recarregar "
-            "os arquivos restaurados do zero."
-        )
-        lbl_hint.setWordWrap(True)
-        lbl_hint.setFont(QFont("DejaVu Sans Mono", 9))
-        lbl_hint.setStyleSheet("color: #6b7a8d;")
-        b_layout.addWidget(lbl_hint)
-
-        b_layout.addStretch()
-
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(10)
-
-        btn_later = QPushButton("Depois")
-        btn_later.setObjectName("SuccessBtnLater")
-        btn_later.setFixedHeight(38)
-        btn_later.clicked.connect(self.accept)
-
-        btn_logout = QPushButton("Fazer logout agora")
-        btn_logout.setObjectName("SuccessBtnOk")
-        btn_logout.setFixedHeight(38)
-        btn_logout.clicked.connect(self._do_logout)
-
-        btn_row.addWidget(btn_later)
-        btn_row.addWidget(btn_logout, 1)
-        b_layout.addLayout(btn_row)
-
-        root.addWidget(header)
-        root.addWidget(body, stretch=1)
-
-    def _do_logout(self) -> None:
-        import subprocess
-        try:
-            subprocess.Popen(["gnome-session-quit", "--logout", "--no-prompt"])
-        except Exception:
-            pass
-        self.accept()
-
-    def _apply_styles(self) -> None:
-        self.setStyleSheet("""
-            QDialog {
-                background: #131417;
-                border-radius: 14px;
-            }
-            QFrame#SuccessHeader {
-                background: rgba(74, 222, 128, 35);
-                border-bottom: 1px solid rgba(74, 222, 128, 25);
-                border-top-left-radius: 14px;
-                border-top-right-radius: 14px;
-            }
-            QFrame#SuccessBody {
-                background: #131417;
-                border-bottom-left-radius: 14px;
-                border-bottom-right-radius: 14px;
-            }
-            QPushButton#SuccessBtnOk {
-                background: rgba(74, 222, 128, 180);
-                border: 1px solid rgba(74, 222, 128, 220);
-                border-radius: 10px;
-                color: #08111d;
-                font-family: "DejaVu Sans Mono";
-                font-size: 11px;
-                font-weight: 700;
-            }
-            QPushButton#SuccessBtnOk:hover {
-                background: rgba(94, 234, 149, 220);
-            }
-            QPushButton#SuccessBtnLater {
-                background: rgba(255, 255, 255, 8);
-                border: 1px solid rgba(255, 255, 255, 20);
-                border-radius: 10px;
-                color: #c8d4e0;
-                font-family: "DejaVu Sans Mono";
-                font-size: 11px;
-            }
-            QPushButton#SuccessBtnLater:hover {
-                background: rgba(255, 255, 255, 14);
-            }
-        """)
-
-
-# ── Dialog de checagem do snapshot irmão ────────────────────────────────────
-
-class PairCheckProgressDialog(QDialog):
-    """Dialog leve exibido enquanto verificamos, via rsync --dry-run, se o
-    snapshot irmão (ROOT/HOME) tem mudanças pendentes reais. Visual baseado
-    no dialog de progresso de exclusão de snapshot, com tema verde de sync."""
-
-    def __init__(self, sibling_label: str = "", parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Verificando snapshot irmão")
-        self.setModal(True)
-        self.setFixedSize(420, 160)
-        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
-        self._dots = 0
-        self._build_ui(sibling_label)
-        self._apply_styles()
-
-        self._timer = QTimer(self)
-        self._timer.setInterval(400)
-        self._timer.timeout.connect(self._tick)
-        self._timer.start()
-
-    def _build_ui(self, sibling_label: str) -> None:
-        root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
-
-        header = QFrame()
-        header.setObjectName("PCHeader")
-        header.setFixedHeight(46)
-        h_layout = QHBoxLayout(header)
-        h_layout.setContentsMargins(18, 0, 18, 0)
-
-        icon = QLabel()
-        icon.setFixedSize(26, 26)
-        icon.setAlignment(Qt.AlignCenter)
-        icon.setPixmap(qta.icon("mdi6.sync", color="#9bf0bd").pixmap(16, 16))
-        icon.setStyleSheet(
-            "QLabel { background: rgba(74,222,128,40); border-radius: 7px; }"
-        )
-
-        lbl = QLabel("Verificando Snapshot Irmão")
-        lbl.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
-        lbl.setStyleSheet("color: #ecf4ff;")
-
-        h_layout.addWidget(icon)
-        h_layout.addSpacing(10)
-        h_layout.addWidget(lbl)
-        h_layout.addStretch()
-
-        body = QFrame()
-        body.setObjectName("PCBody")
-        b_layout = QVBoxLayout(body)
-        b_layout.setContentsMargins(24, 16, 24, 20)
-        b_layout.setSpacing(10)
-
-        self.lbl_status = QLabel("Verificando alterações pendentes...")
-        self.lbl_status.setFont(QFont("DejaVu Sans Mono", 10))
-        self.lbl_status.setStyleSheet("color: #c8d4e0;")
-        self.lbl_status.setAlignment(Qt.AlignCenter)
-
-        snap_lbl = QLabel(sibling_label)
-        snap_lbl.setFont(QFont("DejaVu Sans Mono", 9))
-        snap_lbl.setStyleSheet("color: #6b7a8d;")
-        snap_lbl.setAlignment(Qt.AlignCenter)
-
-        self.progress = QProgressBar()
-        self.progress.setRange(0, 0)  # modo indeterminado — pulsa
-        self.progress.setFixedHeight(4)
-        self.progress.setTextVisible(False)
-        self.progress.setObjectName("PCBar")
-
-        b_layout.addWidget(self.lbl_status)
-        b_layout.addWidget(snap_lbl)
-        b_layout.addSpacing(4)
-        b_layout.addWidget(self.progress)
-
-        root.addWidget(header)
-        root.addWidget(body, stretch=1)
-
-    def _apply_styles(self) -> None:
-        self.setStyleSheet("""
-            PairCheckProgressDialog {
-                background: #131417;
-                border-radius: 14px;
-            }
-            QFrame#PCHeader {
-                background: rgba(74, 222, 128, 35);
-                border-bottom: 1px solid rgba(74, 222, 128, 25);
-                border-top-left-radius: 12px;
-                border-top-right-radius: 12px;
-            }
-            QFrame#PCBody {
-                background: #131417;
-                border-bottom-left-radius: 12px;
-                border-bottom-right-radius: 12px;
-            }
-            QProgressBar#PCBar {
-                background: rgba(74, 222, 128, 20);
-                border: none;
-                border-radius: 2px;
-            }
-            QProgressBar#PCBar::chunk {
-                background: qlineargradient(
-                    x1:0, y1:0, x2:1, y2:0,
-                    stop:0 rgba(35, 166, 80, 220),
-                    stop:1 rgba(94, 234, 149, 220)
-                );
-                border-radius: 2px;
-            }
-        """)
-
-    def _tick(self) -> None:
-        self._dots = (self._dots + 1) % 4
-        dots = "." * self._dots
-        self.lbl_status.setText(f"Verificando alterações pendentes{dots}")
-
-    def closeEvent(self, event) -> None:
-        self._timer.stop()
-        super().closeEvent(event)
-
-    def reject(self) -> None:
-        # QDialog trata ESC chamando reject() diretamente (via done()/
-        # hide()), sem passar pelo closeEvent — esse diálogo não tem
-        # nenhum botão de cancelar (é só um "aguarde" enquanto o processo
-        # elevado faz a checagem via rsync --dry-run), então não existe
-        # forma legítima de fechá-lo pela UI. ESC é sempre ignorado; só o
-        # código externo que o controla fecha de verdade (accept/close)
-        # quando a checagem termina.
-        pass
-
-    def showEvent(self, event):
-        """Centraliza na tela primária ao exibir."""
-        super().showEvent(event)
-        from PySide6.QtGui import QGuiApplication
-        screen = QGuiApplication.primaryScreen()
-        if screen:
-            geo = screen.availableGeometry()
-            self.move(
-                geo.x() + (geo.width() - self.width()) // 2,
-                geo.y() + (geo.height() - self.height()) // 2,
-            )
 
 
 # ── Helper ────────────────────────────────────────────────────────────────────

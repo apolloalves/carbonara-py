@@ -63,9 +63,17 @@ def get_disk_stats(mountpoint: str) -> dict:
 def get_last_iso_for(directory: str) -> dict:
     """Última ISO ARCHLINUX_*.iso dentro de um diretório específico —
     generaliza o que get_dashboard_stats fazia só pro Ventoy, pro card
-    'ÚLTIMA ISO' acompanhar o disco escolhido no combo."""
+    'ÚLTIMA ISO' acompanhar o disco escolhido no combo.
+
+    Quando o disco escolhido é o MDSATA, o Eggs guarda a ISO numa
+    subpasta fixa (MDSATA_EGGS = MDSATA/ARCHEGGS) — sem esse resolver, o
+    card checava a raiz do disco e dizia "sem ISO" mesmo com uma ISO
+    salva ali dentro (list_existing_isos já sabia disso; esse aqui não
+    sabia, causando a divergência)."""
     result = {"name": None, "date_str": None, "size_gb": None}
     path = Path(directory)
+    if path == MDSATA:
+        path = MDSATA_EGGS
     if not path.exists():
         return result
 
@@ -633,10 +641,16 @@ def check_space(dialog, destination: Path | None = None) -> Path | None:
     return check_space(dialog, Path(chosen))
 
 
-def create_eggs(dialog, parent=None, destination: str | None = None) -> None:
+def create_eggs(dialog, parent=None, destination: str | None = None, update_check_version: str | None = None) -> None:
     """Cria uma nova ISO via penguins-eggs (ou move uma já existente para o
     destino escolhido). `destination` é o path de um disco/mount escolhido
-    na UI (ver core/system/disks.py) — se None, usa VENTOY por padrão."""
+    na UI (ver core/system/disks.py) — se None, usa VENTOY por padrão.
+
+    `update_check_version` vem da checagem de update que a UI já fez
+    ANTES de abrir esse diálogo (self._last_update_version em
+    eggs_page.py) — não checa de novo aqui pra não duplicar a chamada de
+    rede. Só serve pra deixar explícito no log inicial que a checagem
+    aconteceu, mesmo quando não havia nada pra atualizar."""
     require_root()
 
     dest_dir = Path(destination) if destination else VENTOY
@@ -647,6 +661,10 @@ def create_eggs(dialog, parent=None, destination: str | None = None) -> None:
     dialog.set_current_file("—")
     dialog.append_log("=== CREATE PENGUIN'S EGGS ===")
     dialog.append_log(f"Destino escolhido: {dest_dir}")
+    if update_check_version:
+        dialog.append_log(f"Penguin's Eggs atualizado para v{update_check_version} antes desta build.")
+    else:
+        dialog.append_log("Penguin's Eggs já estava na versão mais recente — build sem atualização prévia.")
 
     try:
         # Só tenta montar o device fixo do Ventoy se o destino escolhido
@@ -868,7 +886,27 @@ def install_eggs(dialog, parent=None) -> None:
     if pkg_in_repo:
         dialog.append_log("penguins-eggs disponível via repo (chaotic-aur) — usando pacman.")
         steps.append(["pacman", "-Sy", "--noconfirm", "--needed", "penguins-eggs"])
+
+        # Checagem real ANTES de decidir o texto central — sem isso, o
+        # diálogo sempre dizia "Instalando..." mesmo quando não havia
+        # nada de fato pra instalar (só verificação). -Sy aqui é rápido
+        # (só sincroniza os bancos, não instala nada ainda) e -Qu lista
+        # o pacote só se existir versão nova nos repos sincronizados.
+        if eggs_installed:
+            dialog.set_status("Sincronizando bancos de pacotes...")
+            subprocess.run(["pacman", "-Sy"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            qu = subprocess.run(
+                ["pacman", "-Qu", "penguins-eggs"],
+                capture_output=True, text=True,
+            )
+            update_available = bool(qu.stdout.strip())
+            dialog.set_title("Instalando..." if update_available else "Verificando atualizações...")
+            if not update_available:
+                dialog.append_log("pacman confirma: nenhuma atualização disponível pro penguins-eggs.")
+        else:
+            dialog.set_title("Instalando...")
     else:
+        dialog.set_title("Instalando...")
         dialog.append_log(
             "penguins-eggs não encontrado em nenhum repo configurado — "
             "recorrendo ao fresh-eggs.sh (fallback)."
