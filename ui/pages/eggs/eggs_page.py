@@ -1184,11 +1184,39 @@ class EggsPage(QWidget):
         root.addSpacing(14)
         root.addWidget(cards)
 
-        # Só aparece enquanto uma operação pkexec está rodando. Existe
-        # porque o "Force Quit" do GNOME não consegue matar um processo
-        # do root (a janela de progresso roda dentro do pkexec) — sem
-        # isso, um xorriso travado deixava os cards desabilitados pra
-        # sempre, obrigando a fechar e reabrir o Carbonara inteiro.
+        # ── Status da operação em andamento ──────────────────────────────
+        # Antes só existia o link "forçar encerramento", visível desde o
+        # primeiro instante — parecia alarmante numa operação normal que
+        # só demora alguns segundos (o pkexec + verificação do pacman já
+        # levam um tempo real). Agora: spinner de terminal contínuo dá
+        # feedback constante de "tá rodando" (não só na abertura), e o
+        # link de força só aparece depois de um tempo (indicando que
+        # algo pode estar preso de verdade), via _force_kill_timer.
+        self.operation_status_row = QWidget()
+        op_row_layout = QHBoxLayout(self.operation_status_row)
+        op_row_layout.setContentsMargins(0, 0, 0, 0)
+        op_row_layout.setSpacing(10)
+
+        self.lbl_spinner = QLabel("⠋")
+        self.lbl_spinner.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+        self.lbl_spinner.setStyleSheet("color: #60a5fa; background: transparent;")
+
+        self.lbl_operation_status = QLabel("")
+        self.lbl_operation_status.setFont(QFont("DejaVu Sans Mono", 10))
+        self.lbl_operation_status.setStyleSheet("color: #9aa6b2; background: transparent;")
+
+        op_row_layout.addWidget(self.lbl_spinner)
+        op_row_layout.addWidget(self.lbl_operation_status)
+        op_row_layout.addStretch(1)
+        self.operation_status_row.hide()
+        root.addWidget(self.operation_status_row)
+
+        self._spinner_frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+        self._spinner_index = 0
+        self._spinner_timer = QTimer(self)
+        self._spinner_timer.setInterval(80)
+        self._spinner_timer.timeout.connect(self._tick_spinner)
+
         self.btn_force_kill = QPushButton("A operação parece travada? Forçar encerramento")
         self.btn_force_kill.setObjectName("ForceKillLink")
         self.btn_force_kill.setCursor(Qt.PointingHandCursor)
@@ -1201,6 +1229,13 @@ class EggsPage(QWidget):
         self.btn_force_kill.clicked.connect(self._on_force_kill)
         self.btn_force_kill.hide()
         root.addWidget(self.btn_force_kill)
+
+        # Só liga depois de um tempo — dá tempo de uma operação normal
+        # terminar sem nunca chegar a mostrar a opção de força.
+        self._force_kill_timer = QTimer(self)
+        self._force_kill_timer.setSingleShot(True)
+        self._force_kill_timer.setInterval(15000)
+        self._force_kill_timer.timeout.connect(self.btn_force_kill.show)
 
         root.addSpacing(18)
 
@@ -1523,6 +1558,10 @@ class EggsPage(QWidget):
             except Exception:
                 pass
 
+    def _tick_spinner(self) -> None:
+        self._spinner_index = (self._spinner_index + 1) % len(self._spinner_frames)
+        self.lbl_spinner.setText(self._spinner_frames[self._spinner_index])
+
     def _on_force_kill(self) -> None:
         """Mata via root o processo travado (xorriso/eggs) e destrava a
         UI na hora — sem isso, um travamento exigia fechar e reabrir o
@@ -1550,6 +1589,9 @@ class EggsPage(QWidget):
         self._proc = None
         self._pending_after_action = None
         self._set_cards_enabled(True)
+        self._spinner_timer.stop()
+        self.operation_status_row.hide()
+        self._force_kill_timer.stop()
         self.btn_force_kill.hide()
         self.refresh_stats()
         self.rebuild_iso_list()
@@ -1591,7 +1633,11 @@ class EggsPage(QWidget):
             return
 
         self._set_cards_enabled(False)
-        self.btn_force_kill.show()
+        self.lbl_operation_status.setText(f"Executando: {dialog_title}")
+        self.operation_status_row.show()
+        self._spinner_index = 0
+        self._spinner_timer.start()
+        self._force_kill_timer.start()
         self._poll_timer.start()
 
     def _poll_process(self) -> None:
@@ -1610,6 +1656,9 @@ class EggsPage(QWidget):
         self._proc = None
 
         self._set_cards_enabled(True)
+        self._spinner_timer.stop()
+        self.operation_status_row.hide()
+        self._force_kill_timer.stop()
         self.btn_force_kill.hide()
         self.refresh_stats()
         self.rebuild_iso_list()
