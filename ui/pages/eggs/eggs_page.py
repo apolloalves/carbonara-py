@@ -1184,32 +1184,42 @@ class EggsPage(QWidget):
         root.addSpacing(14)
         root.addWidget(cards)
 
-        # ── Status da operação em andamento ──────────────────────────────
-        # Antes só existia o link "forçar encerramento", visível desde o
-        # primeiro instante — parecia alarmante numa operação normal que
-        # só demora alguns segundos (o pkexec + verificação do pacman já
-        # levam um tempo real). Agora: spinner de terminal contínuo dá
-        # feedback constante de "tá rodando" (não só na abertura), e o
-        # link de força só aparece depois de um tempo (indicando que
-        # algo pode estar preso de verdade), via _force_kill_timer.
-        self.operation_status_row = QWidget()
-        op_row_layout = QHBoxLayout(self.operation_status_row)
-        op_row_layout.setContentsMargins(0, 0, 0, 0)
-        op_row_layout.setSpacing(10)
+        # ── Toast de operação em andamento (flutuante, não empurra layout) ──
+        # Antes era uma barra fixa no meio do layout, empurrando a lista de
+        # ISOs pra baixo sempre que aparecia. Agora é um toast flutuante
+        # (QFrame filho da página, fora do layout, posicionado na mão) no
+        # canto inferior direito — aparece/some sem mexer no resto da tela,
+        # como uma notificação de verdade.
+        self.operation_status_row = QFrame(self)
+        self.operation_status_row.setObjectName("OperationToast")
+        self.operation_status_row.setFixedWidth(420)
+        self.operation_status_row.setStyleSheet("""
+            QFrame#OperationToast {
+                background: rgba(15, 18, 28, 235);
+                border: 1px solid rgba(35, 166, 255, 110);
+                border-radius: 12px;
+            }
+        """)
+        toast_layout = QVBoxLayout(self.operation_status_row)
+        toast_layout.setContentsMargins(18, 14, 18, 14)
+        toast_layout.setSpacing(8)
+
+        status_row = QHBoxLayout()
+        status_row.setSpacing(14)
 
         self.lbl_spinner = QLabel("⠋")
-        self.lbl_spinner.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
-        self.lbl_spinner.setStyleSheet("color: #60a5fa; background: transparent;")
+        self.lbl_spinner.setFont(QFont("DejaVu Sans Mono", 16, QFont.Bold))
+        self.lbl_spinner.setStyleSheet("color: #23a6ff; background: transparent;")
+        self.lbl_spinner.setFixedWidth(22)
 
         self.lbl_operation_status = QLabel("")
-        self.lbl_operation_status.setFont(QFont("DejaVu Sans Mono", 10))
-        self.lbl_operation_status.setStyleSheet("color: #9aa6b2; background: transparent;")
+        self.lbl_operation_status.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+        self.lbl_operation_status.setStyleSheet("color: #ecf4ff; background: transparent;")
+        self.lbl_operation_status.setWordWrap(True)
 
-        op_row_layout.addWidget(self.lbl_spinner)
-        op_row_layout.addWidget(self.lbl_operation_status)
-        op_row_layout.addStretch(1)
-        self.operation_status_row.hide()
-        root.addWidget(self.operation_status_row)
+        status_row.addWidget(self.lbl_spinner)
+        status_row.addWidget(self.lbl_operation_status, 1)
+        toast_layout.addLayout(status_row)
 
         self._spinner_frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
         self._spinner_index = 0
@@ -1217,25 +1227,28 @@ class EggsPage(QWidget):
         self._spinner_timer.setInterval(80)
         self._spinner_timer.timeout.connect(self._tick_spinner)
 
-        self.btn_force_kill = QPushButton("A operação parece travada? Forçar encerramento")
+        self.btn_force_kill = QPushButton("Parece travado? Forçar encerramento")
         self.btn_force_kill.setObjectName("ForceKillLink")
         self.btn_force_kill.setCursor(Qt.PointingHandCursor)
         self.btn_force_kill.setStyleSheet(
             "QPushButton#ForceKillLink { background: transparent; border: none; "
-            "color: #ff9966; font-family: 'DejaVu Sans Mono'; font-size: 10px; "
-            "text-decoration: underline; padding: 4px 0px; }"
+            "color: #ff9966; font-family: 'DejaVu Sans Mono'; font-size: 12px; "
+            "text-decoration: underline; padding: 0px; text-align: left; }"
             "QPushButton#ForceKillLink:hover { color: #ffb388; }"
         )
         self.btn_force_kill.clicked.connect(self._on_force_kill)
         self.btn_force_kill.hide()
-        root.addWidget(self.btn_force_kill)
+        toast_layout.addWidget(self.btn_force_kill)
+
+        self.operation_status_row.hide()
+        self.operation_status_row.adjustSize()
 
         # Só liga depois de um tempo — dá tempo de uma operação normal
         # terminar sem nunca chegar a mostrar a opção de força.
         self._force_kill_timer = QTimer(self)
         self._force_kill_timer.setSingleShot(True)
         self._force_kill_timer.setInterval(15000)
-        self._force_kill_timer.timeout.connect(self.btn_force_kill.show)
+        self._force_kill_timer.timeout.connect(self._show_force_kill_link)
 
         root.addSpacing(18)
 
@@ -1562,6 +1575,37 @@ class EggsPage(QWidget):
         self._spinner_index = (self._spinner_index + 1) % len(self._spinner_frames)
         self.lbl_spinner.setText(self._spinner_frames[self._spinner_index])
 
+    def _reposition_toast(self) -> None:
+        """Ancora o toast no canto inferior direito da página — chamado
+        sempre que ele aparece/muda de tamanho e quando a janela é
+        redimensionada, já que ele não faz parte do layout normal."""
+        self.operation_status_row.adjustSize()
+        margin = 24
+        top_margin = 90
+        x = self.width() - self.operation_status_row.width() - margin
+        y = top_margin
+        self.operation_status_row.move(max(margin, x), y)
+        self.operation_status_row.raise_()
+
+    def _show_toast(self, text: str) -> None:
+        self.btn_force_kill.hide()
+        self.lbl_operation_status.setText(text)
+        self.operation_status_row.show()
+        self._reposition_toast()
+
+    def _hide_toast(self) -> None:
+        self.btn_force_kill.hide()
+        self.operation_status_row.hide()
+
+    def _show_force_kill_link(self) -> None:
+        self.btn_force_kill.show()
+        self._reposition_toast()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if self.operation_status_row.isVisible():
+            self._reposition_toast()
+
     def _on_force_kill(self) -> None:
         """Mata via root o processo travado (xorriso/eggs) e destrava a
         UI na hora — sem isso, um travamento exigia fechar e reabrir o
@@ -1590,9 +1634,8 @@ class EggsPage(QWidget):
         self._pending_after_action = None
         self._set_cards_enabled(True)
         self._spinner_timer.stop()
-        self.operation_status_row.hide()
         self._force_kill_timer.stop()
-        self.btn_force_kill.hide()
+        self._hide_toast()
         self.refresh_stats()
         self.rebuild_iso_list()
 
@@ -1633,8 +1676,7 @@ class EggsPage(QWidget):
             return
 
         self._set_cards_enabled(False)
-        self.lbl_operation_status.setText(f"Executando: {dialog_title}")
-        self.operation_status_row.show()
+        self._show_toast(f"Executando: {dialog_title}")
         self._spinner_index = 0
         self._spinner_timer.start()
         self._force_kill_timer.start()
@@ -1657,9 +1699,8 @@ class EggsPage(QWidget):
 
         self._set_cards_enabled(True)
         self._spinner_timer.stop()
-        self.operation_status_row.hide()
         self._force_kill_timer.stop()
-        self.btn_force_kill.hide()
+        self._hide_toast()
         self.refresh_stats()
         self.rebuild_iso_list()
         self._check_for_update()
