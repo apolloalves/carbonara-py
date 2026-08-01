@@ -57,7 +57,7 @@ class BackupProgressDialog(QDialog):
 
         # Transparência do log — aplicada APÓS o stylesheet para não ser sobrescrita
         from PySide6.QtGui import QPalette, QColor
-        palette = self.log_view.palette()\
+        palette = self.log_view.palette()
         palette.setColor(QPalette.Base, QColor(0, 0, 0, 50))
         self.log_view.setPalette(palette)
 
@@ -884,6 +884,142 @@ class _SuccessDialog(QDialog):
             }
             QPushButton#SuccessBtnOk:hover {
                 background: rgba(94, 234, 149, 220);
+            }
+        """)
+
+
+class HomeRestoreDoneDialog(QDialog):
+    """Variante do _SuccessDialog específica pro restore de HOME sem
+    reboot: em vez de só 'OK', oferece logout imediato (a sessão gráfica
+    tem que ser reaberta pra tudo ficar consistente) ou adiar."""
+
+    def __init__(self, message: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("HOME restaurada")
+        self.setModal(True)
+        self.setFixedSize(460, 230)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self._build_ui(message)
+        self._apply_styles()
+
+    def _build_ui(self, message: str) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        header = QFrame()
+        header.setObjectName("SuccessHeader")
+        header.setFixedHeight(56)
+        h_layout = QHBoxLayout(header)
+        h_layout.setContentsMargins(20, 0, 18, 0)
+
+        icon = QLabel()
+        icon.setFixedSize(36, 36)
+        icon.setAlignment(Qt.AlignCenter)
+        icon.setPixmap(qta.icon("mdi6.check-circle", color="#9bf0bd").pixmap(22, 22))
+        icon.setStyleSheet(
+            "QLabel { background: rgba(74,222,128,40); border-radius: 9px; }"
+        )
+
+        lbl_title = QLabel("HOME restaurada com sucesso")
+        lbl_title.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+        lbl_title.setStyleSheet("color: #ffffff; background: transparent;")
+
+        h_layout.addWidget(icon)
+        h_layout.addSpacing(10)
+        h_layout.addWidget(lbl_title)
+        h_layout.addStretch()
+
+        body = QFrame()
+        body.setObjectName("SuccessBody")
+        b_layout = QVBoxLayout(body)
+        b_layout.setContentsMargins(28, 22, 28, 22)
+        b_layout.setSpacing(10)
+
+        lbl_msg = QLabel(message)
+        lbl_msg.setWordWrap(True)
+        lbl_msg.setFont(QFont("DejaVu Sans Mono", 10))
+        lbl_msg.setStyleSheet("color: #c8d4e0;")
+        b_layout.addWidget(lbl_msg)
+
+        lbl_hint = QLabel(
+            "Recomendado: faça logout agora pra sessão atual recarregar "
+            "os arquivos restaurados do zero."
+        )
+        lbl_hint.setWordWrap(True)
+        lbl_hint.setFont(QFont("DejaVu Sans Mono", 9))
+        lbl_hint.setStyleSheet("color: #6b7a8d;")
+        b_layout.addWidget(lbl_hint)
+
+        b_layout.addStretch()
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
+
+        btn_later = QPushButton("Depois")
+        btn_later.setObjectName("SuccessBtnLater")
+        btn_later.setFixedHeight(38)
+        btn_later.clicked.connect(self.accept)
+
+        btn_logout = QPushButton("Fazer logout agora")
+        btn_logout.setObjectName("SuccessBtnOk")
+        btn_logout.setFixedHeight(38)
+        btn_logout.clicked.connect(self._do_logout)
+
+        btn_row.addWidget(btn_later)
+        btn_row.addWidget(btn_logout, 1)
+        b_layout.addLayout(btn_row)
+
+        root.addWidget(header)
+        root.addWidget(body, stretch=1)
+
+    def _do_logout(self) -> None:
+        import subprocess
+        try:
+            subprocess.Popen(["gnome-session-quit", "--logout", "--no-prompt"])
+        except Exception:
+            pass
+        self.accept()
+
+    def _apply_styles(self) -> None:
+        self.setStyleSheet("""
+            QDialog {
+                background: #131417;
+                border-radius: 14px;
+            }
+            QFrame#SuccessHeader {
+                background: rgba(74, 222, 128, 35);
+                border-bottom: 1px solid rgba(74, 222, 128, 25);
+                border-top-left-radius: 14px;
+                border-top-right-radius: 14px;
+            }
+            QFrame#SuccessBody {
+                background: #131417;
+                border-bottom-left-radius: 14px;
+                border-bottom-right-radius: 14px;
+            }
+            QPushButton#SuccessBtnOk {
+                background: rgba(74, 222, 128, 180);
+                border: 1px solid rgba(74, 222, 128, 220);
+                border-radius: 10px;
+                color: #08111d;
+                font-family: "DejaVu Sans Mono";
+                font-size: 11px;
+                font-weight: 700;
+            }
+            QPushButton#SuccessBtnOk:hover {
+                background: rgba(94, 234, 149, 220);
+            }
+            QPushButton#SuccessBtnLater {
+                background: rgba(255, 255, 255, 8);
+                border: 1px solid rgba(255, 255, 255, 20);
+                border-radius: 10px;
+                color: #c8d4e0;
+                font-family: "DejaVu Sans Mono";
+                font-size: 11px;
+            }
+            QPushButton#SuccessBtnLater:hover {
+                background: rgba(255, 255, 255, 14);
             }
         """)
 
