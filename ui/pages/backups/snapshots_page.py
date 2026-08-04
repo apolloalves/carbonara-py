@@ -453,6 +453,18 @@ class SnapshotCard(QFrame):
                     f"border-radius: 8px; padding: 2px 10px;"
                 )
                 title_row.addWidget(badge)
+        else:
+            # Antes, sem synced_at, nenhuma badge aparecia — dava a
+            # impressão de que a informação de sync tinha sumido, quando
+            # na verdade só significa "ainda não sincronizado nenhuma
+            # vez". Mostra isso explicitamente em vez de ficar mudo.
+            badge = QLabel("nunca sincronizado")
+            badge.setFont(QFont("DejaVu Sans Mono", 8, QFont.Bold))
+            badge.setStyleSheet(
+                "color: #ff9966; background: rgba(255,153,102,0.14); "
+                "border-radius: 8px; padding: 2px 10px;"
+            )
+            title_row.addWidget(badge)
 
         title_row.addStretch()
 
