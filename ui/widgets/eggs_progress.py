@@ -788,6 +788,15 @@ class EggsProgressDialog(QDialog):
         m, s = divmod(rem, 60)
         text = f"{m:02d}:{s:02d}" if h == 0 else f"{h:02d}:{m:02d}:{s:02d}"
         self.lbl_elapsed.setText(text)
+        # Reafirma a janela acima do dock periodicamente — o showEvent já
+        # fazia isso uma vez na abertura, mas em operações longas (o
+        # xorriso sozinho já passou de 30min numa build) o dock
+        # customizado pode voltar a empilhar por cima depois de um
+        # tempo. A cada ~3s (não a cada tick, pra não competir demais
+        # por foco) reforça raise_+activateWindow.
+        if self._elapsed_seconds % 3 == 0:
+            self.raise_()
+            self.activateWindow()
 
     def set_running(self, running: bool) -> None:
         self._is_running = running

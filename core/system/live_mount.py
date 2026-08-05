@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -20,10 +21,17 @@ from core.snapshots.restore import (
 # sistema instalado. Cada um é tentado de forma independente — se um
 # não existir nesse ambiente (ex: pendrive desconectado), os outros
 # continuam sendo tentados normalmente.
+#
+# VENTOY é marcado como não-essencial: é o próprio disco de onde a
+# live deu boot, então já está em uso por baixo dos panos (visto ao
+# vivo: /run/archiso/bootmnt é /dev/mapper/ventoy) — falhar ao montar
+# de novo em /mnt/VENTOY é o resultado ESPERADO, não um problema. Sem
+# essa marcação, o banner "ainda não montado" nunca desaparecia,
+# mesmo com RAID+BACK_EMERGENCY+MDSATA já montados de verdade.
 KNOWN_EXTERNAL_DISKS = [
-    {"label": "BACK_EMERGENCY", "uuid": "1499c321-423d-40cf-a8a5-269e2e25c8d4", "mountpoint": "/mnt/BACK_EMERGENCY"},
-    {"label": "MDSATA", "uuid": "82770cba-e03a-4dc7-817f-26a408836239", "mountpoint": "/mnt/MDSATA"},
-    {"label": "VENTOY", "uuid": "E626-528A", "mountpoint": "/mnt/VENTOY"},
+    {"label": "BACK_EMERGENCY", "uuid": "1499c321-423d-40cf-a8a5-269e2e25c8d4", "mountpoint": "/mnt/BACK_EMERGENCY", "essential": True},
+    {"label": "MDSATA", "uuid": "82770cba-e03a-4dc7-817f-26a408836239", "mountpoint": "/mnt/MDSATA", "essential": True},
+    {"label": "VENTOY", "uuid": "E626-528A", "mountpoint": "/mnt/VENTOY", "essential": False},
 ]
 
 
@@ -94,7 +102,23 @@ def mount_system_disks() -> dict[str, str]:
         r = _run(["mount", f"UUID={disk['uuid']}", disk["mountpoint"]])
         if r.returncode == 0:
             results[disk["label"]] = f"montado em {disk['mountpoint']}"
+        elif not disk["essential"]:
+            results[disk["label"]] = "não montado (esperado — é o próprio disco de boot da live)"
         else:
             results[disk["label"]] = "não encontrado/não pôde montar"
 
     return results
+
+
+def essential_disks_mounted() -> bool:
+    """Confere se os discos que REALMENTE importam (RAID + externos
+    marcados essential=True) já estão montados de verdade — ignora o
+    VENTOY de propósito, já que ele nunca monta na live (é o próprio
+    disco de boot) e não deveria contar como 'faltando montar'. Usado
+    pra decidir se o banner de aviso ainda faz sentido aparecer."""
+    if not os.path.ismount(MOUNT_TARGET):
+        return False
+    for disk in KNOWN_EXTERNAL_DISKS:
+        if disk["essential"] and not os.path.ismount(disk["mountpoint"]):
+            return False
+    return True

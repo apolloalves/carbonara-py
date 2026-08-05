@@ -460,8 +460,9 @@ class DisksPage(QWidget):
         # existe /etc/fstab real, então nada vem montado por padrão e as
         # páginas ficam "cegas" (sem quebrar, só sem dado pra mostrar).
         from core.system.live_mount import is_live_environment
+        self._is_live_env = is_live_environment()
         self.live_banner = None
-        if is_live_environment():
+        if self._is_live_env:
             self.live_banner = QFrame()
             self.live_banner.setStyleSheet(f"""
                 QFrame {{
@@ -474,22 +475,23 @@ class DisksPage(QWidget):
             banner_layout.setContentsMargins(16, 12, 16, 12)
             banner_layout.setSpacing(12)
 
-            banner_icon = QLabel()
-            banner_icon.setPixmap(qta.icon("mdi6.usb-flash-drive-outline", color=ACCENT_AMBER).pixmap(18, 18))
-            banner_layout.addWidget(banner_icon)
+            self.lbl_live_banner_icon = QLabel()
+            self.lbl_live_banner_icon.setPixmap(qta.icon("mdi6.usb-flash-drive-outline", color=ACCENT_AMBER).pixmap(18, 18))
+            banner_layout.addWidget(self.lbl_live_banner_icon)
 
-            banner_text = QLabel(
+            self.lbl_live_banner_text = QLabel(
                 "Ambiente live detectado — RAID e discos externos ainda não estão montados."
             )
-            banner_text.setFont(QFont(FONT_FAMILY, 10))
-            banner_text.setStyleSheet(f"color: {TEXT};")
-            banner_layout.addWidget(banner_text, 1)
+            self.lbl_live_banner_text.setFont(QFont(FONT_FAMILY, 10))
+            self.lbl_live_banner_text.setStyleSheet(f"color: {TEXT};")
+            banner_layout.addWidget(self.lbl_live_banner_text, 1)
 
             self.btn_mount_live = QPushButton("Montar discos do sistema")
             self.btn_mount_live.clicked.connect(self._on_mount_live_disks)
             banner_layout.addWidget(self.btn_mount_live)
 
             root.addWidget(self.live_banner)
+            self._update_live_banner()
 
         # ── RAID card ────────────────────────────────────────────────────
         self.raid_container = QVBoxLayout()
@@ -545,6 +547,22 @@ class DisksPage(QWidget):
 
     # ------------------------------------------------------------------ data --
 
+    def _update_live_banner(self) -> None:
+        """Esconde o banner de aviso quando os discos que importam (RAID
+        + BACK_EMERGENCY + MDSATA) já estão montados de verdade — ignora
+        o VENTOY de propósito (é o próprio disco de boot da live, nunca
+        vai montar de novo, e isso é esperado). Antes o banner era
+        estático e continuava avisando 'ainda não montado' mesmo depois
+        de tudo já estar montado com sucesso."""
+        if not self._is_live_env or self.live_banner is None:
+            return
+        from core.system.live_mount import essential_disks_mounted
+
+        if essential_disks_mounted():
+            self.live_banner.hide()
+        else:
+            self.live_banner.show()
+
     def _on_mount_live_disks(self) -> None:
         self.btn_mount_live.setEnabled(False)
         self.btn_mount_live.setText("Montando...")
@@ -565,11 +583,21 @@ class DisksPage(QWidget):
         )
         dialog.exec()
         self.refresh_all()
+        self._update_live_banner()
+
+    def showEvent(self, event) -> None:
+        """Sem isso, o banner de ambiente live e os cards de disco só
+        refletiam o estado de quando a página foi criada — se os discos
+        fossem montados por outro caminho (ex: o toast automático no
+        início do app), visitar a página depois não atualizava sozinho."""
+        super().showEvent(event)
+        self.refresh_all()
 
     def refresh_all(self) -> None:
         self._refresh_raid()
         self._refresh_disks()
         self._refresh_temps()
+        self._update_live_banner()
 
     def _clear_layout(self, layout) -> None:
         while layout.count():

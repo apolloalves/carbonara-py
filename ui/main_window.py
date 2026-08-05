@@ -4,7 +4,7 @@ import sys
 from dataclasses import dataclass
 
 import qtawesome as qta
-from PySide6.QtCore import Qt, QRect, QEvent, QPoint, QSize, Signal
+from PySide6.QtCore import Qt, QRect, QEvent, QPoint, QSize, Signal, QTimer
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -34,9 +34,10 @@ from PySide6.QtWidgets import (
 
 from ui.pages.backups.backups_page import BackupsPage
 from ui.pages.eggs.eggs_page import EggsPage
-from ui.pages.disks.disks_page import DisksPage
+from ui.pages.disks.disks_page import DisksPage, MountKnownDisksWorker
 from ui.pages.doctor.doctor_arch_page import DoctorArchPage
 from core.system.sysinfo import get_system_info
+from core.system.live_mount import is_live_environment
 
 
 # Paleta
@@ -1204,6 +1205,100 @@ class MainWindow(QMainWindow):
         self.doctor_host.page.back_requested.connect(self.show_menu)
 
         self.stack.setCurrentWidget(self.menu_page)
+
+        # ── Toast de montagem automática de discos (ambiente live) ──────
+        # Antes precisava ir até a página Disks e clicar no botão manual.
+        # Agora, se o Carbonara detectar que está rodando num live boot
+        # (ex: a própria ISO gerada pelo Eggs), já dispara a montagem
+        # sozinho ao abrir, com um toast na tela principal avisando.
+        self._live_mount_toast = None
+        if is_live_environment():
+            self._show_live_mount_toast()
+
+    def _show_live_mount_toast(self) -> None:
+        self._live_mount_toast = QFrame(self)
+        self._live_mount_toast.setObjectName("LiveMountToast")
+        self._live_mount_toast.setFixedWidth(380)
+        self._live_mount_toast.setStyleSheet("""
+            QFrame#LiveMountToast {
+                background: rgba(15, 18, 28, 235);
+                border: 1px solid rgba(224, 168, 64, 130);
+                border-radius: 12px;
+            }
+        """)
+        layout = QHBoxLayout(self._live_mount_toast)
+        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(12)
+
+        self._live_mount_spinner = QLabel("⠋")
+        self._live_mount_spinner.setFont(QFont("DejaVu Sans Mono", 14, QFont.Bold))
+        self._live_mount_spinner.setStyleSheet("color: #e0a840; background: transparent;")
+        self._live_mount_spinner.setFixedWidth(20)
+        layout.addWidget(self._live_mount_spinner)
+
+        self._live_mount_label = QLabel("Ambiente live detectado — montando discos do sistema...")
+        self._live_mount_label.setFont(QFont("DejaVu Sans Mono", 10))
+        self._live_mount_label.setStyleSheet(f"color: {TEXT}; background: transparent;")
+        self._live_mount_label.setWordWrap(True)
+        layout.addWidget(self._live_mount_label, 1)
+
+        self._live_mount_toast.show()
+        self._reposition_live_mount_toast()
+
+        self._live_mount_frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+        self._live_mount_frame_idx = 0
+        self._live_mount_spin_timer = QTimer(self)
+        self._live_mount_spin_timer.setInterval(80)
+        self._live_mount_spin_timer.timeout.connect(self._tick_live_mount_spinner)
+        self._live_mount_spin_timer.start()
+
+        self._live_mount_worker = MountKnownDisksWorker(parent=self)
+        self._live_mount_worker.finished_mount.connect(self._on_live_mount_done)
+        self._live_mount_worker.start()
+
+    def _tick_live_mount_spinner(self) -> None:
+        self._live_mount_frame_idx = (self._live_mount_frame_idx + 1) % len(self._live_mount_frames)
+        self._live_mount_spinner.setText(self._live_mount_frames[self._live_mount_frame_idx])
+
+    def _reposition_live_mount_toast(self) -> None:
+        if self._live_mount_toast is None:
+            return
+        self._live_mount_toast.adjustSize()
+        margin = 24
+        x = self.width() - self._live_mount_toast.width() - margin
+        y = 70
+        self._live_mount_toast.move(max(margin, x), y)
+        self._live_mount_toast.raise_()
+
+    def _on_live_mount_done(self, returncode: int, stdout: str, stderr: str) -> None:
+        self._live_mount_spin_timer.stop()
+        ok = returncode == 0
+        self._live_mount_spinner.setText("✓" if ok else "✗")
+        self._live_mount_spinner.setStyleSheet(
+            f"color: {'#5eea95' if ok else '#e24b4a'}; background: transparent;"
+        )
+        # Resumo curto — o relatório completo linha a linha já fica
+        # disponível na página Disks pra quem quiser conferir.
+        montados = [ln.split(":")[0] for ln in stdout.splitlines() if "montado" in ln.lower() and "não" not in ln.lower()]
+        if montados:
+            self._live_mount_label.setText(f"Discos montados: {', '.join(montados)}.")
+        else:
+            self._live_mount_label.setText("Não foi possível montar os discos do sistema.")
+
+        # Atualiza a página Disks mesmo que o usuário nunca tenha
+        # visitado ela ainda, e some com o toast sozinho depois de um
+        # tempo — não precisa ficar preso na tela.
+        self.disks_host.page.refresh_all()
+        QTimer.singleShot(6000, self._hide_live_mount_toast)
+
+    def _hide_live_mount_toast(self) -> None:
+        if self._live_mount_toast is not None:
+            self._live_mount_toast.hide()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self._live_mount_toast is not None and self._live_mount_toast.isVisible():
+            self._reposition_live_mount_toast()
 
     def _show_exit_dialog(self):
         dialog = ExitConfirmDialog(self)
