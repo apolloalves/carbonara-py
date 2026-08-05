@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import qtawesome as qta
@@ -331,6 +332,29 @@ class ScanWorker(QThread):
         self.finished_scan.emit(results)
 
 
+class MountKnownDisksWorker(QThread):
+    """Dispara live.mount_known_disks via pkexec em thread separada —
+    monta RAID+discos externos num ambiente live (sem fstab real), sem
+    travar a UI enquanto isso."""
+    finished_mount = Signal(int, str, str)  # returncode, stdout, stderr
+
+    def run(self) -> None:
+        import json
+        import subprocess
+
+        display = os.environ.get("DISPLAY", "")
+        xauthority = os.environ.get("XAUTHORITY", "")
+        cmd = [
+            "pkexec", "/usr/local/bin/carbonara-helper",
+            display, xauthority, "live.mount_known_disks", json.dumps({}),
+        ]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            self.finished_mount.emit(result.returncode, result.stdout, result.stderr)
+        except Exception as exc:
+            self.finished_mount.emit(1, "", str(exc))
+
+
 class DisksPage(QWidget):
     back_requested = Signal()
 
@@ -430,6 +454,43 @@ class DisksPage(QWidget):
 
         root.addLayout(header_row)
 
+        # ── Banner de ambiente live ────────────────────────────────────────
+        # Só aparece quando o Carbonara detecta que está rodando num live
+        # boot (ex: a própria ISO gerada pelo Eggs) — nesse ambiente não
+        # existe /etc/fstab real, então nada vem montado por padrão e as
+        # páginas ficam "cegas" (sem quebrar, só sem dado pra mostrar).
+        from core.system.live_mount import is_live_environment
+        self.live_banner = None
+        if is_live_environment():
+            self.live_banner = QFrame()
+            self.live_banner.setStyleSheet(f"""
+                QFrame {{
+                    background: rgba({_rgba(ACCENT_AMBER, 12)});
+                    border: 1px solid rgba({_rgba(ACCENT_AMBER, 60)});
+                    border-radius: 12px;
+                }}
+            """)
+            banner_layout = QHBoxLayout(self.live_banner)
+            banner_layout.setContentsMargins(16, 12, 16, 12)
+            banner_layout.setSpacing(12)
+
+            banner_icon = QLabel()
+            banner_icon.setPixmap(qta.icon("mdi6.usb-flash-drive-outline", color=ACCENT_AMBER).pixmap(18, 18))
+            banner_layout.addWidget(banner_icon)
+
+            banner_text = QLabel(
+                "Ambiente live detectado — RAID e discos externos ainda não estão montados."
+            )
+            banner_text.setFont(QFont(FONT_FAMILY, 10))
+            banner_text.setStyleSheet(f"color: {TEXT};")
+            banner_layout.addWidget(banner_text, 1)
+
+            self.btn_mount_live = QPushButton("Montar discos do sistema")
+            self.btn_mount_live.clicked.connect(self._on_mount_live_disks)
+            banner_layout.addWidget(self.btn_mount_live)
+
+            root.addWidget(self.live_banner)
+
         # ── RAID card ────────────────────────────────────────────────────
         self.raid_container = QVBoxLayout()
         root.addLayout(self.raid_container)
@@ -483,6 +544,27 @@ class DisksPage(QWidget):
         self.refresh_all()
 
     # ------------------------------------------------------------------ data --
+
+    def _on_mount_live_disks(self) -> None:
+        self.btn_mount_live.setEnabled(False)
+        self.btn_mount_live.setText("Montando...")
+        self._mount_worker = MountKnownDisksWorker(parent=self)
+        self._mount_worker.finished_mount.connect(self._on_mount_live_disks_done)
+        self._mount_worker.start()
+
+    def _on_mount_live_disks_done(self, returncode: int, stdout: str, stderr: str) -> None:
+        from ui.pages.doctor.doctor_arch_page import ActionResultDialog
+
+        self.btn_mount_live.setEnabled(True)
+        self.btn_mount_live.setText("Montar discos do sistema")
+        dialog = ActionResultDialog(
+            success=(returncode == 0),
+            message=stdout.strip() or "(sem saída)",
+            detail=stderr.strip() if returncode != 0 else "",
+            parent=self.window(),
+        )
+        dialog.exec()
+        self.refresh_all()
 
     def refresh_all(self) -> None:
         self._refresh_raid()

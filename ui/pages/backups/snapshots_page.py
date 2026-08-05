@@ -926,6 +926,14 @@ class SnapshotsPage(QWidget):
         self.refresh_destinations()
         self.set_scope("both")
 
+    def showEvent(self, event) -> None:
+        """A página é criada uma vez só (QStackedWidget) — sem isso, a
+        lista de destinos só era montada na primeira vez e nunca mais
+        atualizava sozinha, mesmo que outro disco fosse montado depois
+        (ex: via o botão 'Montar discos do sistema' na página Disks)."""
+        super().showEvent(event)
+        self.refresh_destinations()
+
     def set_scope(self, scope: str):
         if scope not in {"root", "home", "both"}:
             return
