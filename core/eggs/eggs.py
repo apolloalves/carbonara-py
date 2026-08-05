@@ -399,6 +399,8 @@ class ShellWorker(QThread):
             # única string gigante até o próximo '\n' real (só no fim do
             # processo), e emitir isso de uma vez trava o QPlainTextEdit.
             buf = ""
+            last_progress_emit = 0.0
+            MIN_PROGRESS_INTERVAL = 0.15  # segundos
             while True:
                 chunk = self._proc.stdout.read(1024)
                 if not chunk:
@@ -417,8 +419,6 @@ class ShellWorker(QThread):
                         continue
                     if self._is_suppressed(line):
                         continue
-                    self.log_line.emit(line)
-                    self.file_changed.emit(line[:140])
                     # Extrai o percentual real de linhas tipo
                     # "xorriso : UPDATE :  88.90% done, ..." — sem isso, a
                     # barra ficava no modo indeterminado (só andando de um
@@ -426,10 +426,26 @@ class ShellWorker(QThread):
                     # log rolando, difícil de ver em qual etapa travou.
                     match = re.search(r"(\d+(?:\.\d+)?)\s*%\s*done", line)
                     if match:
+                        # O xorriso dispara MUITAS dessas linhas por segundo
+                        # nas fases finais (visto ao vivo: mesma % repetida
+                        # 3-4x seguidas). Emitir cada uma sinaliza pra thread
+                        # principal renderizar log+barra a cada uma — numa
+                        # rajada, isso inunda a fila de eventos do Qt mais
+                        # rápido do que ela consegue desenhar, e a UI trava
+                        # de verdade (não é só aparência), acionando o
+                        # "Not Responding" do compositor. Mesmo padrão do
+                        # buffer de 300ms já usado em backup_progress.py
+                        # pro rsync — aqui throttlando só as linhas de %.
+                        now = time.monotonic()
+                        if now - last_progress_emit < MIN_PROGRESS_INTERVAL:
+                            continue
+                        last_progress_emit = now
                         try:
                             self.progress_changed.emit(int(float(match.group(1))))
                         except ValueError:
                             pass
+                    self.log_line.emit(line)
+                    self.file_changed.emit(line[:140])
 
             leftover = buf.strip()
             if leftover and not self._is_suppressed(leftover):
@@ -481,7 +497,18 @@ def _cleanup_iso(dialog) -> None:
             dialog.append_log(f"AVISO: não foi possível limpar {directory}: {exc}")
 
 
-def _move_and_backup_iso(dialog, iso_files: list[Path], destination: Path | None = None) -> bool:
+def _start_move_and_backup(dialog, iso_files: list[Path], destination: Path | None, on_done) -> None:
+    """Versão assíncrona do move+backup da ISO.
+
+    A versão antiga (_move_and_backup_iso) rodava shutil.move + rsync —
+    potencialmente vários GB — de forma SÍNCRONA dentro de on_ok(), que
+    por sua vez é um slot conectado a um sinal cross-thread e por isso
+    roda na THREAD PRINCIPAL. Isso travava a UI de verdade bem no
+    momento em que o xorriso terminava (visto ao vivo: log mostrando
+    "Writing ... completed successfully" e o timer do diálogo parado
+    logo em seguida) — o oposto do que resolvemos pro próprio xorriso.
+    Agora os passos pesados (mv, rsync) rodam via ShellWorker (thread
+    separada), encadeados, chamando on_done(ok) só no final."""
     dest_dir = destination or VENTOY
     date_str = datetime.now().strftime("%Y-%m-%d")
     original = iso_files[0]
@@ -491,54 +518,71 @@ def _move_and_backup_iso(dialog, iso_files: list[Path], destination: Path | None
     # em EGGS_DIRECTORY/mnt (confirmado em make-iso.ts: "ln -s"). Se src
     # for esse link, resolve pro arquivo físico de verdade antes de mover
     # — mover o link em si não adianta nada (o destino precisa dos bytes).
+    # Isso é rápido (só resolução de path, sem I/O pesado) — pode ficar
+    # síncrono na thread principal sem problema.
     if src.is_symlink():
         real_src = Path(os.path.realpath(src))
         if not real_src.exists():
             dialog.append_log(f"ERRO: link '{src}' aponta para '{real_src}', que não existe.")
             _cleanup_iso(dialog)
-            return False
+            on_done(False)
+            return
         src = real_src
 
     renamed_name = f"ARCHLINUX_{date_str}.iso"
+    dest = dest_dir / renamed_name
 
-    # Move direto para o destino escolhido já com o nome canônico — sem
-    # passar por FILEPATH (/home/eggs/.mnt) como etapa intermediária. Esse
-    # diretório provavelmente nunca existiu de verdade no sistema (era
-    # uma suposição não verificada) e foi a causa do "No such file or
-    # directory" ao tentar recriar o symlink lá dentro.
     dialog.set_status(f"Movendo para {dest_dir}...")
     dialog.set_current_file(str(src))
-    dest = dest_dir / renamed_name
     dialog.append_log(f"Movendo: {src} -> {dest}")
-    try:
-        shutil.move(str(src), str(dest))
-    except OSError as exc:
-        dialog.append_log(f"ERRO ao mover para {dest_dir}: {exc}")
+
+    mv_worker = ShellWorker(["mv", str(src), str(dest)], title="Movendo...", parent=dialog)
+    dialog.register_worker(mv_worker)
+    mv_worker.log_line.connect(dialog.append_log)
+
+    def on_mv_ok() -> None:
+        # O symlink original (em EGGS_DIRECTORY) agora aponta pro nada, já
+        # que o arquivo real acabou de ser movido embora — sem apagar ele
+        # aqui, ele sobrevive e "engana" find_iso_files() numa tentativa
+        # futura, fazendo o Carbonara achar que ainda existe uma ISO
+        # pronta pra mover.
+        if original != src and original.is_symlink():
+            original.unlink(missing_ok=True)
+
+        dialog.append_log(f"--- ISO criada com sucesso: {dest.name} ---")
+        dialog.set_status(f"Fazendo backup em {MDSATA_EGGS}...")
+        dialog.set_current_file(str(dest))
+        dialog.append_log(f"Iniciando cópia de segurança para {MDSATA_EGGS}...")
+        MDSATA_EGGS.mkdir(parents=True, exist_ok=True)
+
+        rsync_worker = ShellWorker(
+            ["rsync", "-avh", "--progress", str(dest), f"{MDSATA_EGGS}/"],
+            title="Copiando para MDSATA...", parent=dialog,
+        )
+        dialog.register_worker(rsync_worker)
+        rsync_worker.log_line.connect(dialog.append_log)
+
+        def on_rsync_ok() -> None:
+            dialog.append_log(f"--- arquivo '{dest.name}' pronto no Ventoy e no MDSATA ---")
+            on_done(True)
+
+        def on_rsync_fail(msg: str) -> None:
+            dialog.append_log(f"AVISO: backup no MDSATA falhou ({msg}), mas ISO já está no Ventoy.")
+            # ISO no Ventoy já está ok — não remove
+            on_done(False)
+
+        rsync_worker.finished_ok.connect(on_rsync_ok)
+        rsync_worker.failed.connect(on_rsync_fail)
+        rsync_worker.start()
+
+    def on_mv_fail(msg: str) -> None:
+        dialog.append_log(f"ERRO ao mover para {dest_dir}: {msg}")
         _cleanup_iso(dialog)
-        return False
+        on_done(False)
 
-    # O symlink original (em EGGS_DIRECTORY) agora aponta pro nada, já
-    # que o arquivo real acabou de ser movido embora — sem apagar ele
-    # aqui, ele sobrevive e "engana" find_iso_files() numa tentativa
-    # futura, fazendo o Carbonara achar que ainda existe uma ISO pronta
-    # pra mover (foi exatamente esse o bug que causou o "ERRO: link
-    # aponta para ..., que não existe" numa segunda tentativa).
-    if original != src and original.is_symlink():
-        original.unlink(missing_ok=True)
-
-    dialog.append_log(f"--- ISO criada com sucesso: {dest.name} ---")
-
-    dialog.set_status(f"Fazendo backup em {MDSATA_EGGS}...")
-    dialog.set_current_file(str(dest))
-    dialog.append_log(f"Iniciando cópia de segurança para {MDSATA_EGGS}...")
-    MDSATA_EGGS.mkdir(parents=True, exist_ok=True)
-    if not _run_step(dialog, ["rsync", "-avh", "--progress", str(dest), f"{MDSATA_EGGS}/"]):
-        dialog.append_log("AVISO: backup no MDSATA falhou, mas ISO já está no Ventoy.")
-        # ISO no Ventoy já está ok — não remove
-        return False
-
-    dialog.append_log(f"--- arquivo '{dest.name}' pronto no Ventoy e no MDSATA ---")
-    return True
+    mv_worker.finished_ok.connect(on_mv_ok)
+    mv_worker.failed.connect(on_mv_fail)
+    mv_worker.start()
 
 
 def _finish(dialog, ok: bool, success_msg: str, fail_msg: str) -> None:
@@ -718,8 +762,11 @@ def create_eggs(dialog, parent=None, destination: str | None = None, update_chec
             return
         dest_dir = resolved_dest
         dialog.progress.setRange(0, 100)
-        ok = _move_and_backup_iso(dialog, iso_files, dest_dir)
-        _finish(dialog, ok, "Concluído com sucesso.", "Falha na operação.")
+
+        def _on_move_done(ok: bool) -> None:
+            _finish(dialog, ok, "Concluído com sucesso.", "Falha na operação.")
+
+        _start_move_and_backup(dialog, iso_files, dest_dir, _on_move_done)
         return
 
     dialog.append_log(f"Limpando: {EGGS_DIRECTORY}")
@@ -763,8 +810,10 @@ def create_eggs(dialog, parent=None, destination: str | None = None, update_chec
         dialog.progress.setRange(0, 100)
         new_isos = _find_produced_iso()
         if new_isos:
-            ok = _move_and_backup_iso(dialog, new_isos, dest_dir)
-            _finish(dialog, ok, "Concluído com sucesso.", "Falha na operação.")
+            def _on_move_done(ok: bool) -> None:
+                _finish(dialog, ok, "Concluído com sucesso.", "Falha na operação.")
+
+            _start_move_and_backup(dialog, new_isos, dest_dir, _on_move_done)
         else:
             _finish(dialog, True, "ISO gerada, mas não encontrada para mover.", "")
 
@@ -815,8 +864,11 @@ def check_eggs(dialog, parent=None, destination: str | None = None) -> None:
         if resolved_dest is None:
             return
         dest_dir = resolved_dest
-        ok = _move_and_backup_iso(dialog, iso_files, dest_dir)
-        _finish(dialog, ok, "Concluído com sucesso.", "Falha na operação.")
+
+        def _on_move_done(ok: bool) -> None:
+            _finish(dialog, ok, "Concluído com sucesso.", "Falha na operação.")
+
+        _start_move_and_backup(dialog, iso_files, dest_dir, _on_move_done)
         return
 
     dialog.append_log(f"Nenhum .iso encontrado em {EGGS_DIRECTORY / 'mnt'}, {EGGS_DIRECTORY} ou {FILEPATH}")
