@@ -652,6 +652,17 @@ class EggsProgressDialog(QDialog):
     def set_status(self, text: str) -> None:
         self.lbl_status.setText(text)
 
+    def set_progress_percent(self, pct: int) -> None:
+        """Troca a barra do modo indeterminado (setRange(0,0), só um
+        segmento andando de um lado pro outro) pra uma barra real 0-100%
+        assim que o primeiro percentual real chega (ex: parseado do
+        xorriso) — antes ficava indeterminada a operação inteira, e se
+        travasse não dava pra saber em qual etapa (70%? 90%?) sem rolar
+        o log até achar a última linha."""
+        if self.progress.maximum() == 0:
+            self.progress.setRange(0, 100)
+        self.progress.setValue(max(0, min(100, pct)))
+
     def set_title(self, text: str) -> None:
         """Texto central grande (ex: 'Instalando...') — antes só dava pra
         definir na criação do diálogo (preparing_text) e ficava preso

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import signal
 import shutil
 import subprocess
@@ -418,6 +419,17 @@ class ShellWorker(QThread):
                         continue
                     self.log_line.emit(line)
                     self.file_changed.emit(line[:140])
+                    # Extrai o percentual real de linhas tipo
+                    # "xorriso : UPDATE :  88.90% done, ..." — sem isso, a
+                    # barra ficava no modo indeterminado (só andando de um
+                    # lado pro outro) e o número real ficava enterrado no
+                    # log rolando, difícil de ver em qual etapa travou.
+                    match = re.search(r"(\d+(?:\.\d+)?)\s*%\s*done", line)
+                    if match:
+                        try:
+                            self.progress_changed.emit(int(float(match.group(1))))
+                        except ValueError:
+                            pass
 
             leftover = buf.strip()
             if leftover and not self._is_suppressed(leftover):
@@ -514,8 +526,11 @@ def _move_and_backup_iso(dialog, iso_files: list[Path], destination: Path | None
     if original != src and original.is_symlink():
         original.unlink(missing_ok=True)
 
+    dialog.append_log(f"--- ISO criada com sucesso: {dest.name} ---")
+
     dialog.set_status(f"Fazendo backup em {MDSATA_EGGS}...")
     dialog.set_current_file(str(dest))
+    dialog.append_log(f"Iniciando cópia de segurança para {MDSATA_EGGS}...")
     MDSATA_EGGS.mkdir(parents=True, exist_ok=True)
     if not _run_step(dialog, ["rsync", "-avh", "--progress", str(dest), f"{MDSATA_EGGS}/"]):
         dialog.append_log("AVISO: backup no MDSATA falhou, mas ISO já está no Ventoy.")
@@ -529,7 +544,11 @@ def _move_and_backup_iso(dialog, iso_files: list[Path], destination: Path | None
 def _finish(dialog, ok: bool, success_msg: str, fail_msg: str) -> None:
     dialog.set_current_file("—")
     dialog.progress.setRange(0, 100)
-    dialog.progress.setValue(100 if ok else 0)
+    if ok:
+        dialog.progress.setValue(100)
+    # Em falha, NÃO zera — deixa a barra parada no último percentual
+    # real recebido (ex: 88%), pra ficar visível de cara em qual etapa
+    # travou, sem precisar rolar o log procurando a última linha.
     dialog.set_status(success_msg if ok else fail_msg)
     dialog.set_running(False)
     dialog.btn_close.setEnabled(True)
@@ -737,6 +756,7 @@ def create_eggs(dialog, parent=None, destination: str | None = None, update_chec
 
     worker.log_line.connect(dialog.append_log)
     worker.file_changed.connect(dialog.set_current_file)
+    worker.progress_changed.connect(dialog.set_progress_percent)
 
     def on_ok() -> None:
         dialog.append_log("--- ISO gerada com sucesso ---")
@@ -1003,6 +1023,7 @@ def install_eggs(dialog, parent=None) -> None:
         worker.log_line.connect(_watch_for_nothing_to_update)
         worker.log_line.connect(dialog.append_log)
         worker.file_changed.connect(dialog.set_current_file)
+        worker.progress_changed.connect(dialog.set_progress_percent)
 
         def on_ok() -> None:
             run_next(index + 1)

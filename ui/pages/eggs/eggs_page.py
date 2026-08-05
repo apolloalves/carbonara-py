@@ -1238,7 +1238,12 @@ class EggsPage(QWidget):
         )
         self.btn_force_kill.clicked.connect(self._on_force_kill)
         self.btn_force_kill.hide()
-        toast_layout.addWidget(self.btn_force_kill)
+        link_row = QHBoxLayout()
+        link_row.setContentsMargins(0, 0, 0, 0)
+        link_row.setSpacing(0)
+        link_row.addSpacing(22 + 14)  # mesma largura do spinner + espaçamento, pra alinhar com o texto de cima
+        link_row.addWidget(self.btn_force_kill)
+        toast_layout.addLayout(link_row)
 
         self.operation_status_row.hide()
         self.operation_status_row.adjustSize()
