@@ -346,7 +346,9 @@ class ShellWorker(QThread):
     failed = Signal(str)
 
     def __init__(self, cmd: list[str], title: str = "", cwd: str | None = None,
-                 suppress_patterns: list[str] | None = None, parent=None):
+                 suppress_patterns: list[str] | None = None,
+                 progress_pattern: str = r"(\d+(?:\.\d+)?)\s*%\s*done",
+                 progress_only: bool = False, parent=None):
         super().__init__(parent)
         self.cmd = cmd
         self.title = title
@@ -360,6 +362,16 @@ class ShellWorker(QThread):
         # chamador sabe explicitamente que essas linhas são inofensivas
         # NESSE comando específico — não filtra nada por padrão.
         self._suppress_patterns = suppress_patterns or []
+        # Padrão pra extrair percentual real de progresso — default é o
+        # formato do xorriso ("XX.XX% done"). rsync usa outro formato
+        # ("XX%" solto entre bytes/velocidade/ETA), então quem cria o
+        # worker pra um rsync passa um padrão diferente.
+        self._progress_pattern = progress_pattern
+        # Quando True, NENHUMA linha crua vai pro log — só o percentual
+        # extraído alimenta a barra. Existe porque o rsync --progress
+        # solta uma linha por segundo, cheia de bytes/velocidade/ETA que
+        # ninguém lê de verdade; a barra já conta a história toda.
+        self._progress_only = progress_only
 
     def _is_suppressed(self, line: str) -> bool:
         return any(pattern in line for pattern in self._suppress_patterns)
@@ -424,7 +436,7 @@ class ShellWorker(QThread):
                     # barra ficava no modo indeterminado (só andando de um
                     # lado pro outro) e o número real ficava enterrado no
                     # log rolando, difícil de ver em qual etapa travou.
-                    match = re.search(r"(\d+(?:\.\d+)?)\s*%\s*done", line)
+                    match = re.search(self._progress_pattern, line)
                     if match:
                         # O xorriso dispara MUITAS dessas linhas por segundo
                         # nas fases finais (visto ao vivo: mesma % repetida
@@ -444,11 +456,20 @@ class ShellWorker(QThread):
                             self.progress_changed.emit(int(float(match.group(1))))
                         except ValueError:
                             pass
+                        if self._progress_only:
+                            continue
+                    elif self._progress_only:
+                        # Modo "só progresso": nem essa linha nem nenhuma
+                        # outra crua vai pro log — a barra já conta a
+                        # história (usado no rsync de backup pro MDSATA,
+                        # que solta uma linha de bytes/velocidade/ETA por
+                        # segundo que ninguém lê de verdade).
+                        continue
                     self.log_line.emit(line)
                     self.file_changed.emit(line[:140])
 
             leftover = buf.strip()
-            if leftover and not self._is_suppressed(leftover):
+            if leftover and not self._is_suppressed(leftover) and not self._progress_only:
                 self.log_line.emit(leftover)
                 self.file_changed.emit(leftover[:140])
 
@@ -557,10 +578,13 @@ def _start_move_and_backup(dialog, iso_files: list[Path], destination: Path | No
 
         rsync_worker = ShellWorker(
             ["rsync", "-avh", "--progress", str(dest), f"{MDSATA_EGGS}/"],
-            title="Copiando para MDSATA...", parent=dialog,
+            title="Copiando para MDSATA...",
+            progress_pattern=r"(\d{1,3})%",
+            progress_only=True,
+            parent=dialog,
         )
         dialog.register_worker(rsync_worker)
-        rsync_worker.log_line.connect(dialog.append_log)
+        rsync_worker.progress_changed.connect(dialog.set_progress_percent)
 
         def on_rsync_ok() -> None:
             dialog.append_log(f"--- arquivo '{dest.name}' pronto no Ventoy e no MDSATA ---")
