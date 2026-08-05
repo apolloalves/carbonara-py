@@ -57,7 +57,11 @@ class EggsProgressDialog(QDialog):
         self.log_view.viewport().setStyleSheet("background: rgba(0, 0, 0, 60);")
 
     def showEvent(self, event):
-        """Centraliza na tela primária ao exibir — evita aparecer no monitor errado."""
+        """Centraliza na tela primária ao exibir — evita aparecer no monitor
+        errado. Também força pra frente do dock customizado (raise_ +
+        activateWindow) — antes isso só rodava dentro de _toggle_maximize,
+        então uma janela que já nascia grande (sem precisar clicar em
+        maximizar) continuava nascendo atrás do dock."""
         super().showEvent(event)
         from PySide6.QtGui import QGuiApplication
         screen = QGuiApplication.primaryScreen()
@@ -67,6 +71,8 @@ class EggsProgressDialog(QDialog):
                 geo.x() + (geo.width() - self.width()) // 2,
                 geo.y() + (geo.height() - self.height()) // 2,
             )
+        self.raise_()
+        self.activateWindow()
 
     # ------------------------------------------------------------------ UI --
 
