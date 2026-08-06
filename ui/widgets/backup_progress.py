@@ -1038,11 +1038,12 @@ class PairCheckProgressDialog(QDialog):
         self.setFixedSize(420, 160)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
         self._dots = 0
+        self._spinner_frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
         self._build_ui(sibling_label)
         self._apply_styles()
 
         self._timer = QTimer(self)
-        self._timer.setInterval(400)
+        self._timer.setInterval(80)
         self._timer.timeout.connect(self._tick)
         self._timer.start()
 
@@ -1080,10 +1081,21 @@ class PairCheckProgressDialog(QDialog):
         b_layout.setContentsMargins(24, 16, 24, 20)
         b_layout.setSpacing(10)
 
-        self.lbl_status = QLabel("Verificando alterações pendentes...")
+        self.lbl_status = QLabel("Verificando alterações pendentes")
         self.lbl_status.setFont(QFont("DejaVu Sans Mono", 10))
         self.lbl_status.setStyleSheet("color: #c8d4e0;")
         self.lbl_status.setAlignment(Qt.AlignCenter)
+
+        status_row = QHBoxLayout()
+        status_row.setSpacing(10)
+        status_row.addStretch(1)
+
+        self.lbl_spinner = QLabel("⠋")
+        self.lbl_spinner.setFont(QFont("DejaVu Sans Mono", 12, QFont.Bold))
+        self.lbl_spinner.setStyleSheet("color: #23a6ff;")
+        status_row.addWidget(self.lbl_spinner)
+        status_row.addWidget(self.lbl_status)
+        status_row.addStretch(1)
 
         snap_lbl = QLabel(sibling_label)
         snap_lbl.setFont(QFont("DejaVu Sans Mono", 9))
@@ -1096,7 +1108,7 @@ class PairCheckProgressDialog(QDialog):
         self.progress.setTextVisible(False)
         self.progress.setObjectName("PCBar")
 
-        b_layout.addWidget(self.lbl_status)
+        b_layout.addLayout(status_row)
         b_layout.addWidget(snap_lbl)
         b_layout.addSpacing(4)
         b_layout.addWidget(self.progress)
@@ -1137,9 +1149,8 @@ class PairCheckProgressDialog(QDialog):
         """)
 
     def _tick(self) -> None:
-        self._dots = (self._dots + 1) % 4
-        dots = "." * self._dots
-        self.lbl_status.setText(f"Verificando alterações pendentes{dots}")
+        self._dots = (self._dots + 1) % len(self._spinner_frames)
+        self.lbl_spinner.setText(self._spinner_frames[self._dots])
 
     def closeEvent(self, event) -> None:
         self._timer.stop()

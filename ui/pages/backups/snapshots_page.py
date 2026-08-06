@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
+    QGridLayout,
     QLabel,
     QPushButton,
     QMessageBox,
@@ -70,6 +71,7 @@ class SnapshotEntry:
     size_str: str = ""
     size_gb: float = 0.0
     synced_at: str = ""
+    created_at: str = ""
 
 
 def read_snapshot_metadata(path: Path) -> dict:
@@ -106,6 +108,14 @@ def collect_snapshots(backup_root: Path) -> List[SnapshotEntry]:
                     stat.st_mtime
                 ).strftime("%Y-%m-%d %H:%M:%S")
 
+                # created_at pode vir em dois formatos: ISO com "T" (da
+                # metadata gravada pelo backup.py) ou "YYYY-MM-DD HH:MM:SS"
+                # (fallback do mtime do arquivo, sem metadata). Normaliza
+                # pro formato com "T" — mesmo formato de synced_at — pra
+                # poder ser usado como fallback dele mais abaixo, sem
+                # precisar tratar dois formatos na hora de exibir a badge.
+                created_at_iso = created_at.replace(" ", "T", 1) if " " in created_at else created_at
+
                 status = meta.get("status", "unknown")
 
                 # Ignora snapshots incompletos (processo cancelado ou travado)
@@ -140,6 +150,7 @@ def collect_snapshots(backup_root: Path) -> List[SnapshotEntry]:
                         size_str=size_str,
                         size_gb=size_gb,
                         synced_at=synced_at,
+                        created_at=created_at_iso,
                     )
                 )
             except OSError:
@@ -160,24 +171,24 @@ def clear_layout(layout):
             clear_layout(child_layout)
             child_layout.deleteLater()
 
-def icon_badge(icon_name: str, size: int = 34) -> QLabel:
+def icon_badge(icon_name: str, size: int = 34, color: str = "#FFFFFF", bg_rgba: str = "35, 166, 255, 34") -> QLabel:
     label = QLabel()
     label.setAlignment(Qt.AlignCenter)
     label.setFixedSize(size, size)
 
     pixmap = qta.icon(
         icon_name,
-        color="#FFFFFF"
+        color=color
     ).pixmap(size - 2, size - 2)
 
     label.setPixmap(pixmap)
 
     label.setStyleSheet(
-        """
-        QLabel {
-            background: rgba(35, 166, 255, 34);
+        f"""
+        QLabel {{
+            background: rgba({bg_rgba});
             border-radius: 10px;
-        }
+        }}
         """
     )
 
@@ -399,7 +410,14 @@ class SnapshotCard(QFrame):
         left = QHBoxLayout()
         left.setSpacing(16)
 
-        icon_label = icon_badge(SNAPSHOT_GLYPH, 38)
+        # Mesma cor do cabeçalho da seção (ROOT azul, HOME âmbar) — dá
+        # continuidade visual do grupo até o ícone de cada card.
+        kind_upper = entry.kind.upper()
+        card_accent = {"ROOT": "#23a6ff", "HOME": "#e0a840"}.get(kind_upper, "#FFFFFF")
+        r = int(card_accent[1:3], 16)
+        g = int(card_accent[3:5], 16)
+        b = int(card_accent[5:7], 16)
+        icon_label = icon_badge(SNAPSHOT_GLYPH, 46, color=card_accent, bg_rgba=f"{r}, {g}, {b}, 34")
 
         text_block = QVBoxLayout()
         text_block.setSpacing(6)
@@ -423,9 +441,16 @@ class SnapshotCard(QFrame):
         # lembrete. A checagem 100% real continua sendo o dry-run, seja
         # via SYNC individual ou via o botão VERIFICAR (checa os dois).
         STALE_AFTER_DAYS = 7
-        if entry.synced_at:
+        # Fallback: snapshots feitos ANTES desse dia (synced_at só passou
+        # a ser gravado na criação, não só no SYNC explícito) ou qualquer
+        # entrada sem synced_at por algum outro motivo — um snapshot
+        # recém-criado já nasce em sincronia com o sistema no momento em
+        # que foi feito, então created_at é um fallback válido, não um
+        # "nunca". Só cai em "nunca sincronizado" se faltarem os dois.
+        sync_reference = entry.synced_at or entry.created_at
+        if sync_reference:
             try:
-                self_dt = datetime.strptime(entry.synced_at, "%Y-%m-%dT%H:%M:%S")
+                self_dt = datetime.strptime(sync_reference, "%Y-%m-%dT%H:%M:%S")
                 # Compara datas de calendário, não 24h corridas — se
                 # sincronizou às 08:41 do dia 28 e você abre antes das
                 # 08:41 do dia 29, timedelta.days ainda dá 0 (não
@@ -447,10 +472,10 @@ class SnapshotCard(QFrame):
                 badge_bg = "rgba(224,168,64,0.14)" if stale else "rgba(74,222,128,0.14)"
 
                 badge = QLabel(badge_text)
-                badge.setFont(QFont("DejaVu Sans Mono", 8, QFont.Bold))
+                badge.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
                 badge.setStyleSheet(
                     f"color: {badge_color}; background: {badge_bg}; "
-                    f"border-radius: 8px; padding: 2px 10px;"
+                    f"border-radius: 10px; padding: 4px 14px;"
                 )
                 title_row.addWidget(badge)
         else:
@@ -459,10 +484,10 @@ class SnapshotCard(QFrame):
             # na verdade só significa "ainda não sincronizado nenhuma
             # vez". Mostra isso explicitamente em vez de ficar mudo.
             badge = QLabel("nunca sincronizado")
-            badge.setFont(QFont("DejaVu Sans Mono", 8, QFont.Bold))
+            badge.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
             badge.setStyleSheet(
                 "color: #ff9966; background: rgba(255,153,102,0.14); "
-                "border-radius: 8px; padding: 2px 10px;"
+                "border-radius: 10px; padding: 4px 14px;"
             )
             title_row.addWidget(badge)
 
@@ -543,7 +568,7 @@ class SnapshotCard(QFrame):
 
 
 class SectionCard(QFrame):
-    def __init__(self, title_text: str, path_text: str, glyph: str, parent=None):
+    def __init__(self, title_text: str, path_text: str, glyph: str, accent_color: str = "#1f8dda", parent=None):
         super().__init__(parent)
         self.setObjectName("SectionCard")
         self.setStyleSheet(
@@ -563,27 +588,24 @@ class SectionCard(QFrame):
         head_frame = QFrame()
         head_frame.setObjectName("SectionHeader")
         head_frame.setStyleSheet(
-            """
-            QFrame#SectionHeader {
+            f"""
+            QFrame#SectionHeader {{
                 border: none;
-                border-left: 3px solid rgba(31, 141, 218, 200);
                 border-radius: 0px;
                 background: transparent;
-            }
+            }}
             """
         )
         head_layout = QHBoxLayout(head_frame)
         head_layout.setContentsMargins(12, 4, 0, 4)
         head_layout.setSpacing(10)
 
-        icon_label = icon_badge(glyph if glyph else CREATE_GLYPH, 38)
-
         labels = QVBoxLayout()
         labels.setSpacing(1)
 
         title = QLabel(title_text)
-        title.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
-        title.setStyleSheet("color: #ecf4ff;")
+        title.setFont(QFont("DejaVu Sans Mono", 15, QFont.Bold))
+        title.setStyleSheet(f"color: {accent_color};")
 
         path = QLabel(path_text)
         path.setFont(QFont("DejaVu Sans Mono", 8))
@@ -592,16 +614,40 @@ class SectionCard(QFrame):
         labels.addWidget(title)
         labels.addWidget(path)
 
-        head_layout.addWidget(icon_label)
         head_layout.addLayout(labels)
         head_layout.addStretch(1)
 
-        self.body = QVBoxLayout()
-        self.body.setSpacing(6)
+        # Divisor sólido, mas suavizado (opacidade reduzida) — cor cheia
+        # ficava forte demais; com alpha ~55% fica visível o bastante pra
+        # separar os grupos sem gritar na tela.
+        r = int(accent_color[1:3], 16)
+        g = int(accent_color[3:5], 16)
+        b = int(accent_color[5:7], 16)
+        divider = QFrame()
+        divider.setFixedHeight(2)
+        divider.setStyleSheet(f"background: rgba({r}, {g}, {b}, 140); border: none;")
+
+        self.body = QGridLayout()
+        self.body.setHorizontalSpacing(14)
+        self.body.setVerticalSpacing(10)
         self.body.setContentsMargins(0, 0, 0, 0)
+        self.body.setColumnStretch(0, 1)
+        self.body.setColumnStretch(1, 1)
+        self._card_count = 0
 
         self.layout_main.addWidget(head_frame)
+        self.layout_main.addWidget(divider)
+        self.layout_main.addSpacing(4)
         self.layout_main.addLayout(self.body)
+
+    def add_card(self, card_widget) -> None:
+        """Coloca os cards de snapshot em grade de 2 colunas — conforme
+        mais snapshots forem criados, eles vão preenchendo pelo menos
+        2 por linha em vez de empilhar um embaixo do outro."""
+        row = self._card_count // 2
+        col = self._card_count % 2
+        self.body.addWidget(card_widget, row, col)
+        self._card_count += 1
 
 
 class SnapshotsPage(QWidget):
@@ -1141,12 +1187,16 @@ class SnapshotsPage(QWidget):
             if kind not in ordered_kinds:
                 ordered_kinds.append(kind)
 
+        SECTION_ACCENTS = {"ROOT": "#23a6ff", "HOME": "#e0a840"}
+
         for kind in ordered_kinds:
             section_icon = ROOT_GLYPH if kind == "ROOT" else HOME_GLYPH if kind == "HOME" else SNAPSHOT_GLYPH
+            accent_color = SECTION_ACCENTS.get(kind, "#7d8a99")
             section = SectionCard(
                 kind,
                 str(backup_root / kind),
                 section_icon,
+                accent_color=accent_color,
             )
             for entry in grouped[kind]:
                 card = SnapshotCard(entry, sibling=_sibling_of(entry))
@@ -1159,9 +1209,17 @@ class SnapshotsPage(QWidget):
                 card.btn_delete.clicked.connect(
                     lambda _, e=entry: self.delete_snapshot(e)
                 )
-                section.body.addWidget(card)
+                # Grade de 2 colunas DENTRO da seção — não é ROOT e HOME
+                # lado a lado, é cada seção ocupando a largura toda, com
+                # os próprios snapshots dela preenchendo pelo menos 2
+                # por linha conforme mais forem criados.
+                section.add_card(card)
 
             self.scroll_layout.addWidget(section)
+            # Respiro extra entre grupos (ROOT vs HOME) — maior que o
+            # espaçamento padrão do scroll_layout entre cards do mesmo
+            # grupo, pra reforçar visualmente onde um grupo termina.
+            self.scroll_layout.addSpacing(18)
 
         self.scroll_layout.addStretch(1)
 
@@ -4782,11 +4840,12 @@ class _DeleteProgressDialog(QDialog):
         self.setFixedSize(420, 160)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
         self._dots = 0
+        self._spinner_frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
         self._build_ui(snap_name)
         self._apply_styles()
 
         self._timer = QTimer(self)
-        self._timer.setInterval(400)
+        self._timer.setInterval(80)
         self._timer.timeout.connect(self._tick)
         self._timer.start()
 
@@ -4830,6 +4889,17 @@ class _DeleteProgressDialog(QDialog):
         self.lbl_status.setStyleSheet("color: #c8d4e0;")
         self.lbl_status.setAlignment(Qt.AlignCenter)
 
+        status_row = QHBoxLayout()
+        status_row.setSpacing(10)
+        status_row.addStretch(1)
+
+        self.lbl_spinner = QLabel("⠋")
+        self.lbl_spinner.setFont(QFont("DejaVu Sans Mono", 12, QFont.Bold))
+        self.lbl_spinner.setStyleSheet("color: #23a6ff;")
+        status_row.addWidget(self.lbl_spinner)
+        status_row.addWidget(self.lbl_status)
+        status_row.addStretch(1)
+
         snap_lbl = QLabel(snap_name)
         snap_lbl.setFont(QFont("DejaVu Sans Mono", 9))
         snap_lbl.setStyleSheet("color: #6b7a8d;")
@@ -4843,7 +4913,7 @@ class _DeleteProgressDialog(QDialog):
         self.progress.setTextVisible(False)
         self.progress.setObjectName("DPBar")
 
-        b_layout.addWidget(self.lbl_status)
+        b_layout.addLayout(status_row)
         b_layout.addWidget(snap_lbl)
         b_layout.addSpacing(4)
         b_layout.addWidget(self.progress)
@@ -4880,9 +4950,8 @@ class _DeleteProgressDialog(QDialog):
         """)
 
     def _tick(self) -> None:
-        self._dots = (self._dots + 1) % 4
-        dots = "." * self._dots
-        self.lbl_status.setText(f"Removendo{dots}")
+        self._dots = (self._dots + 1) % len(self._spinner_frames)
+        self.lbl_spinner.setText(self._spinner_frames[self._dots])
 
     def closeEvent(self, event) -> None:
         self._timer.stop()
