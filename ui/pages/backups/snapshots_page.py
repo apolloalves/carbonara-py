@@ -11,8 +11,8 @@ import shutil
 import subprocess
 import tempfile
 import qtawesome as qta
-from PySide6.QtCore import Qt, QTimer, Signal, QSize, QThread
-from PySide6.QtGui import QFont
+from PySide6.QtCore import Qt, QTimer, Signal, QSize, QThread, QObject, QEvent, QPoint
+from PySide6.QtGui import QFont, QColor
 
 from PySide6.QtWidgets import (
     QWidget,
@@ -171,14 +171,17 @@ def clear_layout(layout):
             clear_layout(child_layout)
             child_layout.deleteLater()
 
-def icon_badge(icon_name: str, size: int = 34, color: str = "#FFFFFF", bg_rgba: str = "35, 166, 255, 34") -> QLabel:
+def icon_badge(icon_name: str, size: int = 34, color: str = "#FFFFFF", bg_rgba: str = "35, 166, 255, 34", opacity: float = 1.0) -> QLabel:
     label = QLabel()
     label.setAlignment(Qt.AlignCenter)
     label.setFixedSize(size, size)
 
+    icon_color = QColor(color)
+    icon_color.setAlpha(int(max(0.0, min(1.0, opacity)) * 255))
+
     pixmap = qta.icon(
         icon_name,
-        color=color
+        color=icon_color
     ).pixmap(size - 2, size - 2)
 
     label.setPixmap(pixmap)
@@ -334,6 +337,83 @@ class ScopeCard(QFrame):
         super().keyPressEvent(event)
 
 
+class _ButtonToastTip(QFrame):
+    """Tooltip estilo toast pros botões RESTORE/SYNC/DELETE — substitui o
+    QToolTip nativo do Qt (que tinha cache de reexibição inconsistente:
+    'aparece quando quer'). Mesmo padrão visual dos toasts já usados no
+    app (fundo escuro translúcido + borda azul + cantos arredondados) e
+    mesma lógica de posicionamento manual (janela topo-nível própria via
+    Qt.ToolTip, não briga com QToolTip.showText nem com o clique dos
+    botões)."""
+    def __init__(self):
+        super().__init__(None, Qt.ToolTip | Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_ShowWithoutActivating)
+        self.setObjectName("ButtonToastTip")
+        self.setStyleSheet(
+            """
+            QFrame#ButtonToastTip {
+                background: rgba(15, 18, 28, 235);
+                border: 1px solid rgba(35, 166, 255, 110);
+                border-radius: 10px;
+            }
+            """
+        )
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(14, 8, 14, 8)
+        self._label = QLabel("")
+        self._label.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
+        self._label.setStyleSheet("color: #ecf4ff; background: transparent;")
+        layout.addWidget(self._label)
+
+        # Timer próprio, sem depender do msecShowTime do QToolTip (era
+        # esse mecanismo que tinha o cache/reexibição inconsistente).
+        self._hide_timer = QTimer(self)
+        self._hide_timer.setSingleShot(True)
+        self._hide_timer.setInterval(8000)
+        self._hide_timer.timeout.connect(self.hide)
+
+    def show_for(self, target: QWidget, text: str) -> None:
+        self._label.setText(text)
+        self.adjustSize()
+        top_left = target.mapToGlobal(QPoint(0, 0))
+        x = top_left.x() + target.width() // 2 - self.width() // 2
+        y = top_left.y() - self.height() - 8
+        self.move(x, y)
+        self.show()
+        self._hide_timer.start()
+
+    def hide_now(self) -> None:
+        self._hide_timer.stop()
+        self.hide()
+
+
+_toast_tip_instance: "_ButtonToastTip | None" = None
+
+
+def _get_toast_tip() -> "_ButtonToastTip":
+    """Singleton lazy — não pode ser criado no import do módulo porque
+    QFrame exige um QApplication já existente."""
+    global _toast_tip_instance
+    if _toast_tip_instance is None:
+        _toast_tip_instance = _ButtonToastTip()
+    return _toast_tip_instance
+
+
+class _TopTooltipFilter(QObject):
+    """Intercepta o evento nativo de tooltip (mesmo gatilho de hover do
+    Qt) mas exibe com o widget _ButtonToastTip em vez do QToolTip.showText
+    nativo — resolve cor, timer e reexibição inconsistente de uma vez."""
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.ToolTip and obj.toolTip():
+            _get_toast_tip().show_for(obj, obj.toolTip())
+            return True
+        if event.type() == QEvent.Leave:
+            _get_toast_tip().hide_now()
+        return super().eventFilter(obj, event)
+
+
+
 class SnapshotCard(QFrame):
     def __init__(self, entry: SnapshotEntry, sibling: "SnapshotEntry | None" = None, parent=None):
         super().__init__(parent)
@@ -410,14 +490,21 @@ class SnapshotCard(QFrame):
         left = QHBoxLayout()
         left.setSpacing(16)
 
-        # Mesma cor do cabeçalho da seção (ROOT azul, HOME âmbar) — dá
-        # continuidade visual do grupo até o ícone de cada card.
+        # ROOT usa o mesmo azul do botão "ROOT+HOME" selecionado
+        # (rgb(59,130,246) = #3b82f6, mais escuro que o #23a6ff usado
+        # antes) — com opacidade nos dois, ROOT e HOME, em vez de cor
+        # sólida.
         kind_upper = entry.kind.upper()
-        card_accent = {"ROOT": "#23a6ff", "HOME": "#e0a840"}.get(kind_upper, "#FFFFFF")
+        card_accent = {"ROOT": "#3b82f6", "HOME": "#e0a840"}.get(kind_upper, "#FFFFFF")
+        icon_opacity = 0.8
         r = int(card_accent[1:3], 16)
         g = int(card_accent[3:5], 16)
         b = int(card_accent[5:7], 16)
-        icon_label = icon_badge(SNAPSHOT_GLYPH, 46, color=card_accent, bg_rgba=f"{r}, {g}, {b}, 34")
+        icon_label = icon_badge(
+            SNAPSHOT_GLYPH, 46,
+            color=card_accent, bg_rgba=f"{r}, {g}, {b}, 34",
+            opacity=icon_opacity,
+        )
 
         text_block = QVBoxLayout()
         text_block.setSpacing(6)
@@ -568,6 +655,11 @@ class SnapshotCard(QFrame):
         btn_row.addWidget(self.btn_restore)
         btn_row.addWidget(self.btn_sync)
         btn_row.addWidget(self.btn_delete)
+
+        self._tooltip_filter = _TopTooltipFilter(self)
+        self.btn_restore.installEventFilter(self._tooltip_filter)
+        self.btn_sync.installEventFilter(self._tooltip_filter)
+        self.btn_delete.installEventFilter(self._tooltip_filter)
 
         root.addLayout(left, 1)
         root.addLayout(btn_row)
