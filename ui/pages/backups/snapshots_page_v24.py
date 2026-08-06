@@ -9,6 +9,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 import qtawesome as qta
 from PySide6.QtCore import Qt, QTimer, Signal, QSize, QThread
 from PySide6.QtGui import QFont
@@ -17,6 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
+    QGridLayout,
     QLabel,
     QPushButton,
     QMessageBox,
@@ -32,6 +34,7 @@ from PySide6.QtWidgets import (
     QSplitter,
     QProgressBar,
     QPlainTextEdit,
+    QCheckBox,
 )
 
 from core.operation_manager import OperationManager
@@ -53,6 +56,7 @@ DELETE_GLYPH    = "mdi6.delete"
 
 REFRESH_GLYPH   = "mdi6.refresh"
 CREATE_GLYPH    = "mdi6.folder-multiple"
+VERIFY_GLYPH    = "mdi6.magnify-scan"
 
 SNAPSHOT_GLYPH  = "mdi6.archive"
 
@@ -65,7 +69,9 @@ class SnapshotEntry:
     meta_text: str
     modified_text: str
     size_str: str = ""
+    size_gb: float = 0.0
     synced_at: str = ""
+    created_at: str = ""
 
 
 def read_snapshot_metadata(path: Path) -> dict:
@@ -102,6 +108,14 @@ def collect_snapshots(backup_root: Path) -> List[SnapshotEntry]:
                     stat.st_mtime
                 ).strftime("%Y-%m-%d %H:%M:%S")
 
+                # created_at pode vir em dois formatos: ISO com "T" (da
+                # metadata gravada pelo backup.py) ou "YYYY-MM-DD HH:MM:SS"
+                # (fallback do mtime do arquivo, sem metadata). Normaliza
+                # pro formato com "T" — mesmo formato de synced_at — pra
+                # poder ser usado como fallback dele mais abaixo, sem
+                # precisar tratar dois formatos na hora de exibir a badge.
+                created_at_iso = created_at.replace(" ", "T", 1) if " " in created_at else created_at
+
                 status = meta.get("status", "unknown")
 
                 # Ignora snapshots incompletos (processo cancelado ou travado)
@@ -111,10 +125,11 @@ def collect_snapshots(backup_root: Path) -> List[SnapshotEntry]:
                 source = meta.get("source", "")
                 size_bytes = meta.get("size_bytes", 0)
                 size_str = ""
+                size_gb = 0.0
                 if size_bytes and size_bytes > 0:
-                    gb = size_bytes / (1024 ** 3)
-                    if gb >= 1:
-                        size_str = f"{gb:.1f} GB"
+                    size_gb = size_bytes / (1024 ** 3)
+                    if size_gb >= 1:
+                        size_str = f"{size_gb:.1f} GB"
                     else:
                         size_str = f"{size_bytes / (1024 ** 2):.0f} MB"
 
@@ -133,7 +148,9 @@ def collect_snapshots(backup_root: Path) -> List[SnapshotEntry]:
                             stat.st_mtime
                         ).strftime("%Y-%m-%d %H:%M:%S"),
                         size_str=size_str,
+                        size_gb=size_gb,
                         synced_at=synced_at,
+                        created_at=created_at_iso,
                     )
                 )
             except OSError:
@@ -154,24 +171,24 @@ def clear_layout(layout):
             clear_layout(child_layout)
             child_layout.deleteLater()
 
-def icon_badge(icon_name: str, size: int = 34) -> QLabel:
+def icon_badge(icon_name: str, size: int = 34, color: str = "#FFFFFF", bg_rgba: str = "35, 166, 255, 34") -> QLabel:
     label = QLabel()
     label.setAlignment(Qt.AlignCenter)
     label.setFixedSize(size, size)
 
     pixmap = qta.icon(
         icon_name,
-        color="#FFFFFF"
+        color=color
     ).pixmap(size - 2, size - 2)
 
     label.setPixmap(pixmap)
 
     label.setStyleSheet(
-        """
-        QLabel {
-            background: rgba(35, 166, 255, 34);
+        f"""
+        QLabel {{
+            background: rgba({bg_rgba});
             border-radius: 10px;
-        }
+        }}
         """
     )
 
@@ -239,23 +256,24 @@ class ScopeCard(QFrame):
             }
 
             QPushButton {
-                background: transparent;
-                border: none;
-                border-radius: 10px;
-                color: #8b92a3;
+                background: rgba(255, 255, 255, 6);
+                border: 1px solid rgba(255, 255, 255, 12);
+                border-radius: 12px;
+                color: #c8d4e0;
                 font: 700 10pt "DejaVu Sans Mono";
                 padding: 0px 12px;
                 min-height: 34px;
             }
 
             QPushButton:hover {
-                background: rgba(255, 255, 255, 8);
+                background: rgba(255, 255, 255, 10);
+                border: 1px solid rgba(255, 255, 255, 22);
                 color: #c8d4e0;
             }
 
             QPushButton:checked {
-                background: #1f6fd6;
-                border: none;
+                background: rgba(59, 130, 246, 0.22);
+                border: 1px solid rgba(99, 140, 255, 130);
                 color: #ffffff;
             }
 
@@ -317,7 +335,7 @@ class ScopeCard(QFrame):
 
 
 class SnapshotCard(QFrame):
-    def __init__(self, entry: SnapshotEntry, parent=None):
+    def __init__(self, entry: SnapshotEntry, sibling: "SnapshotEntry | None" = None, parent=None):
         super().__init__(parent)
         self.entry = entry
 
@@ -325,28 +343,28 @@ class SnapshotCard(QFrame):
         self.setStyleSheet(
             """
             QFrame#SnapshotCard {
-                border: 1px solid rgba(31, 92, 255, 80);
-                border-radius: 12px;
-                background: rgba(10, 14, 22, 240);
+                border: 1px solid rgba(255, 255, 255, 12);
+                border-radius: 14px;
+                background: rgba(255, 255, 255, 6);
             }
             QFrame#SnapshotCard:hover {
-                border: 1px solid rgba(31, 141, 218, 200);
-                background: rgba(14, 20, 32, 255);
+                border: 1px solid rgba(255, 255, 255, 22);
+                background: rgba(255, 255, 255, 9);
             }
 
             QPushButton {
                 padding: 0px 22px;
                 border-radius: 9px;
-                border: 1px solid rgba(31, 92, 255, 100);
-                background: rgba(15, 20, 35, 220);
+                border: 1px solid rgba(255, 255, 255, 14);
+                background: rgba(255, 255, 255, 6);
                 color: #c8d4e0;
                 font: 700 9pt "DejaVu Sans Mono";
                 min-height: 34px;
             }
 
             QPushButton:hover {
-                background: rgba(31, 141, 218, 50);
-                border: 1px solid rgba(31, 141, 218, 200);
+                background: rgba(255, 255, 255, 12);
+                border: 1px solid rgba(255, 255, 255, 28);
                 color: #ecf4ff;
             }
 
@@ -392,10 +410,17 @@ class SnapshotCard(QFrame):
         left = QHBoxLayout()
         left.setSpacing(16)
 
-        icon_label = icon_badge(SNAPSHOT_GLYPH, 38)
+        # Mesma cor do cabeçalho da seção (ROOT azul, HOME âmbar) — dá
+        # continuidade visual do grupo até o ícone de cada card.
+        kind_upper = entry.kind.upper()
+        card_accent = {"ROOT": "#23a6ff", "HOME": "#e0a840"}.get(kind_upper, "#FFFFFF")
+        r = int(card_accent[1:3], 16)
+        g = int(card_accent[3:5], 16)
+        b = int(card_accent[5:7], 16)
+        icon_label = icon_badge(SNAPSHOT_GLYPH, 46, color=card_accent, bg_rgba=f"{r}, {g}, {b}, 34")
 
         text_block = QVBoxLayout()
-        text_block.setSpacing(4)
+        text_block.setSpacing(6)
 
         title = QLabel(entry.path.name)
         title_font = QFont("DejaVu Sans Mono")
@@ -403,6 +428,70 @@ class SnapshotCard(QFrame):
         title_font.setBold(True)
         title.setFont(title_font)
         title.setStyleSheet("color: #ecf4ff;")
+
+        title_row = QHBoxLayout()
+        title_row.setSpacing(10)
+        title_row.setContentsMargins(0, 0, 0, 0)
+        title_row.addWidget(title)
+
+        # Badge de recência — quantos dias desde o último sync deste
+        # snapshot específico. Isso é matemática pura sobre uma data já
+        # conhecida (sem heurística de comparação com o irmão, que sempre
+        # dava falso positivo). Passado STALE_AFTER_DAYS, fica âmbar como
+        # lembrete. A checagem 100% real continua sendo o dry-run, seja
+        # via SYNC individual ou via o botão VERIFICAR (checa os dois).
+        STALE_AFTER_DAYS = 7
+        # Fallback: snapshots feitos ANTES desse dia (synced_at só passou
+        # a ser gravado na criação, não só no SYNC explícito) ou qualquer
+        # entrada sem synced_at por algum outro motivo — um snapshot
+        # recém-criado já nasce em sincronia com o sistema no momento em
+        # que foi feito, então created_at é um fallback válido, não um
+        # "nunca". Só cai em "nunca sincronizado" se faltarem os dois.
+        sync_reference = entry.synced_at or entry.created_at
+        if sync_reference:
+            try:
+                self_dt = datetime.strptime(sync_reference, "%Y-%m-%dT%H:%M:%S")
+                # Compara datas de calendário, não 24h corridas — se
+                # sincronizou às 08:41 do dia 28 e você abre antes das
+                # 08:41 do dia 29, timedelta.days ainda dá 0 (não
+                # completou 24h), mas já é "ontem" no calendário.
+                elapsed_days = (datetime.now().date() - self_dt.date()).days
+            except ValueError:
+                elapsed_days = None
+
+            if elapsed_days is not None:
+                if elapsed_days <= 0:
+                    badge_text = "sincronizado hoje"
+                elif elapsed_days == 1:
+                    badge_text = "último sync há 1 dia"
+                else:
+                    badge_text = f"último sync há {elapsed_days} dias"
+
+                stale = elapsed_days > STALE_AFTER_DAYS
+                badge_color = "#e0a840" if stale else "#5eea95"
+                badge_bg = "rgba(224,168,64,0.14)" if stale else "rgba(74,222,128,0.14)"
+
+                badge = QLabel(badge_text)
+                badge.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+                badge.setStyleSheet(
+                    f"color: {badge_color}; background: {badge_bg}; "
+                    f"border-radius: 10px; padding: 4px 14px;"
+                )
+                title_row.addWidget(badge)
+        else:
+            # Antes, sem synced_at, nenhuma badge aparecia — dava a
+            # impressão de que a informação de sync tinha sumido, quando
+            # na verdade só significa "ainda não sincronizado nenhuma
+            # vez". Mostra isso explicitamente em vez de ficar mudo.
+            badge = QLabel("nunca sincronizado")
+            badge.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+            badge.setStyleSheet(
+                "color: #ff9966; background: rgba(255,153,102,0.14); "
+                "border-radius: 10px; padding: 4px 14px;"
+            )
+            title_row.addWidget(badge)
+
+        title_row.addStretch()
 
         # Linha de meta + tamanho em destaque
         meta_row = QHBoxLayout()
@@ -427,7 +516,7 @@ class SnapshotCard(QFrame):
 
         meta_row.addStretch()
 
-        text_block.addWidget(title)
+        text_block.addLayout(title_row)
         text_block.addLayout(meta_row)
 
         # Linha synced_at — só aparece se já foi sincronizado
@@ -440,7 +529,7 @@ class SnapshotCard(QFrame):
             sync_icon.setPixmap(
                 qta.icon(SYNC_GLYPH, color="#23a6ff").pixmap(14, 14)
             )
-            sync_lbl = QLabel(f"last sync  {entry.synced_at}")
+            sync_lbl = QLabel(f"last sync  {entry.synced_at.replace('T', 'T ', 1)}")
             sync_lbl.setFont(QFont("DejaVu Sans Mono", 9))
             sync_lbl.setStyleSheet("color: #23a6ff;")
 
@@ -455,20 +544,26 @@ class SnapshotCard(QFrame):
         btn_row = QHBoxLayout()
         btn_row.setSpacing(10)
 
-        self.btn_restore = QPushButton("RESTORE")
+        self.btn_restore = QPushButton()
         self.btn_restore.setIcon(qta.icon(RESTORE_GLYPH, color="#8fd4ff"))
-        self.btn_restore.setIconSize(QSize(18, 18))
+        self.btn_restore.setIconSize(QSize(22, 22))
         self.btn_restore.setObjectName("RestoreButton")
+        self.btn_restore.setToolTip("Restaurar este snapshot")
+        self.btn_restore.setFixedWidth(48)
 
-        self.btn_sync = QPushButton("SYNC")
+        self.btn_sync = QPushButton()
         self.btn_sync.setIcon(qta.icon(SYNC_GLYPH, color="#9bf0bd"))
         self.btn_sync.setIconSize(QSize(18, 18))
         self.btn_sync.setObjectName("SyncButton")
+        self.btn_sync.setToolTip("Sincronizar este snapshot")
+        self.btn_sync.setFixedWidth(48)
 
-        self.btn_delete = QPushButton("DELETE")
+        self.btn_delete = QPushButton()
         self.btn_delete.setIcon(qta.icon(DELETE_GLYPH, color="#ff8888"))
         self.btn_delete.setIconSize(QSize(18, 18))
         self.btn_delete.setObjectName("DangerButton")
+        self.btn_delete.setToolTip("Excluir este snapshot")
+        self.btn_delete.setFixedWidth(48)
 
         btn_row.addWidget(self.btn_restore)
         btn_row.addWidget(self.btn_sync)
@@ -479,7 +574,7 @@ class SnapshotCard(QFrame):
 
 
 class SectionCard(QFrame):
-    def __init__(self, title_text: str, path_text: str, glyph: str, parent=None):
+    def __init__(self, title_text: str, path_text: str, glyph: str, accent_color: str = "#1f8dda", parent=None):
         super().__init__(parent)
         self.setObjectName("SectionCard")
         self.setStyleSheet(
@@ -499,27 +594,24 @@ class SectionCard(QFrame):
         head_frame = QFrame()
         head_frame.setObjectName("SectionHeader")
         head_frame.setStyleSheet(
-            """
-            QFrame#SectionHeader {
+            f"""
+            QFrame#SectionHeader {{
                 border: none;
-                border-left: 3px solid rgba(31, 141, 218, 200);
                 border-radius: 0px;
                 background: transparent;
-            }
+            }}
             """
         )
         head_layout = QHBoxLayout(head_frame)
         head_layout.setContentsMargins(12, 4, 0, 4)
         head_layout.setSpacing(10)
 
-        icon_label = icon_badge(glyph if glyph else CREATE_GLYPH, 32)
-
         labels = QVBoxLayout()
         labels.setSpacing(1)
 
         title = QLabel(title_text)
-        title.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
-        title.setStyleSheet("color: #ecf4ff;")
+        title.setFont(QFont("DejaVu Sans Mono", 15, QFont.Bold))
+        title.setStyleSheet(f"color: {accent_color};")
 
         path = QLabel(path_text)
         path.setFont(QFont("DejaVu Sans Mono", 8))
@@ -528,16 +620,40 @@ class SectionCard(QFrame):
         labels.addWidget(title)
         labels.addWidget(path)
 
-        head_layout.addWidget(icon_label)
         head_layout.addLayout(labels)
         head_layout.addStretch(1)
 
-        self.body = QVBoxLayout()
-        self.body.setSpacing(6)
+        # Divisor sólido, mas suavizado (opacidade reduzida) — cor cheia
+        # ficava forte demais; com alpha ~55% fica visível o bastante pra
+        # separar os grupos sem gritar na tela.
+        r = int(accent_color[1:3], 16)
+        g = int(accent_color[3:5], 16)
+        b = int(accent_color[5:7], 16)
+        divider = QFrame()
+        divider.setFixedHeight(2)
+        divider.setStyleSheet(f"background: rgba({r}, {g}, {b}, 140); border: none;")
+
+        self.body = QGridLayout()
+        self.body.setHorizontalSpacing(14)
+        self.body.setVerticalSpacing(10)
         self.body.setContentsMargins(0, 0, 0, 0)
+        self.body.setColumnStretch(0, 1)
+        self.body.setColumnStretch(1, 1)
+        self._card_count = 0
 
         self.layout_main.addWidget(head_frame)
+        self.layout_main.addWidget(divider)
+        self.layout_main.addSpacing(4)
         self.layout_main.addLayout(self.body)
+
+    def add_card(self, card_widget) -> None:
+        """Coloca os cards de snapshot em grade de 2 colunas — conforme
+        mais snapshots forem criados, eles vão preenchendo pelo menos
+        2 por linha em vez de empilhar um embaixo do outro."""
+        row = self._card_count // 2
+        col = self._card_count % 2
+        self.body.addWidget(card_widget, row, col)
+        self._card_count += 1
 
 
 class SnapshotsPage(QWidget):
@@ -549,6 +665,16 @@ class SnapshotsPage(QWidget):
         self._backup_proc: subprocess.Popen | None = None
         self.scope = "both"
         self.scope_cards: dict[str, ScopeCard] = {}
+
+        # Rastreiam a operação em andamento para permitir oferecer
+        # sincronizar o snapshot irmão (ROOT/HOME) ao concluir um sync.
+        self._current_op_kind: str | None = None
+        self._sync_entry: SnapshotEntry | None = None
+        self._offer_pair_after_sync: bool = True
+        self._pair_check_path: Path | None = None
+        self._verify_check_path: Path | None = None
+        self._verify_entries: dict[str, SnapshotEntry] = {}
+        self._sync_queue: list[SnapshotEntry] = []
 
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(1000)
@@ -605,7 +731,6 @@ class SnapshotsPage(QWidget):
             }
 
             QComboBox::down-arrow {
-                image: none;
                 width: 0px;
                 height: 0px;
             }
@@ -625,6 +750,18 @@ class SnapshotsPage(QWidget):
             """
         )
 
+        # Chevron do QComboBox — usa um ícone renderizado via qtawesome
+        # (cacheado em disco) em vez do truque de borda CSS, que não
+        # renderiza de forma confiável no Qt.
+        chevron_path = Path(tempfile.gettempdir()) / "carbonara_chevron_down_v2.png"
+        if not chevron_path.exists():
+            qta.icon("mdi6.chevron-down", color="#23a6ff").pixmap(28, 28).save(str(chevron_path))
+        self.setStyleSheet(
+            self.styleSheet()
+            + "QComboBox::down-arrow { image: url(" + chevron_path.as_posix() + "); "
+            + "width: 14px; height: 14px; margin-right: 10px; }"
+        )
+
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(14)
@@ -634,14 +771,14 @@ class SnapshotsPage(QWidget):
         self.control_card.setStyleSheet(
             """
             QFrame#ControlCard {
-                border: none;
-                border-radius: 0px;
-                background: transparent;
+                border: 1px solid rgba(255, 255, 255, 12);
+                border-radius: 18px;
+                background: rgba(255, 255, 255, 6);
             }
             """
         )
         control_layout = QHBoxLayout(self.control_card)
-        control_layout.setContentsMargins(0, 0, 0, 8)
+        control_layout.setContentsMargins(20, 18, 20, 18)
         control_layout.setSpacing(48)
         control_layout.setAlignment(Qt.AlignTop)
 
@@ -704,22 +841,22 @@ class SnapshotsPage(QWidget):
         self.right_frame.setStyleSheet(
             """
             QFrame#RightPanel {
-                border: none;
-                border-radius: 0px;
-                background: transparent;
+                border: 1px solid rgba(255, 255, 255, 12);
+                border-radius: 16px;
+                background: rgba(255, 255, 255, 6);
             }
             """
         )
 
         right_panel = QVBoxLayout(self.right_frame)
-        right_panel.setContentsMargins(0, 0, 0, 12)
+        right_panel.setContentsMargins(16, 14, 16, 14)
         right_panel.setSpacing(2)
 
         top_summary = QHBoxLayout()
         top_summary.setSpacing(8)
         top_summary.setAlignment(Qt.AlignVCenter)
 
-        self.destination_badge = icon_badge(DEST_GLYPH, 36)
+        self.destination_badge = icon_badge(DEST_GLYPH, 52)
 
         summary_text = QVBoxLayout()
         summary_text.setSpacing(0)
@@ -766,7 +903,7 @@ class SnapshotsPage(QWidget):
 
         space_row = QHBoxLayout()
         space_row.setSpacing(10)
-        space_row.setContentsMargins(50, -18, 0, 0)
+        space_row.setContentsMargins(0, 8, 0, 0)
         space_row.addWidget(self.space_bar, 8)
         space_row.addWidget(self.lbl_space_percent, 1)
 
@@ -777,22 +914,34 @@ class SnapshotsPage(QWidget):
         buttons_row = QHBoxLayout()
         buttons_row.setSpacing(12)
 
-        self.btn_refresh = QPushButton("REFRESH")
+        self.btn_refresh = QPushButton("ATUALIZAR ESPAÇO")
         self.btn_refresh.setIcon(qta.icon(REFRESH_GLYPH, color="#FFFFFF"))
         self.btn_refresh.setIconSize(QSize(16, 16))
-        self.btn_refresh.setFixedWidth(140)
+        self.btn_refresh.setFixedSize(190, 40)
+        self.btn_refresh.setVisible(True)  # reabilitado: útil para recalcular espaço após mudanças fora do app
+
+        self.btn_verify = QPushButton("VERIFICAR SYNC")
+        self.btn_verify.setIcon(qta.icon(VERIFY_GLYPH, color="#9bf0bd"))
+        self.btn_verify.setIconSize(QSize(16, 16))
+        self.btn_verify.setFixedSize(180, 40)
+        self.btn_verify.setToolTip(
+            "Verifica de verdade (rsync --dry-run) se o ROOT e o HOME mais "
+            "recentes estão desatualizados em relação ao sistema."
+        )
 
         self.btn_create = QPushButton("CREATE SNAPSHOT")
         self.btn_create.setIcon(qta.icon(CREATE_GLYPH))
         self.btn_create.setIconSize(QSize(16, 16))
-        self.btn_create.setFixedWidth(160)
+        self.btn_create.setFixedSize(160, 40)
         self.btn_create.setObjectName("PrimaryButton")
 
         self.btn_refresh.clicked.connect(self.refresh_destinations)
+        self.btn_verify.clicked.connect(self.verify_all_snapshots)
         self.btn_create.clicked.connect(self.create_snapshot)
 
         buttons_row.addStretch()
         buttons_row.addWidget(self.btn_refresh)
+        buttons_row.addWidget(self.btn_verify)
         buttons_row.addWidget(self.btn_create)
 
         # coluna direita: label + card bordado alinhados com esquerda
@@ -828,6 +977,14 @@ class SnapshotsPage(QWidget):
 
         self.refresh_destinations()
         self.set_scope("both")
+
+    def showEvent(self, event) -> None:
+        """A página é criada uma vez só (QStackedWidget) — sem isso, a
+        lista de destinos só era montada na primeira vez e nunca mais
+        atualizava sozinha, mesmo que outro disco fosse montado depois
+        (ex: via o botão 'Montar discos do sistema' na página Disks)."""
+        super().showEvent(event)
+        self.refresh_destinations()
 
     def set_scope(self, scope: str):
         if scope not in {"root", "home", "both"}:
@@ -870,10 +1027,12 @@ class SnapshotsPage(QWidget):
             self.lbl_space_percent.setText("—")
             self.space_fill.setGeometry(0, 0, 0, 5)
             self.btn_create.setEnabled(False)
+            self.btn_verify.setEnabled(False)
             self.rebuild_snapshot_view()
             return
 
         self.btn_create.setEnabled(True)
+        self.btn_verify.setEnabled(True)
 
         if current_mount:
             idx = next(
@@ -936,10 +1095,20 @@ class SnapshotsPage(QWidget):
     def set_busy(self, busy: bool):
         self.cmb_destination.setEnabled(not busy)
         self.btn_refresh.setEnabled(not busy)
+        self.btn_verify.setEnabled(not busy)
         self.btn_create.setEnabled(not busy)
         self.scroll.setEnabled(not busy)
         for card in self.scope_cards.values():
             card.setEnabled(not busy)
+        # Trava a janela principal inteira (não só os controles dessa
+        # página) enquanto o processo elevado (pkexec) roda em segundo
+        # plano — inclui o diálogo "Verificando Snapshot Irmão", que roda
+        # num processo do SO separado e por isso não consegue travar o
+        # Carbonara principal sozinho via modalidade do Qt (modalidade só
+        # funciona dentro do mesmo processo/QApplication).
+        window = self.window()
+        if window is not None:
+            window.setEnabled(not busy)
 
     def rebuild_snapshot_view(self):
         clear_layout(self.scroll_layout)
@@ -1007,6 +1176,14 @@ class SnapshotsPage(QWidget):
         for entry in entries:
             grouped[entry.kind.upper()].append(entry)
 
+        # Lookup para encontrar o snapshot irmão (mesmo stamp, kind oposto)
+        by_key = {(e.kind.upper(), e.path.name): e for e in entries}
+
+        def _sibling_of(e: SnapshotEntry) -> "SnapshotEntry | None":
+            kind = e.kind.upper()
+            sib_kind = "HOME" if kind == "ROOT" else "ROOT" if kind == "HOME" else None
+            return by_key.get((sib_kind, e.path.name)) if sib_kind else None
+
         ordered_kinds = []
         for preferred in ("ROOT", "HOME"):
             if preferred in grouped:
@@ -1016,15 +1193,19 @@ class SnapshotsPage(QWidget):
             if kind not in ordered_kinds:
                 ordered_kinds.append(kind)
 
+        SECTION_ACCENTS = {"ROOT": "#23a6ff", "HOME": "#e0a840"}
+
         for kind in ordered_kinds:
             section_icon = ROOT_GLYPH if kind == "ROOT" else HOME_GLYPH if kind == "HOME" else SNAPSHOT_GLYPH
+            accent_color = SECTION_ACCENTS.get(kind, "#7d8a99")
             section = SectionCard(
                 kind,
                 str(backup_root / kind),
                 section_icon,
+                accent_color=accent_color,
             )
             for entry in grouped[kind]:
-                card = SnapshotCard(entry)
+                card = SnapshotCard(entry, sibling=_sibling_of(entry))
                 card.btn_restore.clicked.connect(
                     lambda _, e=entry: self.restore_snapshot(e)
                 )
@@ -1034,9 +1215,17 @@ class SnapshotsPage(QWidget):
                 card.btn_delete.clicked.connect(
                     lambda _, e=entry: self.delete_snapshot(e)
                 )
-                section.body.addWidget(card)
+                # Grade de 2 colunas DENTRO da seção — não é ROOT e HOME
+                # lado a lado, é cada seção ocupando a largura toda, com
+                # os próprios snapshots dela preenchendo pelo menos 2
+                # por linha conforme mais forem criados.
+                section.add_card(card)
 
             self.scroll_layout.addWidget(section)
+            # Respiro extra entre grupos (ROOT vs HOME) — maior que o
+            # espaçamento padrão do scroll_layout entre cards do mesmo
+            # grupo, pra reforçar visualmente onde um grupo termina.
+            self.scroll_layout.addSpacing(18)
 
         self.scroll_layout.addStretch(1)
 
@@ -1073,37 +1262,27 @@ class SnapshotsPage(QWidget):
             return
 
         self.set_busy(True)
+        self._current_op_kind = "backup"
+        self._sync_entry = None
 
-        project_root = Path(__file__).resolve().parents[3]
-        python_bin = Path.home() / "venvs" / "pyside" / "bin" / "python3"
+        import json
 
-        script = f"""
-import sys
-sys.path.insert(0, {str(project_root)!r})
-
-from PySide6.QtWidgets import QApplication
-from core.snapshots.backup import create_backup
-from ui.widgets.backup_progress import BackupProgressDialog
-
-app = QApplication([])
-dialog = BackupProgressDialog()
-create_backup(dialog, destination_mountpoint={dest.mountpoint!r}, scope={self.current_scope()!r})
-dialog.exec()
-"""
+        args_json = json.dumps({
+            "destination_mountpoint": dest.mountpoint,
+            "scope": self.current_scope(),
+        })
 
         cmd = [
             "pkexec",
-            "env",
-            f"DISPLAY={os.environ.get('DISPLAY', '')}",
-            f"XAUTHORITY={os.environ.get('XAUTHORITY', '')}",
-            f"PYTHONPATH={project_root}",
-            str(python_bin),
-            "-c",
-            script,
+            "/usr/local/bin/carbonara-helper",
+            os.environ.get("DISPLAY", ""),
+            os.environ.get("XAUTHORITY", ""),
+            "backup.create_backup",
+            args_json,
         ]
 
         try:
-            self._backup_proc = subprocess.Popen(cmd, cwd=str(project_root))
+            self._backup_proc = subprocess.Popen(cmd)
             self._poll_timer.start()
         except Exception as e:
             OperationManager.finish()
@@ -1140,6 +1319,39 @@ dialog.exec()
                 parent=self,
             )
 
+        # Após um SYNC concluído com sucesso, oferece sincronizar o
+        # snapshot irmão (ROOT/HOME com o mesmo stamp), se existir.
+        if (
+            rc == 0
+            and self._current_op_kind == "sync"
+            and self._sync_entry is not None
+            and self._offer_pair_after_sync
+        ):
+            self._maybe_offer_pair_sync(self._sync_entry)
+
+        # Após o botão VERIFICAR checar ROOT e HOME de verdade, oferece
+        # sincronizar cada um que estiver realmente desatualizado.
+        if rc == 0 and self._current_op_kind == "verify":
+            self._handle_verify_result()
+
+        # Se o usuário marcou mais de um no dialog combinado (ex: "Sincronizar
+        # ambas"), encadeia o próximo da fila automaticamente — já foi
+        # confirmado, não precisa perguntar de novo.
+        if rc == 0 and self._current_op_kind == "sync" and self._sync_queue:
+            next_entry = self._sync_queue.pop(0)
+            # Garantia defensiva: nesse ponto o finish() já rodou linhas
+            # acima, mas forçamos de novo antes de encadear — nada mais
+            # deveria estar "rodando" aqui, então isso é seguro e evita
+            # qualquer resquício de estado impedir o próximo da fila.
+            OperationManager.finish()
+            self._start_sync_process(next_entry, offer_pair=False)
+            return
+
+        self._sync_entry = None
+        self._current_op_kind = None
+        self._verify_entries = {}
+        self._sync_queue = []
+
     def restore_snapshot(self, entry: SnapshotEntry):
         if OperationManager.is_running():
             QMessageBox.warning(
@@ -1161,47 +1373,297 @@ dialog.exec()
         if dialog.exec() != QDialog.Accepted:
             return
 
+        self._start_sync_process(entry, offer_pair=True)
+
+    def _start_sync_process(self, entry: SnapshotEntry, offer_pair: bool = True):
         if not OperationManager.start("sync", f"Sync snapshot {entry.path.name}"):
             QMessageBox.warning(self, "Carbonara", "Another operation is already running.")
             return
 
         self.set_busy(True)
+        self._current_op_kind = "sync"
+        self._sync_entry = entry
+        self._offer_pair_after_sync = offer_pair
 
-        dest = self.current_destination()
-        project_root = Path(__file__).resolve().parents[3]
-        python_bin = Path.home() / "venvs" / "pyside" / "bin" / "python3"
+        # Arquivo onde o processo elevado (pkexec) grava o resultado real
+        # da checagem de pendências do snapshot irmão — evita um segundo
+        # prompt de autenticação e evita heurísticas por horário.
+        pair_check_path = Path(f"/tmp/carbonara-pair-check-{os.getpid()}-{entry.path.name}.json")
+        self._pair_check_path = pair_check_path
 
-        script = f"""
-import sys
-sys.path.insert(0, {str(project_root)!r})
+        import json
 
-from PySide6.QtWidgets import QApplication
-from core.snapshots.backup import sync_snapshot
-from ui.widgets.backup_progress import BackupProgressDialog
+        args_json = json.dumps({
+            "snapshot_path": str(entry.path),
+            "offer_pair": offer_pair,
+            "pair_check_path": str(pair_check_path),
+        })
 
-app = QApplication([])
-dialog = BackupProgressDialog()
-sync_snapshot(dialog, snapshot_path={str(entry.path)!r})
-dialog.exec()
-"""
         cmd = [
             "pkexec",
-            "env",
-            f"DISPLAY={os.environ.get('DISPLAY', '')}",
-            f"XAUTHORITY={os.environ.get('XAUTHORITY', '')}",
-            f"PYTHONPATH={project_root}",
-            str(python_bin),
-            "-c",
-            script,
+            "/usr/local/bin/carbonara-helper",
+            os.environ.get("DISPLAY", ""),
+            os.environ.get("XAUTHORITY", ""),
+            "backup.sync_snapshot",
+            args_json,
         ]
 
         try:
-            self._backup_proc = subprocess.Popen(cmd, cwd=str(project_root))
+            self._backup_proc = subprocess.Popen(cmd)
             self._poll_timer.start()
         except Exception as e:
             OperationManager.finish()
             self.set_busy(False)
             _show_error("Carbonara Sync", str(e), parent=self)
+
+    def _maybe_offer_pair_sync(self, entry: SnapshotEntry) -> None:
+        """Lê o resultado do rsync --dry-run gravado pelo processo elevado
+        e só pergunta se houver mudanças pendentes reais no snapshot irmão."""
+        pair_check_path = getattr(self, "_pair_check_path", None)
+        if pair_check_path is None:
+            return
+        if not pair_check_path.exists():
+            _show_error(
+                "Verificação de snapshot irmão",
+                "A checagem não gerou resultado — o arquivo temporário não "
+                "foi criado. Verifique se ui/widgets/backup_progress.py está "
+                "atualizado no projeto (classe PairCheckProgressDialog).",
+                parent=self,
+            )
+            return
+
+        try:
+            payload = json.loads(pair_check_path.read_text(encoding="utf-8"))
+        finally:
+            try:
+                pair_check_path.unlink()
+            except OSError:
+                pass
+
+        if payload.get("error"):
+            _show_error(
+                "Verificação de snapshot irmão",
+                f"A checagem falhou (sync já concluído normalmente):\n\n{payload['error']}",
+                parent=self,
+            )
+            return
+
+        if not payload.get("needs_sync"):
+            return
+
+        sibling_kind = payload.get("sibling_kind")
+        sibling_path = payload.get("sibling_path")
+        if not sibling_kind or not sibling_path:
+            return
+
+        backup_root = entry.path.parent.parent
+        sibling_entry = next(
+            (
+                e for e in collect_snapshots(backup_root)
+                if e.kind.upper() == sibling_kind and str(e.path) == sibling_path
+            ),
+            None,
+        )
+        if sibling_entry is None:
+            return
+
+        dlg = _OfferPairSyncDialog(sibling_kind, sibling_entry.path.name, parent=self)
+        if dlg.exec() != QDialog.Accepted:
+            return
+
+        # Garantia defensiva — ver comentário equivalente no encadeamento
+        # da fila em _poll_backup_process.
+        OperationManager.finish()
+        self._start_sync_process(sibling_entry, offer_pair=False)
+
+    def verify_all_snapshots(self):
+        """Botão VERIFICAR: roda uma única sessão pkexec que faz
+        rsync --dry-run real do ROOT e do HOME mais recentes contra o
+        sistema atual, e oferece sincronizar cada um que estiver
+        realmente desatualizado — sem depender de heurística de data."""
+        if OperationManager.is_running():
+            QMessageBox.warning(
+                self, "Carbonara", "Another exclusive operation is already running."
+            )
+            return
+
+        dest = self.current_destination()
+        if dest is None:
+            return
+
+        backup_root = Path(dest.backup_root)
+        all_entries = [
+            e for e in collect_snapshots(backup_root) if e.kind.upper() in ("ROOT", "HOME")
+        ]
+
+        if not all_entries:
+            _show_info(
+                "Carbonara",
+                "Nenhum snapshot ROOT/HOME encontrado para verificar.",
+                parent=self,
+            )
+            return
+
+        # Por padrão, pré-marca só o mais recente de cada tipo (mesmo
+        # comportamento de antes) — o usuário pode marcar outros também.
+        latest_by_kind: dict[str, SnapshotEntry] = {}
+        for e in all_entries:
+            k = e.kind.upper()
+            if k not in latest_by_kind or e.path.name > latest_by_kind[k].path.name:
+                latest_by_kind[k] = e
+        default_checked = {_VerifySelectDialog.make_id(e) for e in latest_by_kind.values()}
+
+        if len(all_entries) == 1:
+            # Só existe um candidato — nada para escolher, verifica direto.
+            selected = all_entries
+        else:
+            select_dlg = _VerifySelectDialog(all_entries, default_checked=default_checked, parent=self)
+            if select_dlg.exec() != QDialog.Accepted:
+                return
+
+            selected = select_dlg.selected_entries()
+            if not selected:
+                return
+
+        verify_label_op = ", ".join(f"{e.kind.upper()} {e.path.name}" for e in selected)
+        if not OperationManager.start("verify", f"Verificando {verify_label_op}"):
+            QMessageBox.warning(self, "Carbonara", "Another operation is already running.")
+            return
+
+        self.set_busy(True)
+        self._current_op_kind = "verify"
+        self._verify_entries = {_VerifySelectDialog.make_id(e): e for e in selected}
+
+        verify_path = Path(f"/tmp/carbonara-verify-{os.getpid()}.json")
+        self._verify_check_path = verify_path
+
+        targets = {
+            _VerifySelectDialog.make_id(e): {"kind": e.kind.upper(), "path": str(e.path)}
+            for e in selected
+        }
+        kinds_involved = sorted({e.kind.upper() for e in selected})
+        verify_label = (
+            " + ".join(kinds_involved) if len(selected) <= 2
+            else f"{len(selected)} snapshots"
+        )
+
+        args_json = json.dumps({
+            "targets": targets,
+            "label": verify_label,
+            "result_path": str(verify_path),
+        })
+
+        cmd = [
+            "pkexec",
+            "/usr/local/bin/carbonara-helper",
+            os.environ.get("DISPLAY", ""),
+            os.environ.get("XAUTHORITY", ""),
+            "backup.verify",
+            args_json,
+        ]
+
+        try:
+            self._backup_proc = subprocess.Popen(cmd)
+            self._poll_timer.start()
+        except Exception as e:
+            OperationManager.finish()
+            self.set_busy(False)
+            _show_error("Carbonara Verify", str(e), parent=self)
+
+    def _handle_verify_result(self) -> None:
+        """Lê o resultado real do VERIFICAR e oferece sincronizar, em
+        sequência, cada snapshot (ROOT e/ou HOME) que estiver desatualizado."""
+        verify_path = getattr(self, "_verify_check_path", None)
+        if verify_path is None:
+            return
+        if not verify_path.exists():
+            _show_error(
+                "Carbonara Verify",
+                "A verificação não gerou resultado — o arquivo temporário "
+                "não foi criado.",
+                parent=self,
+            )
+            return
+
+        try:
+            payload = json.loads(verify_path.read_text(encoding="utf-8"))
+        finally:
+            try:
+                verify_path.unlink()
+            except OSError:
+                pass
+
+        entries = getattr(self, "_verify_entries", {}) or {}
+
+        error_ids = [
+            id_ for id_, info in payload.items()
+            if isinstance(info, dict) and info.get("status") == "error" and id_ in entries
+        ]
+        stale_ids = [
+            id_ for id_, info in payload.items()
+            if isinstance(info, dict) and info.get("status") == "stale" and id_ in entries
+        ]
+
+        def _label(id_: str) -> str:
+            e = entries[id_]
+            return f"{e.kind.upper()} {e.path.name}"
+
+        # Qualquer snapshot que não pôde ser verificado (erro real, não "sem
+        # mudanças") é reportado explicitamente — nunca tratado como "em dia"
+        # por padrão, pra não mascarar uma falha real como sucesso.
+        if error_ids:
+            details = "\n".join(
+                f"{_label(id_)}: {payload[id_].get('detail', 'motivo desconhecido')}"
+                for id_ in error_ids
+            )
+            _show_error(
+                "Carbonara Verify",
+                f"Não foi possível verificar {', '.join(_label(i) for i in error_ids)} de verdade:\n\n{details}",
+                parent=self,
+            )
+            if not stale_ids:
+                return
+
+        if not stale_ids:
+            lines = [
+                f"Snapshot {e.path.name} {e.kind.upper()} já está sincronizado com o estado atual do sistema."
+                for id_, e in sorted(entries.items())
+            ]
+            _show_info(
+                "Carbonara",
+                "\n".join(lines) if lines else "Nenhum snapshot verificado.",
+                parent=self,
+            )
+            return
+
+        stale_list = [(entries[id_].kind.upper(), entries[id_].path.name) for id_ in stale_ids]
+        dlg = _VerifyResultsDialog(stale_list, parent=self)
+        if dlg.exec() != QDialog.Accepted:
+            return
+
+        selected_labels = dlg.selected_kinds()
+        if not selected_labels:
+            return
+
+        # _VerifyResultsDialog trabalha com (kind, name) — remonta pra id_
+        # composto pra buscar o SnapshotEntry certo de volta.
+        selected_ids = [
+            id_ for id_ in stale_ids
+            if f"{entries[id_].kind.upper()}|{entries[id_].path.name}" in selected_labels
+        ]
+
+        # Sync é uma operação exclusiva — enfileira e processa uma de cada
+        # vez, encadeando automaticamente (sem perguntar de novo, já que
+        # o usuário acabou de confirmar todos no mesmo dialog).
+        queue = [entries[id_] for id_ in selected_ids]
+        if not queue:
+            return
+        first = queue.pop(0)
+        self._sync_queue = queue
+        # Garantia defensiva — ver comentário equivalente no encadeamento
+        # da fila em _poll_backup_process.
+        OperationManager.finish()
+        self._start_sync_process(first, offer_pair=False)
 
     def delete_snapshot(self, entry: SnapshotEntry):
         if OperationManager.is_running():
@@ -1212,7 +1674,19 @@ dialog.exec()
             )
             return
 
-        dialog = _DeleteConfirmDialog(entry, parent=self)
+        # Se este for o último snapshot ROOT, apagá-lo também remove o
+        # carbonara-restore.sh (nada sobra pra restaurar) — avisa antes.
+        is_last_root = False
+        if entry.kind.upper() == "ROOT":
+            dest = self.current_destination()
+            if dest is not None:
+                root_count = sum(
+                    1 for e in collect_snapshots(Path(dest.backup_root))
+                    if e.kind.upper() == "ROOT"
+                )
+                is_last_root = root_count <= 1
+
+        dialog = _DeleteConfirmDialog(entry, is_last_root=is_last_root, parent=self)
         if dialog.exec() != QDialog.Accepted:
             return
 
@@ -1367,6 +1841,120 @@ def _show_error(title: str, message: str, parent=None) -> None:
     _ErrorDialog(title, message, parent=parent).exec()
 
 
+class _InfoDialog(QDialog):
+    """Variante verde do _ErrorDialog, para mensagens neutras/positivas
+    (ex: 'já está tudo em dia') — mesma identidade visual, sem o
+    QMessageBox genérico do sistema."""
+
+    def __init__(self, title: str, message: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setModal(True)
+        self.setMinimumWidth(500)
+        self.setMaximumWidth(680)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self._build_ui(title, message)
+        self._apply_styles()
+        self.adjustSize()
+
+    def _build_ui(self, title: str, message: str) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        header = QFrame()
+        header.setObjectName("InfoHeader")
+        header.setFixedHeight(46)
+        h_layout = QHBoxLayout(header)
+        h_layout.setContentsMargins(16, 0, 14, 0)
+
+        icon = QLabel()
+        icon.setFixedSize(26, 26)
+        icon.setAlignment(Qt.AlignCenter)
+        icon.setPixmap(qta.icon("mdi6.check-circle", color="#9bf0bd").pixmap(16, 16))
+        icon.setStyleSheet("QLabel { background: rgba(74,222,128,40); border-radius: 7px; }")
+
+        lbl = QLabel(title)
+        lbl.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+        lbl.setStyleSheet("color: #ecf4ff;")
+
+        btn_x = _CloseLabel(self)
+        btn_x.setFixedSize(24, 24)
+        btn_x.mousePressEvent = lambda e: self.accept()
+
+        h_layout.addWidget(icon)
+        h_layout.addSpacing(8)
+        h_layout.addWidget(lbl)
+        h_layout.addStretch()
+        h_layout.addWidget(btn_x)
+
+        body = QFrame()
+        body.setObjectName("InfoBody")
+        b_layout = QVBoxLayout(body)
+        b_layout.setContentsMargins(24, 24, 24, 22)
+        b_layout.setSpacing(20)
+
+        msg = QLabel(message.replace("\n", "<br><br>"))
+        msg.setTextFormat(Qt.RichText)
+        msg.setFont(QFont("DejaVu Sans Mono", 10))
+        msg.setStyleSheet("color: #c8d4e0;")
+        msg.setWordWrap(True)
+        msg.setTextInteractionFlags(Qt.TextSelectableByMouse)
+
+        btn_ok = QPushButton("OK")
+        btn_ok.setObjectName("InfoBtnOk")
+        btn_ok.setFixedWidth(90)
+        btn_ok.clicked.connect(self.accept)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_row.addWidget(btn_ok)
+
+        b_layout.addWidget(msg)
+        b_layout.addLayout(btn_row)
+
+        root.addWidget(header)
+        root.addWidget(body)
+
+    def _apply_styles(self) -> None:
+        self.setStyleSheet("""
+            QFrame#InfoHeader {
+                background: rgba(10, 30, 16, 255);
+                border-bottom: 1px solid rgba(74, 222, 128, 100);
+                border-top-left-radius: 12px;
+                border-top-right-radius: 12px;
+            }
+            QFrame#InfoBody {
+                background: #080c14;
+                border-bottom-left-radius: 12px;
+                border-bottom-right-radius: 12px;
+            }
+            QPushButton#InfoBtnOk {
+                background: rgba(10, 15, 25, 230);
+                border: 1px solid rgba(74, 222, 128, 120);
+                border-radius: 8px; color: #ecf4ff;
+                font-family: "DejaVu Sans Mono";
+                font-size: 11px; padding: 5px 0;
+            }
+            QPushButton#InfoBtnOk:hover {
+                background: rgba(74, 222, 128, 40);
+                border-color: rgba(94, 234, 149, 200);
+            }
+        """)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.LeftButton and hasattr(self, '_drag'):
+            self.move(event.globalPosition().toPoint() - self._drag)
+
+
+def _show_info(title: str, message: str, parent=None) -> None:
+    _InfoDialog(title, message, parent=parent).exec()
+
+
 # ── Restore helpers ───────────────────────────────────────────────────────────
 
 class _MaxLabel(QLabel):
@@ -1383,7 +1971,7 @@ class _MaxLabel(QLabel):
             "QLabel { color: #c8d4e0; font-size: 14px; "
             "border-radius: 6px; background: transparent; }"
         )
-        self.setText("⬜")
+        self.setText("□")
 
     def _set_hover(self):
         self.setStyleSheet(
@@ -1406,7 +1994,7 @@ class _MaxLabel(QLabel):
                 win.resize(win._normal_size)
                 win.move(win._normal_pos)
                 win._is_maximized = False
-                self.setText("⬜")
+                self.setText("□")
             else:
                 from PySide6.QtWidgets import QApplication
                 win._normal_size = win.size()
@@ -1511,7 +2099,8 @@ class _RestoreDialog(QDialog):
         self.entry = entry
         self.setWindowTitle("Restore Snapshot")
         self.setModal(True)
-        self.setFixedSize(860, 400)
+        extra_height = 92 if entry.path.parent.name.upper() == "HOME" else 0
+        self.setFixedSize(880, 514 + extra_height)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_StyledBackground, True)
         self._build_ui()
@@ -1524,25 +2113,25 @@ class _RestoreDialog(QDialog):
 
         header = QFrame()
         header.setObjectName("RstHeader")
-        header.setFixedHeight(54)
+        header.setFixedHeight(60)
         h_layout = QHBoxLayout(header)
         h_layout.setContentsMargins(20, 0, 18, 0)
+        h_layout.setSpacing(6)
 
         icon = QLabel()
-        icon.setFixedSize(34, 34)
+        icon.setFixedSize(50, 50)
         icon.setAlignment(Qt.AlignCenter)
-        icon.setPixmap(qta.icon("mdi6.file-restore-outline", color="#23a6ff").pixmap(22, 22))
-        icon.setStyleSheet("QLabel { background: rgba(35,166,255,40); border-radius: 10px; }")
+        icon.setPixmap(qta.icon("mdi6.file-restore-outline", color="#8fd4ff").pixmap(40, 40))
+        icon.setStyleSheet("QLabel { background: transparent; }")
 
         lbl = QLabel("Restore Snapshot")
-        lbl.setFont(QFont("DejaVu Sans Mono", 13, QFont.Bold))
-        lbl.setStyleSheet("color: #ecf4ff;")
+        lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+        lbl.setStyleSheet("color: #ffffff; background: transparent;")
 
         btn_x = _CloseLabel(self)
         btn_x.mousePressEvent = lambda e: self.reject()
 
         h_layout.addWidget(icon)
-        h_layout.addSpacing(12)
         h_layout.addWidget(lbl)
         h_layout.addStretch()
         h_layout.addWidget(btn_x)
@@ -1550,43 +2139,81 @@ class _RestoreDialog(QDialog):
         body = QFrame()
         body.setObjectName("RstBody")
         b_layout = QVBoxLayout(body)
-        b_layout.setContentsMargins(24, 10, 24, 14)
-        b_layout.setSpacing(5)
-        # Snapshot info com badge igual aos cards da lista
+        b_layout.setContentsMargins(28, 20, 28, 22)
+        b_layout.setSpacing(10)
+        # Snapshot info — réplica completa do SnapshotCard (título, meta+size, last sync)
         snap_row = QHBoxLayout()
-        snap_row.setSpacing(10)
+        snap_row.setSpacing(14)
         snap_row.setContentsMargins(0, 0, 0, 0)
 
-        snap_icon = icon_badge(SNAPSHOT_GLYPH, 32)
+        snap_icon = icon_badge(SNAPSHOT_GLYPH, 38)
 
         snap_text = QVBoxLayout()
-        snap_text.setSpacing(2)
+        snap_text.setSpacing(4)
         snap_text.setContentsMargins(0, 0, 0, 0)
 
         snap_title = QLabel(self.entry.path.name)
-        snap_title.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+        snap_title_font = QFont("DejaVu Sans Mono")
+        snap_title_font.setPointSizeF(10.5)
+        snap_title_font.setBold(True)
+        snap_title.setFont(snap_title_font)
         snap_title.setStyleSheet("color: #ecf4ff;")
 
+        snap_meta_row = QHBoxLayout()
+        snap_meta_row.setSpacing(8)
+        snap_meta_row.setContentsMargins(0, 0, 0, 0)
+
         snap_meta = QLabel(self.entry.meta_text)
-        snap_meta.setFont(QFont("DejaVu Sans Mono", 8))
+        snap_meta.setFont(QFont("DejaVu Sans Mono", 10))
         snap_meta.setStyleSheet("color: #6b7a8d;")
+        snap_meta_row.addWidget(snap_meta)
+
+        if self.entry.size_str:
+            snap_size_prefix = QLabel("snapshot size")
+            snap_size_prefix.setFont(QFont("DejaVu Sans Mono", 9))
+            snap_size_prefix.setStyleSheet("color: #6b7a8d;")
+            snap_meta_row.addWidget(snap_size_prefix)
+
+            snap_size_val = QLabel(self.entry.size_str)
+            snap_size_val.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
+            snap_size_val.setStyleSheet("color: #4ade80;")
+            snap_meta_row.addWidget(snap_size_val)
+
+        snap_meta_row.addStretch()
 
         snap_text.addWidget(snap_title)
-        snap_text.addWidget(snap_meta)
+        snap_text.addLayout(snap_meta_row)
+
+        if self.entry.synced_at:
+            snap_sync_row = QHBoxLayout()
+            snap_sync_row.setSpacing(6)
+            snap_sync_row.setContentsMargins(0, 0, 0, 0)
+
+            snap_sync_icon = QLabel()
+            snap_sync_icon.setPixmap(qta.icon(SYNC_GLYPH, color="#23a6ff").pixmap(14, 14))
+
+            snap_sync_lbl = QLabel(f"last sync  {self.entry.synced_at.replace('T', 'T ', 1)}")
+            snap_sync_lbl.setFont(QFont("DejaVu Sans Mono", 9))
+            snap_sync_lbl.setStyleSheet("color: #23a6ff;")
+
+            snap_sync_row.addWidget(snap_sync_icon)
+            snap_sync_row.addWidget(snap_sync_lbl)
+            snap_sync_row.addStretch()
+            snap_text.addLayout(snap_sync_row)
 
         snap_row.addWidget(snap_icon)
         snap_row.addLayout(snap_text)
         snap_row.addStretch()
-        lbl_choose = QLabel("Escolha o tipo de restore:")
-        lbl_choose = QLabel("Escolha o tipo de restore:")
-        lbl_choose.setFont(QFont("DejaVu Sans Mono", 9))
-        lbl_choose.setStyleSheet("color: #9aa6b2;")
+        lbl_choose = QLabel("ESCOLHA O TIPO DE RESTORE")
+        lbl_choose.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
+        lbl_choose.setStyleSheet("color: #c8d4e0; letter-spacing: 1px;")
         btn1 = _RestoreOptionButton(
             glyph="mdi6.harddisk",
             title="Full System Restore",
-            desc="Gera script bash para restaurar o sistema completo via live ISO (requer reboot).",
+            desc="Gera script bash para restaurar o sistema completo via live ISO.",
             color="#ff9966",
             parent=self,
+            badge="requer reboot",
         )
         btn1.clicked.connect(self._on_full_restore)
 
@@ -1608,15 +2235,27 @@ class _RestoreDialog(QDialog):
         )
         btn3.clicked.connect(self._on_alt_restore)
 
+        is_home = self.entry.path.parent.name.upper() == "HOME"
+        btn4 = None
+        if is_home:
+            btn4 = _RestoreOptionButton(
+                glyph="mdi6.home-import-outline",
+                title="Restaurar HOME sem reboot",
+                desc="Restaura a HOME inteira no sistema rodando agora — sem live ISO. Encerra a sessão ao final (logout).",
+                color="#4ade80",
+                parent=self,
+            )
+            btn4.clicked.connect(self._on_home_live_restore)
+
         b_layout.addLayout(snap_row)
-        b_layout.addSpacing(8)
+        b_layout.addSpacing(24)
         b_layout.addWidget(lbl_choose)
-        b_layout.addSpacing(6)
+        b_layout.addSpacing(10)
         b_layout.addWidget(btn1)
 
         sep1 = QFrame()
         sep1.setFrameShape(QFrame.HLine)
-        sep1.setStyleSheet("border: none; border-top: 1px solid rgba(31,92,255,30);")
+        sep1.setStyleSheet("border: none; border-top: 1px solid rgba(255,255,255,10);")
         sep1.setFixedHeight(1)
         b_layout.addWidget(sep1)
 
@@ -1624,11 +2263,20 @@ class _RestoreDialog(QDialog):
 
         sep2 = QFrame()
         sep2.setFrameShape(QFrame.HLine)
-        sep2.setStyleSheet("border: none; border-top: 1px solid rgba(31,92,255,30);")
+        sep2.setStyleSheet("border: none; border-top: 1px solid rgba(255,255,255,10);")
         sep2.setFixedHeight(1)
         b_layout.addWidget(sep2)
 
         b_layout.addWidget(btn3)
+
+        if btn4 is not None:
+            sep3 = QFrame()
+            sep3.setFrameShape(QFrame.HLine)
+            sep3.setStyleSheet("border: none; border-top: 1px solid rgba(255,255,255,10);")
+            sep3.setFixedHeight(1)
+            b_layout.addWidget(sep3)
+            b_layout.addWidget(btn4)
+
         b_layout.addStretch()
 
         root.addWidget(header)
@@ -1637,18 +2285,17 @@ class _RestoreDialog(QDialog):
     def _apply_styles(self) -> None:
         self.setStyleSheet("""
             QDialog {
-                background: #080c14;
-                
+                background: #0d0f14;
                 border-radius: 16px;
             }
             QFrame#RstHeader {
-                background: rgba(8, 20, 40, 255);
-                border-bottom: 1px solid rgba(35, 166, 255, 80);
+                background: rgba(35, 166, 255, 35);
+                border-bottom: 1px solid rgba(35, 166, 255, 25);
                 border-top-left-radius: 15px;
                 border-top-right-radius: 15px;
             }
             QFrame#RstBody {
-                background: #080c14;
+                background: #0d0f14;
                 border-bottom-left-radius: 15px;
                 border-bottom-right-radius: 15px;
             }
@@ -1662,18 +2309,29 @@ class _RestoreDialog(QDialog):
         """)
 
     def _on_full_restore(self) -> None:
-        self.accept()
-        _do_full_restore(self.entry, parent=self.parent())
+        self.hide()
+        try:
+            _do_full_restore(self.entry, parent=self.parent())
+        finally:
+            self.show()
 
     def _on_file_browser(self) -> None:
-        self.accept()
+        self.hide()
         dlg = _FileBrowserDialog(self.entry, parent=self.parent())
         dlg.exec()
+        self.show()
 
     def _on_alt_restore(self) -> None:
-        self.accept()
+        self.hide()
         dlg = _AltRestoreDialog(self.entry, parent=self.parent())
         dlg.exec()
+        self.show()
+
+    def _on_home_live_restore(self) -> None:
+        self.hide()
+        dlg = _HomeLiveRestoreDialog(self.entry, parent=self.parent())
+        dlg.exec()
+        self.show()
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -1688,7 +2346,7 @@ class _RestoreDialog(QDialog):
         super().paintEvent(event)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        pen = QPen(QColor(31, 141, 218, 120))
+        pen = QPen(QColor(255, 255, 255, 22))
         pen.setWidth(1)
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
@@ -1698,20 +2356,20 @@ class _RestoreDialog(QDialog):
 class _RestoreOptionButton(QFrame):
     clicked = Signal()
 
-    def __init__(self, glyph: str, title: str, desc: str, color: str, parent=None):
+    def __init__(self, glyph: str, title: str, desc: str, color: str, parent=None, badge: str = ""):
         super().__init__(parent)
         self.setCursor(Qt.PointingHandCursor)
         self.setObjectName("RstOptionBtn")
-        self.setFixedHeight(62)
+        self.setFixedHeight(72)
         self._color = color
         self.setStyleSheet(f"""
             QFrame#RstOptionBtn {{
-                background: rgba(10, 15, 25, 200);
-                border: 1px solid rgba(31, 92, 255, 40);
+                background: rgba(255, 255, 255, 5);
+                border: 1px solid rgba(255, 255, 255, 10);
                 border-radius: 12px;
             }}
             QFrame#RstOptionBtn:hover {{
-                background: rgba(14, 22, 40, 255);
+                background: rgba(255, 255, 255, 9);
                 border: 1px solid {color};
             }}
         """)
@@ -1723,9 +2381,9 @@ class _RestoreOptionButton(QFrame):
 
         # Badge colorido via icon_badge
         ico_lbl = QLabel()
-        ico_lbl.setFixedSize(36, 36)
+        ico_lbl.setFixedSize(42, 42)
         ico_lbl.setAlignment(Qt.AlignCenter)
-        ico_lbl.setPixmap(qta.icon(glyph, color=color).pixmap(18, 18))
+        ico_lbl.setPixmap(qta.icon(glyph, color=color).pixmap(22, 22))
         h = color.lstrip("#")
         r, g, b = int(h[0:2],16), int(h[2:4],16), int(h[4:6],16)
         ico_lbl.setStyleSheet(
@@ -1738,16 +2396,33 @@ class _RestoreOptionButton(QFrame):
         text.setContentsMargins(0, 0, 0, 0)
         text.setAlignment(Qt.AlignVCenter)
 
+        title_row = QHBoxLayout()
+        title_row.setSpacing(8)
+        title_row.setContentsMargins(0, 0, 0, 0)
+
         t = QLabel(title)
         t.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
         t.setStyleSheet(f"color: {color}; background: transparent; border: none;")
+        title_row.addWidget(t)
+
+        if badge:
+            badge_lbl = QLabel(badge.upper())
+            badge_lbl.setFont(QFont("DejaVu Sans Mono", 7, QFont.Bold))
+            badge_lbl.setStyleSheet(
+                "color: #ff9966; background: rgba(255,153,102,22); "
+                "border: 1px solid rgba(255,153,102,70); border-radius: 4px; "
+                "padding: 1px 6px;"
+            )
+            title_row.addWidget(badge_lbl)
+
+        title_row.addStretch()
 
         d = QLabel(desc)
         d.setFont(QFont("DejaVu Sans Mono", 9))
         d.setWordWrap(False)
         d.setStyleSheet("color: #6b7a8d; background: transparent; border: none;")
 
-        text.addWidget(t)
+        text.addLayout(title_row)
         text.addWidget(d)
         layout.addWidget(ico_lbl, 0, Qt.AlignVCenter)
         layout.addLayout(text)
@@ -1776,8 +2451,6 @@ def _do_full_restore(entry: SnapshotEntry, parent=None) -> None:
 
         output = Path(destination_mountpoint) / "carbonara-restore.sh"
         output_instr = Path(destination_mountpoint) / "carbonara-restore-INSTRUCOES.txt"
-        project_root = Path(__file__).resolve().parents[3]
-        python_bin = str(Path.home() / "venvs" / "pyside" / "bin" / "python3")
 
         # Detecta ISO sugerida para incluir nas instruções
         ventoy = Path("/mnt/VENTOY")
@@ -1792,69 +2465,32 @@ def _do_full_restore(entry: SnapshotEntry, parent=None) -> None:
         except Exception:
             pass
 
-        script = f"""
-import sys
-sys.path.insert(0, {str(project_root)!r})
-from core.snapshots.restore import generate_restore_script
-from pathlib import Path
-from datetime import datetime
+        args_json = json.dumps({
+            "root_path": root_path,
+            "home_path": home_path,
+            "output": str(output),
+            "output_instr": str(output_instr),
+            "suggested_iso": suggested_iso,
+        })
 
-script_path = generate_restore_script(
-    snapshot_root_path={repr(root_path)},
-    snapshot_home_path={repr(home_path)},
-    output_path={str(output)!r},
-)
-
-# Gera arquivo de instruções junto
-out_instr = Path({str(output_instr)!r})
-content = f\"\"\"
-================================================================================
-  CARBONARA — INSTRUCOES DE RESTORE COMPLETO DO SISTEMA
-  Gerado em: {{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}}
-================================================================================
-
-PASSO 1 — Boot pelo Ventoy
-  Reinicie o computador e selecione pelo Ventoy:
-  -> {suggested_iso}
-
-PASSO 2 — Execute no shell do live ISO
-  Cole o comando abaixo e pressione Enter:
-
-  bash <(mount /dev/sdc3 /mnt/bk 2>/dev/null; cat /mnt/bk/carbonara-restore.sh)
-
-  O script ira:
-  OK Montar o disco de backup automaticamente
-  OK Montar o array RAID0 (/dev/md127)
-  OK Restaurar ROOT e HOME via rsync
-  OK Reinstalar o GRUB (legacy BIOS)
-  OK Desmontar tudo ao finalizar
-
-PASSO 3 — Confirmacao
-  Quando solicitado, digite exatamente:  RESTAURAR
-  (qualquer outra entrada cancela a operacao)
-
-================================================================================
-  ARQUIVOS GERADOS
-  Script:      {str(output)}
-  Instrucoes:  {str(output_instr)}
-================================================================================
-\"\"\".strip()
-out_instr.write_text(content, encoding="utf-8")
-"""
         result = subprocess.run(
             [
-                "pkexec", "env",
-                f"DISPLAY={os.environ.get('DISPLAY', '')}",
-                f"XAUTHORITY={os.environ.get('XAUTHORITY', '')}",
-                f"PYTHONPATH={project_root}",
-                python_bin, "-c", script,
+                "pkexec",
+                "/usr/local/bin/carbonara-helper",
+                os.environ.get("DISPLAY", ""),
+                os.environ.get("XAUTHORITY", ""),
+                "restore.generate_script",
+                args_json,
             ],
             capture_output=True, text=True,
         )
 
         if result.returncode != 0:
             err = result.stderr.strip() or result.stdout.strip() or f"exit code {result.returncode}"
-            _show_error("Restore", f"Erro ao gerar script:\n\n{err}", parent=parent)
+            if result.returncode == 126 or "dismissed" in err.lower():
+                _show_error("Restore", "Operação cancelada.", parent=parent)
+            else:
+                _show_error("Restore", f"Erro ao gerar script:\n\n{err}", parent=parent)
             return
 
         dlg = _RestoreInstructionsDialog(str(output), str(output_instr), parent=parent)
@@ -1930,15 +2566,15 @@ PASSO 3 — Confirmação
 
         header = QFrame()
         header.setObjectName("RIHeader")
-        header.setFixedHeight(48)
+        header.setFixedHeight(58)
         h_layout = QHBoxLayout(header)
         h_layout.setContentsMargins(18, 0, 16, 0)
 
         icon = QLabel()
-        icon.setFixedSize(28, 28)
+        icon.setFixedSize(38, 38)
         icon.setAlignment(Qt.AlignCenter)
-        icon.setPixmap(qta.icon("mdi6.check-circle", color="#4ade80").pixmap(18, 18))
-        icon.setStyleSheet("QLabel { background: rgba(74,222,128,30); border-radius: 8px; }")
+        icon.setPixmap(qta.icon("mdi6.check-circle", color="#4ade80").pixmap(24, 24))
+        icon.setStyleSheet("QLabel { background: rgba(74,222,128,30); border-radius: 10px; }")
 
         lbl = QLabel("Script de Restore Gerado")
         lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
@@ -1952,8 +2588,8 @@ PASSO 3 — Confirmação
         body = QFrame()
         body.setObjectName("RIBody")
         b_layout = QVBoxLayout(body)
-        b_layout.setContentsMargins(28, 20, 28, 20)
-        b_layout.setSpacing(6)
+        b_layout.setContentsMargins(28, 24, 28, 22)
+        b_layout.setSpacing(8)
 
         # ── Passo 1: ISO disponível no Ventoy ────────────────────────────────
         lbl1 = QLabel("1.  Boot pelo Ventoy → selecione uma ISO Arch:")
@@ -1973,16 +2609,16 @@ PASSO 3 — Confirmação
                     break
             self.cmb_iso.setStyleSheet("""
                 QComboBox {
-                    background: rgba(10,15,25,230);
-                    border: 1px solid rgba(31,92,255,120);
-                    border-radius: 6px; color: #ecf4ff;
+                    background: rgba(255,255,255,6);
+                    border: 1px solid rgba(255,255,255,14);
+                    border-radius: 10px; color: #ecf4ff;
                     font-family: "DejaVu Sans Mono"; font-size: 10px;
-                    padding: 6px 12px;
+                    padding: 8px 12px;
                 }
                 QComboBox::drop-down { border: none; width: 20px; }
                 QComboBox QAbstractItemView {
                     background: #0a0f19; color: #ecf4ff;
-                    border: 1px solid rgba(31,92,255,140);
+                    border: 1px solid rgba(255,255,255,14);
                 }
             """)
             b_layout.addWidget(self.cmb_iso)
@@ -1992,7 +2628,7 @@ PASSO 3 — Confirmação
             lbl_no_iso.setStyleSheet("color: #ff9966;")
             b_layout.addWidget(lbl_no_iso)
 
-        b_layout.addSpacing(10)
+        b_layout.addSpacing(20)
 
         # ── Passo 2: Executar script ──────────────────────────────────────────
         lbl2 = QLabel("2.  No shell do live ISO, execute:")
@@ -2004,8 +2640,8 @@ PASSO 3 — Confirmação
         cmd_lbl.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
         cmd_lbl.setWordWrap(True)
         cmd_lbl.setStyleSheet(
-            "color: #4ade80; background: rgba(74,222,128,15); "
-            "border: 1px solid rgba(74,222,128,60); border-radius: 6px; padding: 10px 14px;"
+            "color: #8fd4ff; background: rgba(255,255,255,6); "
+            "border: 1px solid rgba(255,255,255,14); border-radius: 10px; padding: 10px 14px;"
         )
         cmd_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
         b_layout.addWidget(cmd_lbl)
@@ -2018,17 +2654,30 @@ PASSO 3 — Confirmação
         lbl3.setWordWrap(True)
         b_layout.addWidget(lbl3)
 
-        warn = QLabel("⚠  Confirme digitando RESTAURAR quando solicitado.")
+        warn_row = QHBoxLayout()
+        warn_row.setSpacing(8)
+        warn_row.setContentsMargins(0, 4, 0, 0)
+
+        warn_icon = QLabel()
+        warn_icon.setFixedSize(20, 20)
+        warn_icon.setAlignment(Qt.AlignCenter)
+        warn_icon.setPixmap(qta.icon("mdi6.alert", color="#ff9966").pixmap(18, 18))
+
+        warn = QLabel("Confirme digitando RESTAURAR quando solicitado.")
         warn.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
         warn.setStyleSheet("color: #ff9966;")
-        b_layout.addWidget(warn)
+
+        warn_row.addWidget(warn_icon)
+        warn_row.addWidget(warn)
+        warn_row.addStretch()
+        b_layout.addLayout(warn_row)
 
         b_layout.addSpacing(14)
 
         # ── Arquivos gerados ──────────────────────────────────────────────────
         sep = QFrame()
         sep.setFrameShape(QFrame.HLine)
-        sep.setStyleSheet("border: none; border-top: 1px solid rgba(31,92,255,40);")
+        sep.setStyleSheet("border: none; border-top: 1px solid rgba(255,255,255,12);")
         b_layout.addWidget(sep)
 
         b_layout.addSpacing(6)
@@ -2082,18 +2731,17 @@ PASSO 3 — Confirmação
     def _apply_styles(self) -> None:
         self.setStyleSheet("""
             QDialog {
-                background: #080c14;
-                border: 1px solid rgba(70, 188, 255, 220);
+                background: #131417;
                 border-radius: 14px;
             }
             QFrame#RIHeader {
                 background: rgba(8, 20, 14, 255);
-                border-bottom: 1px solid rgba(74, 222, 128, 80);
+                border-bottom: 1px solid rgba(74, 222, 128, 35);
                 border-top-left-radius: 12px;
                 border-top-right-radius: 12px;
             }
             QFrame#RIBody {
-                background: #080c14;
+                background: #131417;
                 border-bottom-left-radius: 12px;
                 border-bottom-right-radius: 12px;
             }
@@ -2208,7 +2856,7 @@ class _FileBrowserDialog(QDialog):
 
         splitter = QSplitter(Qt.Horizontal)
         splitter.setHandleWidth(2)
-        splitter.setStyleSheet("QSplitter::handle { background: rgba(31,92,255,40); }")
+        splitter.setStyleSheet("QSplitter::handle { background: rgba(255,255,255,18); }")
 
         # Árvore
         self.tree = QTreeWidget()
@@ -2267,6 +2915,7 @@ class _FileBrowserDialog(QDialog):
 
         cf_l.addWidget(lbl_cf)
         cf_row = QHBoxLayout()
+        cf_row.setSpacing(8)
         cf_row.addWidget(self.btn_overwrite)
         cf_row.addWidget(self.btn_skip)
         cf_l.addLayout(cf_row)
@@ -2319,30 +2968,29 @@ class _FileBrowserDialog(QDialog):
     def _apply_styles(self):
         self.setStyleSheet("""
             QDialog {
-                background: #080c14;
-                border: 1px solid rgba(31,92,255,80);
+                background: #131417;
                 border-radius: 14px;
             }
             QFrame#FBHeader {
                 background: rgba(8,20,14,255);
-                border-bottom: 1px solid rgba(74,222,128,80);
+                border-bottom: 1px solid rgba(74,222,128,35);
                 border-top-left-radius: 14px;
                 border-top-right-radius: 14px;
             }
             QFrame#FBBreadcrumb {
                 background: rgba(6,9,16,200);
-                border-bottom: 1px solid rgba(31,92,255,40);
+                border-bottom: 1px solid rgba(255,255,255,16);
             }
             QFrame#FBBody {
-                background: #080c14;
+                background: #131417;
                 border-bottom-left-radius: 14px;
                 border-bottom-right-radius: 14px;
             }
             QFrame#FBRight { background: transparent; }
             QFrame#FBConflict {
-                background: rgba(10,15,25,180);
-                border: 1px solid rgba(31,92,255,50);
-                border-radius: 8px;
+                background: rgba(255,255,255,8);
+                border: 1px solid rgba(255,255,255,18);
+                border-radius: 10px;
             }
             QFrame#FBLogFrame { background: transparent; }
             QPushButton#FBClose {
@@ -2351,39 +2999,39 @@ class _FileBrowserDialog(QDialog):
             }
             QPushButton#FBClose:hover { background: rgba(200,60,60,60); color: #ff8888; }
             QPushButton#FBNavBtn {
-                background: rgba(10,15,25,200);
-                border: 1px solid rgba(31,92,255,80); border-radius: 6px;
+                background: rgba(255,255,255,8);
+                border: 1px solid rgba(255,255,255,18); border-radius: 8px;
             }
             QPushButton#FBNavBtn:hover {
                 background: rgba(23,147,209,70);
                 border-color: rgba(35,166,255,180);
             }
             QTreeWidget#FBTree {
-                background: rgba(6,9,16,240);
-                border: 1px solid rgba(31,92,255,55);
-                border-radius: 8px; color: #c8d4e0;
+                background: rgba(255,255,255,5);
+                border: 1px solid rgba(255,255,255,18);
+                border-radius: 10px; color: #c8d4e0;
                 font-family: "DejaVu Sans Mono"; font-size: 12px; outline: none;
             }
             QTreeWidget#FBTree::item { padding: 6px 8px; border-radius: 4px; }
             QTreeWidget#FBTree::item:hover { background: rgba(35,166,255,30); }
             QTreeWidget#FBTree::item:selected { background: rgba(35,166,255,80); color: #ecf4ff; }
             QPlainTextEdit#FBSelected {
-                background: rgba(6,9,16,200);
-                border: 1px solid rgba(31,92,255,55); border-radius: 8px;
+                background: rgba(255,255,255,5);
+                border: 1px solid rgba(255,255,255,18); border-radius: 10px;
                 color: #9aa6b2; font-family: "DejaVu Sans Mono";
                 font-size: 11px; padding: 6px;
             }
             QPlainTextEdit#FBLog {
-                background: rgba(6,9,16,200);
-                border: 1px solid rgba(31,92,255,40); border-radius: 6px;
+                background: rgba(255,255,255,5);
+                border: 1px solid rgba(255,255,255,16); border-radius: 8px;
                 color: #6b7a8d; font-family: "DejaVu Sans Mono";
                 font-size: 9px; padding: 4px;
             }
             QPushButton#FBConflictBtn {
-                background: rgba(10,15,25,200);
-                border: 1px solid rgba(31,92,255,80); border-radius: 6px;
+                background: rgba(255,255,255,8);
+                border: 1px solid rgba(255,255,255,18); border-radius: 10px;
                 color: #9aa6b2; font-family: "DejaVu Sans Mono";
-                font-size: 11px; padding: 7px 12px;
+                font-size: 11px; padding: 8px 12px;
             }
             QPushButton#FBConflictBtn:checked {
                 background: rgba(35,166,255,100);
@@ -2392,9 +3040,9 @@ class _FileBrowserDialog(QDialog):
             QPushButton#FBBtnRestore {
                 background: rgba(74,222,128,180);
                 border: 1px solid rgba(74,222,128,220);
-                border-radius: 8px; color: #08111d;
+                border-radius: 10px; color: #08111d;
                 font-family: "DejaVu Sans Mono"; font-size: 13px;
-                font-weight: 700; padding: 10px 0;
+                font-weight: 700; padding: 11px 0;
             }
             QPushButton#FBBtnRestore:hover { background: rgba(94,234,149,220); }
             QPushButton#FBBtnRestore:disabled {
@@ -2402,7 +3050,7 @@ class _FileBrowserDialog(QDialog):
                 border-color: rgba(74,222,128,40); color: #3a4a3a;
             }
             QProgressBar#FBProgressBar {
-                background: rgba(31,92,255,20); border: none; border-radius: 2px;
+                background: rgba(255,255,255,10); border: none; border-radius: 2px;
             }
             QProgressBar#FBProgressBar::chunk {
                 background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
@@ -2554,61 +3202,14 @@ class _FileBrowserDialog(QDialog):
         if confirm.exec() != QDialog.Accepted:
             return
 
-        items_repr = repr([str(p) for p in self._selected_items])
-        snap_root_repr = repr(str(self.snapshot_root))
-        conflict_repr = repr(self._conflict_mode)
-        # Snapshot HOME armazena o conteúdo de /home/ sem o prefixo "home/"
-        # — precisa recolocar esse prefixo no destino real.
-        dest_prefix_repr = repr("home") if self.entry.kind.upper() == "HOME" else repr("")
-
-        script = f"""
-import shutil
-from pathlib import Path
-
-snapshot_root = Path({snap_root_repr})
-items = {items_repr}
-conflict = {conflict_repr}
-dest_prefix = {dest_prefix_repr}
-
-def to_dest(rel: Path) -> Path:
-    if dest_prefix:
-        return Path("/") / dest_prefix / rel
-    return Path("/") / rel
-
-for src_str in items:
-    src = Path(src_str)
-    try:
-        rel = src.relative_to(snapshot_root)
-    except ValueError:
-        continue
-    dst = to_dest(rel)
-    if src.is_dir():
-        for f in src.rglob("*"):
-            if f.is_file() or f.is_symlink():
-                try:
-                    rel_f = f.relative_to(snapshot_root)
-                    dst_f = to_dest(rel_f)
-                    if dst_f.exists() and conflict == "skip":
-                        print(f"SKIP: {{dst_f}}")
-                        continue
-                    dst_f.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(f, dst_f)
-                    print(f"OK: {{dst_f}}")
-                except Exception as ex:
-                    print(f"ERR: {{dst_f}} -- {{ex}}")
-    else:
-        try:
-            if dst.exists() and conflict == "skip":
-                print(f"SKIP: {{dst}}")
-            else:
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(src, dst)
-                print(f"OK: {{dst}}")
-        except Exception as ex:
-            print(f"ERR: {{dst}} -- {{ex}}")
-"""
-        project_root = Path(__file__).resolve().parents[3]
-        python_bin = str(Path.home() / "venvs" / "pyside" / "bin" / "python3")
+        args_json = json.dumps({
+            "snapshot_root": str(self.snapshot_root),
+            "items": [str(p) for p in self._selected_items],
+            "conflict": self._conflict_mode,
+            # Snapshot HOME armazena o conteúdo de /home/ sem o prefixo
+            # "home/" — precisa recolocar esse prefixo no destino real.
+            "dest_prefix": "home" if self.entry.kind.upper() == "HOME" else "",
+        })
 
         self.log_frame.setVisible(True)
         self.log_view.clear()
@@ -2616,9 +3217,7 @@ for src_str in items:
         self.restore_progress.setRange(0, 0)
 
         worker = _FileBrowserRestoreWorker(
-            python_bin=python_bin,
-            project_root=str(project_root),
-            script=script,
+            args_json=args_json,
             parent=self,
         )
         worker.log_line.connect(self._on_log_line)
@@ -2751,21 +3350,20 @@ class _FileBrowserRestoreWorker(QThread):
     finished_ok = Signal()
     failed = Signal(str)
 
-    def __init__(self, python_bin, project_root, script, parent=None):
+    def __init__(self, args_json: str, parent=None):
         super().__init__(parent)
-        self._python_bin = python_bin
-        self._project_root = project_root
-        self._script = script
+        self._args_json = args_json
 
     def run(self):
         try:
             result = subprocess.run(
                 [
-                    "pkexec", "env",
-                    f"DISPLAY={os.environ.get('DISPLAY', '')}",
-                    f"XAUTHORITY={os.environ.get('XAUTHORITY', '')}",
-                    f"PYTHONPATH={self._project_root}",
-                    self._python_bin, "-c", self._script,
+                    "pkexec",
+                    "/usr/local/bin/carbonara-helper",
+                    os.environ.get("DISPLAY", ""),
+                    os.environ.get("XAUTHORITY", ""),
+                    "restore.copy_files",
+                    self._args_json,
                 ],
                 capture_output=True, text=True,
             )
@@ -2774,6 +3372,8 @@ class _FileBrowserRestoreWorker(QThread):
                     self.log_line.emit(line)
             if result.returncode != 0:
                 err = result.stderr.strip() or f"exit code {result.returncode}"
+                if result.returncode == 126 or "dismissed" in err.lower():
+                    err = "Operação cancelada."
                 self.failed.emit(err)
             else:
                 self.finished_ok.emit()
@@ -2792,7 +3392,7 @@ class _AltRestoreDialog(QDialog):
         self.entry = entry
         self.setWindowTitle("Restore para disco alternativo")
         self.setModal(True)
-        self.setFixedSize(680, 420)
+        self.setFixedSize(800, 480)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_StyledBackground, True)
         self._destinations = []
@@ -2808,15 +3408,15 @@ class _AltRestoreDialog(QDialog):
         # Header
         header = QFrame()
         header.setObjectName("ARHeader")
-        header.setFixedHeight(52)
+        header.setFixedHeight(60)
         hl = QHBoxLayout(header)
-        hl.setContentsMargins(18, 0, 16, 0)
+        hl.setContentsMargins(20, 0, 18, 0)
 
         ico = QLabel()
-        ico.setFixedSize(32, 32)
+        ico.setFixedSize(40, 40)
         ico.setAlignment(Qt.AlignCenter)
-        ico.setPixmap(qta.icon("mdi6.content-copy", color="#23a6ff").pixmap(20, 20))
-        ico.setStyleSheet("QLabel { background: rgba(35,166,255,40); border-radius: 9px; }")
+        ico.setPixmap(qta.icon("mdi6.content-copy", color="#23a6ff").pixmap(24, 24))
+        ico.setStyleSheet("QLabel { background: rgba(35,166,255,40); border-radius: 10px; }")
 
         lbl = QLabel("Restore para disco alternativo")
         lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
@@ -2835,16 +3435,72 @@ class _AltRestoreDialog(QDialog):
         body = QFrame()
         body.setObjectName("ARBody")
         bl = QVBoxLayout(body)
-        bl.setContentsMargins(24, 18, 24, 20)
-        bl.setSpacing(12)
+        bl.setContentsMargins(28, 24, 28, 24)
+        bl.setSpacing(14)
 
         # Snapshot info
-        snap_lbl = QLabel(self.entry.path.name)
-        snap_lbl.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
-        snap_lbl.setStyleSheet(
-            "color: #23a6ff; background: rgba(35,166,255,20); "
-            "border: 1px solid rgba(35,166,255,60); border-radius: 6px; padding: 4px 10px;"
-        )
+        snap_row = QHBoxLayout()
+        snap_row.setSpacing(14)
+        snap_row.setContentsMargins(0, 0, 0, 0)
+
+        snap_icon = icon_badge(SNAPSHOT_GLYPH, 38)
+
+        snap_text = QVBoxLayout()
+        snap_text.setSpacing(4)
+        snap_text.setContentsMargins(0, 0, 0, 0)
+
+        snap_title = QLabel(self.entry.path.name)
+        snap_title_font = QFont("DejaVu Sans Mono")
+        snap_title_font.setPointSizeF(10.5)
+        snap_title_font.setBold(True)
+        snap_title.setFont(snap_title_font)
+        snap_title.setStyleSheet("color: #ecf4ff;")
+
+        snap_meta_row = QHBoxLayout()
+        snap_meta_row.setSpacing(8)
+        snap_meta_row.setContentsMargins(0, 0, 0, 0)
+
+        snap_meta = QLabel(self.entry.meta_text)
+        snap_meta.setFont(QFont("DejaVu Sans Mono", 10))
+        snap_meta.setStyleSheet("color: #6b7a8d;")
+        snap_meta_row.addWidget(snap_meta)
+
+        if self.entry.size_str:
+            snap_size_prefix = QLabel("snapshot size")
+            snap_size_prefix.setFont(QFont("DejaVu Sans Mono", 9))
+            snap_size_prefix.setStyleSheet("color: #6b7a8d;")
+            snap_meta_row.addWidget(snap_size_prefix)
+
+            snap_size_val = QLabel(self.entry.size_str)
+            snap_size_val.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
+            snap_size_val.setStyleSheet("color: #4ade80;")
+            snap_meta_row.addWidget(snap_size_val)
+
+        snap_meta_row.addStretch()
+
+        snap_text.addWidget(snap_title)
+        snap_text.addLayout(snap_meta_row)
+
+        if self.entry.synced_at:
+            snap_sync_row = QHBoxLayout()
+            snap_sync_row.setSpacing(6)
+            snap_sync_row.setContentsMargins(0, 0, 0, 0)
+
+            snap_sync_icon = QLabel()
+            snap_sync_icon.setPixmap(qta.icon(SYNC_GLYPH, color="#23a6ff").pixmap(14, 14))
+
+            snap_sync_lbl = QLabel(f"last sync  {self.entry.synced_at.replace('T', 'T ', 1)}")
+            snap_sync_lbl.setFont(QFont("DejaVu Sans Mono", 9))
+            snap_sync_lbl.setStyleSheet("color: #23a6ff;")
+
+            snap_sync_row.addWidget(snap_sync_icon)
+            snap_sync_row.addWidget(snap_sync_lbl)
+            snap_sync_row.addStretch()
+            snap_text.addLayout(snap_sync_row)
+
+        snap_row.addWidget(snap_icon)
+        snap_row.addLayout(snap_text)
+        snap_row.addStretch()
 
         # Destino
         lbl_dest = QLabel("Selecione o disco de destino:")
@@ -2853,7 +3509,7 @@ class _AltRestoreDialog(QDialog):
 
         self.cmb_dest = QComboBox()
         self.cmb_dest.setFont(QFont("DejaVu Sans Mono", 10))
-        self.cmb_dest.setMinimumHeight(36)
+        self.cmb_dest.setMinimumHeight(40)
         style_combo_popup(self.cmb_dest)
 
         # Opções de cópia
@@ -2868,11 +3524,17 @@ class _AltRestoreDialog(QDialog):
         self.chk_delete.setCheckable(True)
         self.chk_delete.setChecked(False)
         self.chk_delete.setObjectName("AROptBtn")
+        self.chk_delete.setFixedHeight(38)
+        self.chk_delete.setMinimumWidth(200)
+        self.chk_delete.setCursor(Qt.PointingHandCursor)
 
         self.chk_hardlinks = QPushButton("Preservar hard-links (-H)")
         self.chk_hardlinks.setCheckable(True)
         self.chk_hardlinks.setChecked(True)
         self.chk_hardlinks.setObjectName("AROptBtn")
+        self.chk_hardlinks.setFixedHeight(38)
+        self.chk_hardlinks.setMinimumWidth(200)
+        self.chk_hardlinks.setCursor(Qt.PointingHandCursor)
 
         opts_row.addWidget(self.chk_delete)
         opts_row.addWidget(self.chk_hardlinks)
@@ -2882,23 +3544,38 @@ class _AltRestoreDialog(QDialog):
         self.lbl_dest_info = QLabel("—")
         self.lbl_dest_info.setFont(QFont("DejaVu Sans Mono", 9))
         self.lbl_dest_info.setStyleSheet("color: #6b7a8d;")
+        self.lbl_dest_info.setWordWrap(True)
         self.cmb_dest.currentIndexChanged.connect(self._on_dest_changed)
 
         # Warn
-        warn = QLabel("⚠  O conteúdo existente no destino pode ser alterado.")
-        warn.setFont(QFont("DejaVu Sans Mono", 8))
+        warn_row = QHBoxLayout()
+        warn_row.setSpacing(8)
+        warn_row.setContentsMargins(0, 0, 0, 0)
+
+        warn_icon = QLabel()
+        warn_icon.setFixedSize(20, 20)
+        warn_icon.setAlignment(Qt.AlignCenter)
+        warn_icon.setPixmap(qta.icon("mdi6.alert", color="#ff9966").pixmap(18, 18))
+
+        warn = QLabel("O conteúdo existente no destino pode ser alterado.")
+        warn.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
         warn.setStyleSheet("color: #ff9966;")
+
+        warn_row.addWidget(warn_icon)
+        warn_row.addWidget(warn)
+        warn_row.addStretch()
 
         # Botões
         btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
         btn_cancel = QPushButton("Cancelar")
         btn_cancel.setObjectName("ARBtnCancel")
-        btn_cancel.setFixedWidth(110)
+        btn_cancel.setFixedSize(120, 40)
         btn_cancel.clicked.connect(self.reject)
 
         self.btn_start = QPushButton("Iniciar Restore")
         self.btn_start.setObjectName("ARBtnStart")
-        self.btn_start.setFixedWidth(140)
+        self.btn_start.setFixedSize(160, 40)
         self.btn_start.setEnabled(False)
         self.btn_start.clicked.connect(self._on_start)
 
@@ -2906,14 +3583,17 @@ class _AltRestoreDialog(QDialog):
         btn_row.addWidget(btn_cancel)
         btn_row.addWidget(self.btn_start)
 
-        bl.addWidget(snap_lbl)
+        bl.addLayout(snap_row)
+        bl.addSpacing(6)
         bl.addWidget(lbl_dest)
         bl.addWidget(self.cmb_dest)
         bl.addWidget(self.lbl_dest_info)
+        bl.addSpacing(4)
         bl.addWidget(lbl_opts)
         bl.addLayout(opts_row)
+        bl.addSpacing(20)
+        bl.addLayout(warn_row)
         bl.addStretch()
-        bl.addWidget(warn)
         bl.addLayout(btn_row)
 
         root.addWidget(header)
@@ -2922,45 +3602,44 @@ class _AltRestoreDialog(QDialog):
     def _apply_styles(self):
         self.setStyleSheet("""
             QDialog {
-                background: #080c14;
+                background: #131417;
                 border-radius: 14px;
             }
             QFrame#ARHeader {
-                background: rgba(8, 20, 40, 255);
-                border-bottom: 1px solid rgba(35, 166, 255, 80);
+                background: rgba(35, 166, 255, 35);
+                border-bottom: 1px solid rgba(35, 166, 255, 25);
                 border-top-left-radius: 13px;
                 border-top-right-radius: 13px;
             }
             QFrame#ARBody {
-                background: #080c14;
+                background: #131417;
                 border-bottom-left-radius: 13px;
                 border-bottom-right-radius: 13px;
             }
             QComboBox {
-                background: rgba(10,15,25,230);
-                border: 1px solid rgba(31,92,255,120);
-                border-radius: 8px; color: #ecf4ff;
-                font-family: "DejaVu Sans Mono"; padding: 6px 12px;
+                background: rgba(255,255,255,6);
+                border: 1px solid rgba(255,255,255,18);
+                border-radius: 10px; color: #ecf4ff;
+                font-family: "DejaVu Sans Mono"; padding: 8px 12px;
             }
             QComboBox:hover { border-color: rgba(35,166,255,200); }
             QComboBox::drop-down { border: none; width: 24px; }
             QPushButton#AROptBtn {
-                background: rgba(10,15,25,200);
-                border: 1px solid rgba(31,92,255,80);
-                border-radius: 8px; color: #9aa6b2;
-                font-family: "DejaVu Sans Mono"; font-size: 9px;
-                padding: 5px 12px;
+                background: rgba(255,255,255,8);
+                border: 1px solid rgba(255,255,255,18);
+                border-radius: 10px; color: #9aa6b2;
+                font-family: "DejaVu Sans Mono"; font-size: 10px;
+                padding: 0 14px;
             }
             QPushButton#AROptBtn:checked {
-                background: rgba(35,166,255,100);
-                border-color: rgba(35,166,255,200); color: #ecf4ff;
+                background: rgba(74,222,128,100);
+                border-color: rgba(74,222,128,200); color: #ffffff;
             }
             QPushButton#ARBtnCancel {
-                background: rgba(10,15,25,230);
-                border: 1px solid rgba(31,92,255,120);
-                border-radius: 8px; color: #ecf4ff;
+                background: rgba(255,255,255,6);
+                border: 1px solid rgba(255,255,255,18);
+                border-radius: 10px; color: #ecf4ff;
                 font-family: "DejaVu Sans Mono"; font-size: 11px;
-                padding: 6px 0;
             }
             QPushButton#ARBtnCancel:hover {
                 background: rgba(23,147,209,70);
@@ -2969,14 +3648,14 @@ class _AltRestoreDialog(QDialog):
             QPushButton#ARBtnStart {
                 background: rgba(35,166,255,180);
                 border: 1px solid rgba(35,166,255,220);
-                border-radius: 8px; color: #08111d;
+                border-radius: 10px; color: #08111d;
                 font-family: "DejaVu Sans Mono"; font-size: 11px;
-                font-weight: 700; padding: 6px 0;
+                font-weight: 700;
             }
             QPushButton#ARBtnStart:hover { background: rgba(70,188,255,220); }
             QPushButton#ARBtnStart:disabled {
-                background: rgba(10,15,25,100);
-                border-color: rgba(31,92,255,30); color: #3a4a5a;
+                background: rgba(255,255,255,6);
+                border-color: rgba(255,255,255,14); color: #3a4a5a;
             }
         """)
 
@@ -3009,10 +3688,23 @@ class _AltRestoreDialog(QDialog):
         if index < 0 or index >= len(self._destinations):
             return
         dest = self._destinations[index]
-        self.lbl_dest_info.setText(
+        base_info = (
             f"{format_gb(dest.free_gb)} livre de {format_gb(dest.total_gb)} "
             f"• {dest.fs_type}"
         )
+
+        if self.entry.size_gb > 0 and dest.free_gb < self.entry.size_gb:
+            self.lbl_dest_info.setText(
+                f"{base_info}  —  espaço insuficiente "
+                f"(snapshot tem {self.entry.size_str}, faltam "
+                f"{format_gb(self.entry.size_gb - dest.free_gb)})"
+            )
+            self.lbl_dest_info.setStyleSheet("color: #ff8888; font-weight: bold;")
+            self.btn_start.setEnabled(False)
+        else:
+            self.lbl_dest_info.setText(base_info)
+            self.lbl_dest_info.setStyleSheet("color: #6b7a8d;")
+            self.btn_start.setEnabled(True)
 
     def _on_start(self):
         idx = self.cmb_dest.currentIndex()
@@ -3025,75 +3717,25 @@ class _AltRestoreDialog(QDialog):
 
         self.accept()
 
-        project_root = Path(__file__).resolve().parents[3]
-        python_bin = str(Path.home() / "venvs" / "pyside" / "bin" / "python3")
-        snap_path = str(self.entry.path)
-        dest_path = dest.mountpoint
+        args_json = json.dumps({
+            "snap_path": str(self.entry.path),
+            "dest_path": dest.mountpoint,
+            "dest_label": dest.label,
+            "use_delete": use_delete,
+            "use_hardlinks": use_hardlinks,
+        })
 
-        script = f"""
-import sys, subprocess
-sys.path.insert(0, {str(project_root)!r})
-
-from PySide6.QtWidgets import QApplication
-from ui.widgets.backup_progress import BackupProgressDialog
-from core.workers.rsync_worker import RsyncWorker
-from pathlib import Path
-
-snap = Path({snap_path!r})
-dest_base = Path({dest_path!r}) / "CarbonaraSnapshots" / snap.parent.name
-dest_base.mkdir(parents=True, exist_ok=True)
-dest_dir = dest_base / snap.name
-
-cmd = [
-    "rsync", "-aAXHh",
-    "--numeric-ids",
-    "--info=progress2",
-    "--out-format=Copiando: %n",
-]
-{"""cmd.append("--delete")""" if use_delete else ""}
-{"""cmd.append("-H")""" if use_hardlinks else ""}
-cmd += [str(snap) + "/", str(dest_dir) + "/"]
-
-app = QApplication([])
-dialog = BackupProgressDialog("Restore para {dest.label}")
-dialog.set_running(True)
-dialog.set_status("Iniciando restore...")
-dialog.progress.setRange(0, 100)
-dialog.progress.setValue(0)
-
-worker = RsyncWorker(cmd, title="Copiando snapshot...", parent=dialog)
-dialog.register_worker(worker)
-worker.progress_changed.connect(dialog.progress.setValue)
-worker.status_changed.connect(dialog.set_status)
-worker.file_changed.connect(dialog.set_current_file)
-worker.log_line.connect(dialog.append_log)
-
-def on_ok():
-    dialog.set_status("Restore concluído com sucesso.")
-    dialog.progress.setValue(100)
-    dialog.set_running(False)
-    dialog.btn_close.setEnabled(True)
-
-def on_fail(msg):
-    dialog.set_status(f"Erro: {{msg}}")
-    dialog.set_running(False)
-    dialog.btn_close.setEnabled(True)
-
-worker.finished_ok.connect(on_ok)
-worker.failed.connect(on_fail)
-worker.start()
-dialog.exec()
-"""
         cmd_pkexec = [
-            "pkexec", "env",
-            f"DISPLAY={os.environ.get('DISPLAY', '')}",
-            f"XAUTHORITY={os.environ.get('XAUTHORITY', '')}",
-            f"PYTHONPATH={project_root}",
-            python_bin, "-c", script,
+            "pkexec",
+            "/usr/local/bin/carbonara-helper",
+            os.environ.get("DISPLAY", ""),
+            os.environ.get("XAUTHORITY", ""),
+            "restore.copy_to_alt_disk",
+            args_json,
         ]
 
         try:
-            subprocess.Popen(cmd_pkexec, cwd=str(project_root))
+            subprocess.Popen(cmd_pkexec)
         except Exception as e:
             _show_error("Restore Alternativo", str(e), parent=self.parent())
 
@@ -3119,6 +3761,201 @@ dialog.exec()
 
 # ── Sync helpers ─────────────────────────────────────────────────────────────
 
+class _HomeLiveRestoreDialog(QDialog):
+    """Confirmação pro restore de HOME sem reboot — checkbox obrigatório
+    (o Confirmar só habilita depois de marcado), dispara e esquece igual
+    ao _AltRestoreDialog (o próprio processo pkexec abre o
+    BackupProgressDialog como root na tela do usuário)."""
+
+    def __init__(self, entry: SnapshotEntry, parent=None):
+        super().__init__(parent)
+        self.entry = entry
+        self.setWindowTitle("Restaurar HOME sem reboot")
+        self.setModal(True)
+        self.setFixedSize(560, 300)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self._build_ui(entry)
+        self._apply_styles()
+
+    def _build_ui(self, entry: SnapshotEntry) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        header = QFrame()
+        header.setObjectName("HomeRestoreHeader")
+        header.setFixedHeight(56)
+        h_layout = QHBoxLayout(header)
+        h_layout.setContentsMargins(20, 0, 18, 0)
+
+        icon = QLabel()
+        icon.setFixedSize(36, 36)
+        icon.setAlignment(Qt.AlignCenter)
+        icon.setPixmap(qta.icon("mdi6.home-import-outline", color="#ffcf8f").pixmap(22, 22))
+        icon.setStyleSheet("QLabel { background: rgba(224,168,64,40); border-radius: 9px; }")
+
+        lbl = QLabel("Restaurar HOME sem reboot")
+        lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+        lbl.setStyleSheet("color: #ecf4ff;")
+
+        btn_x = _CloseLabel(self)
+        btn_x.mousePressEvent = lambda e: self.reject()
+
+        h_layout.addWidget(icon)
+        h_layout.addSpacing(10)
+        h_layout.addWidget(lbl)
+        h_layout.addStretch()
+        h_layout.addWidget(btn_x)
+
+        body = QFrame()
+        body.setObjectName("HomeRestoreBody")
+        b_layout = QVBoxLayout(body)
+        b_layout.setContentsMargins(28, 22, 28, 22)
+        b_layout.setSpacing(12)
+
+        warn = QLabel(
+            "Isso substitui os arquivos atuais de /home pelos deste "
+            "snapshot, no sistema já rodando (sem live ISO). Ao final, "
+            "a sessão gráfica é encerrada (logout) — feche seu trabalho "
+            "antes de continuar."
+        )
+        warn.setWordWrap(True)
+        warn.setFont(QFont("DejaVu Sans Mono", 9))
+        warn.setStyleSheet("color: #c8d4e0;")
+
+        snap_label = QLabel(entry.path.name)
+        snap_label.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+        snap_label.setStyleSheet(
+            "color: #ffcf8f; background: #101115; "
+            "border-radius: 6px; padding: 10px 12px;"
+        )
+
+        self.chk_confirm = QCheckBox("Entendo que a sessão será encerrada e os arquivos atuais de /home serão substituídos")
+        self.chk_confirm.setObjectName("HomeRestoreCheck")
+        self.chk_confirm.setFont(QFont("DejaVu Sans Mono", 9))
+        self.chk_confirm.toggled.connect(self._on_checkbox_toggled)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
+
+        btn_cancel = QPushButton("Cancelar")
+        btn_cancel.setObjectName("HomeRestoreBtnCancel")
+        btn_cancel.setFixedSize(110, 40)
+        btn_cancel.clicked.connect(self.reject)
+
+        self.btn_confirm = QPushButton("Restaurar")
+        self.btn_confirm.setObjectName("HomeRestoreBtnConfirm")
+        self.btn_confirm.setFixedSize(130, 40)
+        self.btn_confirm.setEnabled(False)
+        self.btn_confirm.clicked.connect(self._on_confirm)
+
+        btn_row.addStretch()
+        btn_row.addWidget(btn_cancel)
+        btn_row.addWidget(self.btn_confirm)
+
+        b_layout.addWidget(warn)
+        b_layout.addSpacing(6)
+        b_layout.addWidget(snap_label)
+        b_layout.addSpacing(6)
+        b_layout.addWidget(self.chk_confirm)
+        b_layout.addStretch()
+        b_layout.addLayout(btn_row)
+
+        root.addWidget(header)
+        root.addWidget(body, stretch=1)
+
+    def _on_checkbox_toggled(self, checked: bool) -> None:
+        self.btn_confirm.setEnabled(checked)
+
+    def _on_confirm(self) -> None:
+        if not self.chk_confirm.isChecked():
+            return
+        self.accept()
+
+        args_json = json.dumps({"home_snapshot_path": str(self.entry.path)})
+        cmd_pkexec = [
+            "pkexec",
+            "/usr/local/bin/carbonara-helper",
+            os.environ.get("DISPLAY", ""),
+            os.environ.get("XAUTHORITY", ""),
+            "restore.home_live",
+            args_json,
+        ]
+
+        try:
+            subprocess.Popen(cmd_pkexec)
+        except Exception as e:
+            _show_error("Restaurar HOME", str(e), parent=self.parent())
+
+    def _apply_styles(self) -> None:
+        self.setStyleSheet("""
+            QDialog {
+                background: #131417;
+                border-radius: 14px;
+            }
+            QFrame#HomeRestoreHeader {
+                background: rgba(224, 168, 64, 35);
+                border-bottom: 1px solid rgba(224, 168, 64, 25);
+                border-top-left-radius: 14px;
+                border-top-right-radius: 14px;
+            }
+            QFrame#HomeRestoreBody {
+                background: #131417;
+                border-bottom-left-radius: 14px;
+                border-bottom-right-radius: 14px;
+            }
+            QCheckBox#HomeRestoreCheck {
+                color: #c8d4e0;
+                spacing: 8px;
+            }
+            QCheckBox#HomeRestoreCheck::indicator {
+                width: 16px; height: 16px;
+                border: 1px solid rgba(224,168,64,120);
+                border-radius: 4px;
+                background: rgba(255,255,255,6);
+            }
+            QCheckBox#HomeRestoreCheck::indicator:checked {
+                background: rgba(224,168,64,200);
+                border: 1px solid rgba(224,168,64,220);
+            }
+            QPushButton#HomeRestoreBtnCancel {
+                background: rgba(255,255,255,8);
+                border: 1px solid rgba(255,255,255,20);
+                border-radius: 10px;
+                color: #c8d4e0;
+                font-family: "DejaVu Sans Mono";
+                font-size: 11px;
+            }
+            QPushButton#HomeRestoreBtnCancel:hover {
+                background: rgba(255,255,255,14);
+            }
+            QPushButton#HomeRestoreBtnConfirm {
+                background: rgba(224, 168, 64, 180);
+                border: 1px solid rgba(224, 168, 64, 220);
+                border-radius: 10px;
+                color: #1a1200;
+                font-family: "DejaVu Sans Mono";
+                font-size: 11px;
+                font-weight: 700;
+            }
+            QPushButton#HomeRestoreBtnConfirm:hover {
+                background: rgba(240, 190, 90, 220);
+            }
+            QPushButton#HomeRestoreBtnConfirm:disabled {
+                background: rgba(224, 168, 64, 40);
+                color: rgba(26, 18, 0, 140);
+            }
+        """)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.LeftButton and hasattr(self, "_drag"):
+            self.move(event.globalPosition().toPoint() - self._drag)
+
+
 class _SyncConfirmDialog(QDialog):
     """Dialog de confirmação estilizado para sync de snapshot."""
 
@@ -3126,7 +3963,7 @@ class _SyncConfirmDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Confirmar sincronização")
         self.setModal(True)
-        self.setFixedSize(520, 220)
+        self.setFixedSize(540, 240)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
         self._build_ui(entry)
         self._apply_styles()
@@ -3138,15 +3975,15 @@ class _SyncConfirmDialog(QDialog):
 
         header = QFrame()
         header.setObjectName("SyncHeader")
-        header.setFixedHeight(48)
+        header.setFixedHeight(56)
         h_layout = QHBoxLayout(header)
-        h_layout.setContentsMargins(18, 0, 16, 0)
+        h_layout.setContentsMargins(20, 0, 18, 0)
 
         icon = QLabel()
-        icon.setFixedSize(28, 28)
+        icon.setFixedSize(36, 36)
         icon.setAlignment(Qt.AlignCenter)
-        icon.setPixmap(qta.icon("mdi6.sync", color="#23a6ff").pixmap(18, 18))
-        icon.setStyleSheet("QLabel { background: rgba(35,166,255,40); border-radius: 8px; }")
+        icon.setPixmap(qta.icon("mdi6.sync", color="#9bf0bd").pixmap(22, 22))
+        icon.setStyleSheet("QLabel { background: rgba(74,222,128,40); border-radius: 9px; }")
 
         lbl = QLabel("Sincronizar Snapshot")
         lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
@@ -3164,8 +4001,8 @@ class _SyncConfirmDialog(QDialog):
         body = QFrame()
         body.setObjectName("SyncBody")
         b_layout = QVBoxLayout(body)
-        b_layout.setContentsMargins(24, 18, 24, 20)
-        b_layout.setSpacing(10)
+        b_layout.setContentsMargins(28, 22, 28, 22)
+        b_layout.setSpacing(12)
 
         warn = QLabel("O snapshot será atualizado com o estado atual do sistema. Apenas arquivos modificados serão transferidos.")
         warn.setWordWrap(True)
@@ -3175,8 +4012,8 @@ class _SyncConfirmDialog(QDialog):
         snap_label = QLabel(entry.path.name)
         snap_label.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
         snap_label.setStyleSheet(
-            "color: #23a6ff; background: rgba(35,166,255,20); "
-            "border: 1px solid rgba(35,166,255,60); border-radius: 6px; padding: 4px 10px;"
+            "color: #23a6ff; background: #101115; "
+            "border-radius: 6px; padding: 10px 12px;"
         )
 
         btn_row = QHBoxLayout()
@@ -3184,12 +4021,12 @@ class _SyncConfirmDialog(QDialog):
 
         btn_cancel = QPushButton("Cancelar")
         btn_cancel.setObjectName("SyncBtnCancel")
-        btn_cancel.setFixedWidth(110)
+        btn_cancel.setFixedSize(110, 40)
         btn_cancel.clicked.connect(self.reject)
 
         btn_confirm = QPushButton("Sincronizar")
         btn_confirm.setObjectName("SyncBtnConfirm")
-        btn_confirm.setFixedWidth(120)
+        btn_confirm.setFixedSize(130, 40)
         btn_confirm.clicked.connect(self.accept)
 
         btn_row.addStretch()
@@ -3197,6 +4034,7 @@ class _SyncConfirmDialog(QDialog):
         btn_row.addWidget(btn_confirm)
 
         b_layout.addWidget(warn)
+        b_layout.addSpacing(6)
         b_layout.addWidget(snap_label)
         b_layout.addStretch()
         b_layout.addLayout(btn_row)
@@ -3206,16 +4044,20 @@ class _SyncConfirmDialog(QDialog):
 
     def _apply_styles(self) -> None:
         self.setStyleSheet("""
+            QDialog {
+                background: #131417;
+                border-radius: 14px;
+            }
             QFrame#SyncHeader {
-                background: rgba(8, 20, 40, 255);
-                border-bottom: 1px solid rgba(35, 166, 255, 100);
-                border-top-left-radius: 12px;
-                border-top-right-radius: 12px;
+                background: rgba(74, 222, 128, 35);
+                border-bottom: 1px solid rgba(74, 222, 128, 25);
+                border-top-left-radius: 14px;
+                border-top-right-radius: 14px;
             }
             QFrame#SyncBody {
-                background: #080c14;
-                border-bottom-left-radius: 12px;
-                border-bottom-right-radius: 12px;
+                background: #131417;
+                border-bottom-left-radius: 14px;
+                border-bottom-right-radius: 14px;
             }
             QPushButton#SyncClose {
                 background: transparent;
@@ -3229,31 +4071,584 @@ class _SyncConfirmDialog(QDialog):
                 color: #ff8888;
             }
             QPushButton#SyncBtnCancel {
-                background: rgba(10, 15, 25, 230);
-                border: 1px solid rgba(31, 92, 255, 120);
-                border-radius: 8px;
+                background: rgba(255,255,255,6);
+                border: 1px solid rgba(255,255,255,18);
+                border-radius: 10px;
                 color: #ecf4ff;
                 font-family: "DejaVu Sans Mono";
                 font-size: 11px;
-                padding: 6px 0;
             }
             QPushButton#SyncBtnCancel:hover {
                 background: rgba(23, 147, 209, 70);
                 border-color: rgba(35, 166, 255, 180);
             }
             QPushButton#SyncBtnConfirm {
-                background: rgba(31, 92, 255, 180);
-                border: 1px solid rgba(35, 166, 255, 200);
-                border-radius: 8px;
-                color: #ffffff;
+                background: rgba(74, 222, 128, 180);
+                border: 1px solid rgba(74, 222, 128, 220);
+                border-radius: 10px;
+                color: #08111d;
                 font-family: "DejaVu Sans Mono";
                 font-size: 11px;
                 font-weight: 700;
-                padding: 6px 0;
             }
             QPushButton#SyncBtnConfirm:hover {
-                background: rgba(35, 166, 255, 220);
-                border-color: rgba(70, 188, 255, 255);
+                background: rgba(94, 234, 149, 220);
+                border-color: rgba(94, 234, 149, 255);
+            }
+        """)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.LeftButton and hasattr(self, '_drag'):
+            self.move(event.globalPosition().toPoint() - self._drag)
+
+
+class _OfferPairSyncDialog(QDialog):
+    """Exibido após um SYNC bem-sucedido, perguntando se o usuário quer
+    sincronizar também o snapshot irmão (ROOT ↔ HOME) de mesmo stamp."""
+
+    def __init__(
+        self,
+        sibling_kind: str,
+        sibling_name: str,
+        parent=None,
+        title: str = "Sincronizar também?",
+        message: str | None = None,
+    ):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setModal(True)
+        self.setFixedSize(540, 240)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self._build_ui(sibling_kind, sibling_name, title, message)
+        self._apply_styles()
+
+    def _build_ui(
+        self,
+        sibling_kind: str,
+        sibling_name: str,
+        title: str = "Sincronizar também?",
+        message: str | None = None,
+    ) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        header = QFrame()
+        header.setObjectName("SyncHeader")
+        header.setFixedHeight(56)
+        h_layout = QHBoxLayout(header)
+        h_layout.setContentsMargins(20, 0, 18, 0)
+
+        icon = QLabel()
+        icon.setFixedSize(36, 36)
+        icon.setAlignment(Qt.AlignCenter)
+        icon.setPixmap(qta.icon("mdi6.sync", color="#9bf0bd").pixmap(22, 22))
+        icon.setStyleSheet("QLabel { background: rgba(74,222,128,40); border-radius: 9px; }")
+
+        lbl = QLabel(title)
+        lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+        lbl.setStyleSheet("color: #ecf4ff;")
+
+        btn_x = _CloseLabel(self)
+        btn_x.mousePressEvent = lambda e: self.reject()
+
+        h_layout.addWidget(icon)
+        h_layout.addSpacing(10)
+        h_layout.addWidget(lbl)
+        h_layout.addStretch()
+        h_layout.addWidget(btn_x)
+
+        body = QFrame()
+        body.setObjectName("SyncBody")
+        b_layout = QVBoxLayout(body)
+        b_layout.setContentsMargins(28, 22, 28, 22)
+        b_layout.setSpacing(12)
+
+        msg = QLabel(
+            message or (
+                f"O snapshot {sibling_kind} correspondente também pode ser "
+                f"sincronizado agora, mantendo ROOT e HOME em par."
+            )
+        )
+        msg.setWordWrap(True)
+        msg.setFont(QFont("DejaVu Sans Mono", 9))
+        msg.setStyleSheet("color: #c8d4e0;")
+
+        snap_label = QLabel(f"{sibling_kind} • {sibling_name}")
+        snap_label.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+        snap_label.setStyleSheet(
+            "color: #23a6ff; background: #101115; "
+            "border-radius: 6px; padding: 10px 12px;"
+        )
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
+
+        btn_cancel = QPushButton("Agora não")
+        btn_cancel.setObjectName("SyncBtnCancel")
+        btn_cancel.setFixedSize(130, 40)
+        btn_cancel.clicked.connect(self.reject)
+
+        btn_confirm = QPushButton(f"Sincronizar {sibling_kind}")
+        btn_confirm.setObjectName("SyncBtnConfirm")
+        btn_confirm.setFixedSize(170, 40)
+        btn_confirm.clicked.connect(self.accept)
+
+        btn_row.addStretch()
+        btn_row.addWidget(btn_cancel)
+        btn_row.addWidget(btn_confirm)
+
+        b_layout.addWidget(msg)
+        b_layout.addSpacing(6)
+        b_layout.addWidget(snap_label)
+        b_layout.addStretch()
+        b_layout.addLayout(btn_row)
+
+        root.addWidget(header)
+        root.addWidget(body, stretch=1)
+
+    def _apply_styles(self) -> None:
+        self.setStyleSheet("""
+            QDialog {
+                background: #131417;
+                border-radius: 14px;
+            }
+            QFrame#SyncHeader {
+                background: rgba(74, 222, 128, 35);
+                border-bottom: 1px solid rgba(74, 222, 128, 25);
+                border-top-left-radius: 14px;
+                border-top-right-radius: 14px;
+            }
+            QFrame#SyncBody {
+                background: #131417;
+                border-bottom-left-radius: 14px;
+                border-bottom-right-radius: 14px;
+            }
+            QPushButton#SyncBtnCancel {
+                background: rgba(255,255,255,6);
+                border: 1px solid rgba(255,255,255,18);
+                border-radius: 10px;
+                color: #ecf4ff;
+                font-family: "DejaVu Sans Mono";
+                font-size: 11px;
+            }
+            QPushButton#SyncBtnCancel:hover {
+                background: rgba(23, 147, 209, 70);
+                border-color: rgba(35, 166, 255, 180);
+            }
+            QPushButton#SyncBtnConfirm {
+                background: rgba(74, 222, 128, 180);
+                border: 1px solid rgba(74, 222, 128, 220);
+                border-radius: 10px;
+                color: #08111d;
+                font-family: "DejaVu Sans Mono";
+                font-size: 11px;
+                font-weight: 700;
+            }
+            QPushButton#SyncBtnConfirm:hover {
+                background: rgba(94, 234, 149, 220);
+                border-color: rgba(94, 234, 149, 255);
+            }
+        """)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.LeftButton and hasattr(self, '_drag'):
+            self.move(event.globalPosition().toPoint() - self._drag)
+
+
+class _VerifySelectDialog(QDialog):
+    """Mostrado ao clicar em VERIFICAR — lista todos os snapshots ROOT/HOME
+    disponíveis com checkboxes, permitindo escolher exatamente quais serão
+    checados de verdade (rsync --dry-run). Por padrão só o mais recente de
+    cada tipo vem pré-marcado, mas o usuário pode marcar snapshots antigos
+    também."""
+
+    @staticmethod
+    def make_id(entry: SnapshotEntry) -> str:
+        return f"{entry.kind.upper()}::{entry.path.name}"
+
+    def __init__(self, entries: list[SnapshotEntry], default_checked: set[str], parent=None):
+        super().__init__(parent)
+        self.entries = entries
+        self.checkboxes: dict[str, QCheckBox] = {}
+        self.setWindowTitle("Escolher snapshots para verificar")
+        self.setModal(True)
+        row_h = 30
+        self.setFixedSize(560, 240 + row_h * max(0, len(entries) - 1))
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self._build_ui(default_checked)
+        self._apply_styles()
+
+    def selected_entries(self) -> list[SnapshotEntry]:
+        return [e for e in self.entries if self.checkboxes[self.make_id(e)].isChecked()]
+
+    def _build_ui(self, default_checked: set[str]) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        header = QFrame()
+        header.setObjectName("SelHeader")
+        header.setFixedHeight(56)
+        h_layout = QHBoxLayout(header)
+        h_layout.setContentsMargins(20, 0, 18, 0)
+
+        icon = QLabel()
+        icon.setFixedSize(36, 36)
+        icon.setAlignment(Qt.AlignCenter)
+        icon.setPixmap(qta.icon(VERIFY_GLYPH, color="#9bf0e0").pixmap(22, 22))
+        icon.setStyleSheet("QLabel { background: rgba(35,166,255,40); border-radius: 9px; }")
+
+        lbl = QLabel("Escolher snapshots para verificar")
+        lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+        lbl.setStyleSheet("color: #ecf4ff;")
+
+        btn_x = _CloseLabel(self)
+        btn_x.mousePressEvent = lambda e: self.reject()
+
+        h_layout.addWidget(icon)
+        h_layout.addSpacing(10)
+        h_layout.addWidget(lbl)
+        h_layout.addStretch()
+        h_layout.addWidget(btn_x)
+
+        body = QFrame()
+        body.setObjectName("SelBody")
+        b_layout = QVBoxLayout(body)
+        b_layout.setContentsMargins(28, 20, 28, 20)
+        b_layout.setSpacing(10)
+
+        msg = QLabel(
+            "Por padrão só o mais recente de cada tipo vem marcado. "
+            "Marque outros snapshots se quiser verificá-los também:"
+        )
+        msg.setWordWrap(True)
+        msg.setFont(QFont("DejaVu Sans Mono", 9))
+        msg.setStyleSheet("color: #c8d4e0;")
+        b_layout.addWidget(msg)
+        b_layout.addSpacing(4)
+
+        for e in sorted(self.entries, key=lambda x: (x.kind.upper(), x.path.name), reverse=True):
+            row = QFrame()
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(10)
+
+            id_ = self.make_id(e)
+            cb = QCheckBox()
+            cb.setChecked(id_ in default_checked)
+            cb.setObjectName("SyncCheckbox")
+            self.checkboxes[id_] = cb
+
+            snap_label = QLabel(f"{e.kind.upper()} • {e.path.name}")
+            snap_label.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
+            snap_label.setStyleSheet(
+                "color: #23a6ff; background: #101115; "
+                "border-radius: 6px; padding: 7px 10px;"
+            )
+
+            row_layout.addWidget(cb)
+            row_layout.addWidget(snap_label, 1)
+            b_layout.addWidget(row)
+
+        b_layout.addStretch()
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
+
+        btn_cancel = QPushButton("Cancelar")
+        btn_cancel.setObjectName("SyncBtnCancel")
+        btn_cancel.setFixedSize(130, 40)
+        btn_cancel.clicked.connect(self.reject)
+
+        btn_confirm = QPushButton("Verificar selecionados")
+        btn_confirm.setObjectName("SyncBtnConfirm")
+        btn_confirm.setFixedSize(200, 40)
+        btn_confirm.clicked.connect(self.accept)
+
+        btn_row.addStretch()
+        btn_row.addWidget(btn_cancel)
+        btn_row.addWidget(btn_confirm)
+        b_layout.addLayout(btn_row)
+
+        root.addWidget(header)
+        root.addWidget(body, stretch=1)
+
+    def _apply_styles(self) -> None:
+        self.setStyleSheet("""
+            QDialog {
+                background: #131417;
+                border-radius: 14px;
+            }
+            QFrame#SelHeader {
+                background: rgba(35, 166, 255, 35);
+                border-bottom: 1px solid rgba(35, 166, 255, 25);
+                border-top-left-radius: 14px;
+                border-top-right-radius: 14px;
+            }
+            QFrame#SelBody {
+                background: #131417;
+                border-bottom-left-radius: 14px;
+                border-bottom-right-radius: 14px;
+            }
+            QCheckBox#SyncCheckbox {
+                spacing: 0px;
+            }
+            QCheckBox#SyncCheckbox::indicator {
+                width: 18px;
+                height: 18px;
+                border-radius: 5px;
+                border: 1px solid rgba(255,255,255,40);
+                background: rgba(255,255,255,6);
+            }
+            QCheckBox#SyncCheckbox::indicator:checked {
+                background: rgba(35, 166, 255, 200);
+                border: 1px solid rgba(35, 166, 255, 220);
+            }
+            QPushButton#SyncBtnCancel {
+                background: rgba(255,255,255,6);
+                border: 1px solid rgba(255,255,255,18);
+                border-radius: 10px;
+                color: #ecf4ff;
+                font-family: "DejaVu Sans Mono";
+                font-size: 11px;
+            }
+            QPushButton#SyncBtnCancel:hover {
+                background: rgba(23, 147, 209, 70);
+                border-color: rgba(35, 166, 255, 180);
+            }
+            QPushButton#SyncBtnConfirm {
+                background: rgba(35, 166, 255, 180);
+                border: 1px solid rgba(35, 166, 255, 220);
+                border-radius: 10px;
+                color: #08111d;
+                font-family: "DejaVu Sans Mono";
+                font-size: 11px;
+                font-weight: 700;
+            }
+            QPushButton#SyncBtnConfirm:hover {
+                background: rgba(94, 200, 255, 220);
+                border-color: rgba(94, 200, 255, 255);
+            }
+        """)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.LeftButton and hasattr(self, '_drag'):
+            self.move(event.globalPosition().toPoint() - self._drag)
+
+
+class _VerifyResultsDialog(QDialog):
+    """Exibido após o botão VERIFICAR encontrar um ou mais snapshots
+    desatualizados. Mostra todos de uma vez com checkboxes, em vez de
+    perguntar um por um — evita o efeito "insistente" de vários dialogs
+    em sequência."""
+
+    def __init__(self, stale: list[tuple[str, str]], parent=None):
+        # stale: lista de (kind, snapshot_name), ex: [("ROOT", "2026-..."), ("HOME", "2026-...")]
+        super().__init__(parent)
+        self.stale = stale
+        self.checkboxes: dict[str, QCheckBox] = {}
+        self.setWindowTitle("Snapshots desatualizados")
+        self.setModal(True)
+        self.setFixedSize(540, 260 + 34 * max(0, len(stale) - 1))
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self._build_ui()
+        self._apply_styles()
+
+    def selected_kinds(self) -> list[str]:
+        return [key for key, cb in self.checkboxes.items() if cb.isChecked()]
+
+    def _build_ui(self) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        header = QFrame()
+        header.setObjectName("SyncHeader")
+        header.setFixedHeight(56)
+        h_layout = QHBoxLayout(header)
+        h_layout.setContentsMargins(20, 0, 18, 0)
+
+        icon = QLabel()
+        icon.setFixedSize(36, 36)
+        icon.setAlignment(Qt.AlignCenter)
+        icon.setPixmap(qta.icon("mdi6.sync-alert", color="#e0a840").pixmap(22, 22))
+        icon.setStyleSheet("QLabel { background: rgba(224,168,64,40); border-radius: 9px; }")
+
+        kinds_involved = {kind for kind, _ in self.stale}
+        if len(self.stale) > 1 and len(kinds_involved) > 1:
+            title_text = "ROOT e HOME estão desatualizados"
+        elif len(self.stale) > 1:
+            title_text = f"{len(self.stale)} snapshots {next(iter(kinds_involved))} estão desatualizados"
+        else:
+            title_text = f"{self.stale[0][0]} está desatualizado"
+        lbl = QLabel(title_text)
+        lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+        lbl.setStyleSheet("color: #ecf4ff;")
+
+        btn_x = _CloseLabel(self)
+        btn_x.mousePressEvent = lambda e: self.reject()
+
+        h_layout.addWidget(icon)
+        h_layout.addSpacing(10)
+        h_layout.addWidget(lbl)
+        h_layout.addStretch()
+        h_layout.addWidget(btn_x)
+
+        body = QFrame()
+        body.setObjectName("SyncBody")
+        b_layout = QVBoxLayout(body)
+        b_layout.setContentsMargins(28, 22, 28, 22)
+        b_layout.setSpacing(12)
+
+        msg = QLabel(
+            "O rsync --dry-run encontrou mudanças reais no sistema que "
+            "ainda não estão nos snapshots abaixo. Escolha quais sincronizar:"
+        )
+        msg.setWordWrap(True)
+        msg.setFont(QFont("DejaVu Sans Mono", 9))
+        msg.setStyleSheet("color: #c8d4e0;")
+        b_layout.addWidget(msg)
+        b_layout.addSpacing(4)
+
+        for kind, name in self.stale:
+            row = QFrame()
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(10)
+
+            key = f"{kind}|{name}"
+            cb = QCheckBox()
+            cb.setChecked(True)
+            cb.setObjectName("SyncCheckbox")
+            cb.stateChanged.connect(self._update_confirm_label)
+            self.checkboxes[key] = cb
+
+            snap_label = QLabel(f"{kind} • {name}")
+            snap_label.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+            snap_label.setStyleSheet(
+                "color: #23a6ff; background: #101115; "
+                "border-radius: 6px; padding: 10px 12px;"
+            )
+
+            row_layout.addWidget(cb)
+            row_layout.addWidget(snap_label, 1)
+            b_layout.addWidget(row)
+
+        b_layout.addStretch()
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
+
+        btn_cancel = QPushButton("Agora não")
+        btn_cancel.setObjectName("SyncBtnCancel")
+        btn_cancel.setFixedSize(130, 40)
+        btn_cancel.clicked.connect(self.reject)
+
+        self.btn_confirm = QPushButton()
+        self.btn_confirm.setObjectName("SyncBtnConfirm")
+        self.btn_confirm.setFixedSize(190, 40)
+        self.btn_confirm.clicked.connect(self.accept)
+
+        btn_row.addStretch()
+        btn_row.addWidget(btn_cancel)
+        btn_row.addWidget(self.btn_confirm)
+
+        b_layout.addLayout(btn_row)
+
+        root.addWidget(header)
+        root.addWidget(body, stretch=1)
+
+        self._update_confirm_label()
+
+    def _update_confirm_label(self) -> None:
+        selected = self.selected_kinds()
+        if len(selected) == 0:
+            self.btn_confirm.setText("Sincronizar")
+            self.btn_confirm.setEnabled(False)
+        elif len(selected) == len(self.stale) and len(self.stale) > 1:
+            self.btn_confirm.setText(f"Sincronizar todos ({len(selected)})")
+            self.btn_confirm.setEnabled(True)
+        elif len(selected) == 1:
+            kind = selected[0].split("|", 1)[0]
+            self.btn_confirm.setText(f"Sincronizar {kind}")
+            self.btn_confirm.setEnabled(True)
+        else:
+            self.btn_confirm.setText(f"Sincronizar {len(selected)} selecionados")
+            self.btn_confirm.setEnabled(True)
+
+    def _apply_styles(self) -> None:
+        self.setStyleSheet("""
+            QDialog {
+                background: #131417;
+                border-radius: 14px;
+            }
+            QFrame#SyncHeader {
+                background: rgba(224, 168, 64, 35);
+                border-bottom: 1px solid rgba(224, 168, 64, 25);
+                border-top-left-radius: 14px;
+                border-top-right-radius: 14px;
+            }
+            QFrame#SyncBody {
+                background: #131417;
+                border-bottom-left-radius: 14px;
+                border-bottom-right-radius: 14px;
+            }
+            QCheckBox#SyncCheckbox {
+                spacing: 0px;
+            }
+            QCheckBox#SyncCheckbox::indicator {
+                width: 18px;
+                height: 18px;
+                border-radius: 5px;
+                border: 1px solid rgba(255,255,255,40);
+                background: rgba(255,255,255,6);
+            }
+            QCheckBox#SyncCheckbox::indicator:checked {
+                background: rgba(74, 222, 128, 200);
+                border: 1px solid rgba(74, 222, 128, 220);
+            }
+            QPushButton#SyncBtnCancel {
+                background: rgba(255,255,255,6);
+                border: 1px solid rgba(255,255,255,18);
+                border-radius: 10px;
+                color: #ecf4ff;
+                font-family: "DejaVu Sans Mono";
+                font-size: 11px;
+            }
+            QPushButton#SyncBtnCancel:hover {
+                background: rgba(23, 147, 209, 70);
+                border-color: rgba(35, 166, 255, 180);
+            }
+            QPushButton#SyncBtnConfirm {
+                background: rgba(74, 222, 128, 180);
+                border: 1px solid rgba(74, 222, 128, 220);
+                border-radius: 10px;
+                color: #08111d;
+                font-family: "DejaVu Sans Mono";
+                font-size: 11px;
+                font-weight: 700;
+            }
+            QPushButton#SyncBtnConfirm:hover {
+                background: rgba(94, 234, 149, 220);
+                border-color: rgba(94, 234, 149, 255);
+            }
+            QPushButton#SyncBtnConfirm:disabled {
+                background: rgba(255,255,255,6);
+                border: 1px solid rgba(255,255,255,18);
+                color: #5f6b7a;
             }
         """)
 
@@ -3271,16 +4666,16 @@ class _SyncConfirmDialog(QDialog):
 class _DeleteConfirmDialog(QDialog):
     """Dialog de confirmação estilizado para delete de snapshot."""
 
-    def __init__(self, entry: SnapshotEntry, parent=None):
+    def __init__(self, entry: SnapshotEntry, is_last_root: bool = False, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Confirmar exclusão")
         self.setModal(True)
-        self.setFixedSize(520, 220)
+        self.setFixedSize(520, 300 if is_last_root else 240)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
-        self._build_ui(entry)
+        self._build_ui(entry, is_last_root)
         self._apply_styles()
 
-    def _build_ui(self, entry: SnapshotEntry) -> None:
+    def _build_ui(self, entry: SnapshotEntry, is_last_root: bool = False) -> None:
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
@@ -3326,6 +4721,24 @@ class _DeleteConfirmDialog(QDialog):
         warn.setFont(QFont("DejaVu Sans Mono", 9))
         warn.setStyleSheet("color: #c8d4e0;")
 
+        root_warn = None
+        if is_last_root:
+            root_warn = QLabel(
+                "Este é o último snapshot ROOT — o carbonara-restore.sh "
+                "também será removido, já que não sobrará nada para restaurar."
+            )
+            root_warn.setWordWrap(True)
+            root_warn.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
+            root_warn.setStyleSheet(
+                "color: #e0a840; background: rgba(224,168,64,0.12); "
+                "border-radius: 6px; padding: 8px 10px;"
+            )
+
+        pw_note = QLabel("Será solicitada a senha de root para concluir a exclusão.")
+        pw_note.setWordWrap(True)
+        pw_note.setFont(QFont("DejaVu Sans Mono", 8))
+        pw_note.setStyleSheet("color: #5f6b7a;")
+
         snap_label = QLabel(entry.path.name)
         snap_label.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
         snap_label.setStyleSheet(
@@ -3351,7 +4764,10 @@ class _DeleteConfirmDialog(QDialog):
         btn_row.addWidget(btn_confirm)
 
         b_layout.addWidget(warn)
+        if root_warn is not None:
+            b_layout.addWidget(root_warn)
         b_layout.addWidget(snap_label)
+        b_layout.addWidget(pw_note)
         b_layout.addStretch()
         b_layout.addLayout(btn_row)
 
@@ -3430,11 +4846,12 @@ class _DeleteProgressDialog(QDialog):
         self.setFixedSize(420, 160)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
         self._dots = 0
+        self._spinner_frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
         self._build_ui(snap_name)
         self._apply_styles()
 
         self._timer = QTimer(self)
-        self._timer.setInterval(400)
+        self._timer.setInterval(80)
         self._timer.timeout.connect(self._tick)
         self._timer.start()
 
@@ -3478,6 +4895,17 @@ class _DeleteProgressDialog(QDialog):
         self.lbl_status.setStyleSheet("color: #c8d4e0;")
         self.lbl_status.setAlignment(Qt.AlignCenter)
 
+        status_row = QHBoxLayout()
+        status_row.setSpacing(10)
+        status_row.addStretch(1)
+
+        self.lbl_spinner = QLabel("⠋")
+        self.lbl_spinner.setFont(QFont("DejaVu Sans Mono", 12, QFont.Bold))
+        self.lbl_spinner.setStyleSheet("color: #23a6ff;")
+        status_row.addWidget(self.lbl_spinner)
+        status_row.addWidget(self.lbl_status)
+        status_row.addStretch(1)
+
         snap_lbl = QLabel(snap_name)
         snap_lbl.setFont(QFont("DejaVu Sans Mono", 9))
         snap_lbl.setStyleSheet("color: #6b7a8d;")
@@ -3491,7 +4919,7 @@ class _DeleteProgressDialog(QDialog):
         self.progress.setTextVisible(False)
         self.progress.setObjectName("DPBar")
 
-        b_layout.addWidget(self.lbl_status)
+        b_layout.addLayout(status_row)
         b_layout.addWidget(snap_lbl)
         b_layout.addSpacing(4)
         b_layout.addWidget(self.progress)
@@ -3528,9 +4956,8 @@ class _DeleteProgressDialog(QDialog):
         """)
 
     def _tick(self) -> None:
-        self._dots = (self._dots + 1) % 4
-        dots = "." * self._dots
-        self.lbl_status.setText(f"Removendo{dots}")
+        self._dots = (self._dots + 1) % len(self._spinner_frames)
+        self.lbl_spinner.setText(self._spinner_frames[self._dots])
 
     def closeEvent(self, event) -> None:
         self._timer.stop()
@@ -3578,37 +5005,29 @@ class _DeleteWorker(QThread):
                 )
                 new_latest = candidates[-1] if candidates else None
 
-            # Script python que roda como root via pkexec
-            script = f"""
-import shutil, os
-from pathlib import Path
-
-target = Path({str(self._path)!r})
-link   = Path({str(link)!r})
-
-shutil.rmtree(target)
-
-# Atualiza symlink latest
-if link.is_symlink() or link.exists():
-    link.unlink()
-
-new_latest = {repr(str(new_latest)) if new_latest else repr(None)}
-if new_latest:
-    link.symlink_to(Path(new_latest).name)
-"""
-            import subprocess
-            from pathlib import Path as _Path
-
-            python_bin = str(_Path.home() / "venvs" / "pyside" / "bin" / "python3")
+            args_json = json.dumps({
+                "target": str(self._path),
+                "link": str(link),
+                "new_latest": str(new_latest) if new_latest else None,
+            })
 
             result = subprocess.run(
-                ["pkexec", python_bin, "-c", script],
+                [
+                    "pkexec",
+                    "/usr/local/bin/carbonara-helper",
+                    os.environ.get("DISPLAY", ""),
+                    os.environ.get("XAUTHORITY", ""),
+                    "backup.delete_snapshot",
+                    args_json,
+                ],
                 capture_output=True,
                 text=True,
             )
 
             if result.returncode != 0:
                 err = result.stderr.strip() or f"exit code {result.returncode}"
+                if result.returncode == 126 or "dismissed" in err.lower():
+                    err = "Operação cancelada."
                 self.failed.emit(err)
                 return
 
