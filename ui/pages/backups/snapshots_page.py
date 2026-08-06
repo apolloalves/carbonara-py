@@ -337,87 +337,34 @@ class ScopeCard(QFrame):
         super().keyPressEvent(event)
 
 
-class _ButtonToastTip(QFrame):
+class _TopTooltipFilter(QObject):
     """Tooltip estilo toast pros botões RESTORE/SYNC/DELETE — substitui o
     QToolTip nativo do Qt (que tinha cache de reexibição inconsistente:
-    'aparece quando quer'). Mesmo padrão visual dos toasts já usados no
-    app (fundo escuro translúcido + borda azul + cantos arredondados) e
-    mesma lógica de posicionamento manual (janela topo-nível própria via
-    Qt.ToolTip, não briga com QToolTip.showText nem com o clique dos
-    botões)."""
-    def __init__(self):
-        super().__init__(None, Qt.ToolTip | Qt.FramelessWindowHint)
-        self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setAttribute(Qt.WA_ShowWithoutActivating)
-        self.setObjectName("ButtonToastTip")
-        self.setStyleSheet(
-            """
-            QFrame#ButtonToastTip {
-                background: rgba(15, 18, 28, 235);
-                border: 1px solid rgba(35, 166, 255, 110);
-                border-radius: 10px;
-            }
-            """
-        )
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(14, 8, 14, 8)
-        self._label = QLabel("")
-        self._label.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
-        self._label.setStyleSheet("color: #ecf4ff; background: transparent;")
-        layout.addWidget(self._label)
+    'aparece quando quer'). Delega a exibição pra página (SnapshotsPage),
+    que tem seu próprio toast QFrame (self._button_toast) — filho real da
+    página, igual ao operation_status_row do eggs_page.py, em vez de uma
+    janela topo-nível própria (Qt.ToolTip) como na primeira tentativa, que
+    o compositor/mutter custom do Apollo não renderizava direito
+    (transparência/cantos arredondados saíam errados)."""
+    def __init__(self, page: QWidget, parent=None):
+        super().__init__(parent)
+        self._page = page
 
-        # Timer próprio, sem depender do msecShowTime do QToolTip (era
-        # esse mecanismo que tinha o cache/reexibição inconsistente).
-        self._hide_timer = QTimer(self)
-        self._hide_timer.setSingleShot(True)
-        self._hide_timer.setInterval(8000)
-        self._hide_timer.timeout.connect(self.hide)
-
-    def show_for(self, target: QWidget, text: str) -> None:
-        self._label.setText(text)
-        self.adjustSize()
-        top_left = target.mapToGlobal(QPoint(0, 0))
-        x = top_left.x() + target.width() // 2 - self.width() // 2
-        y = top_left.y() - self.height() - 8
-        self.move(x, y)
-        self.show()
-        self._hide_timer.start()
-
-    def hide_now(self) -> None:
-        self._hide_timer.stop()
-        self.hide()
-
-
-_toast_tip_instance: "_ButtonToastTip | None" = None
-
-
-def _get_toast_tip() -> "_ButtonToastTip":
-    """Singleton lazy — não pode ser criado no import do módulo porque
-    QFrame exige um QApplication já existente."""
-    global _toast_tip_instance
-    if _toast_tip_instance is None:
-        _toast_tip_instance = _ButtonToastTip()
-    return _toast_tip_instance
-
-
-class _TopTooltipFilter(QObject):
-    """Intercepta o evento nativo de tooltip (mesmo gatilho de hover do
-    Qt) mas exibe com o widget _ButtonToastTip em vez do QToolTip.showText
-    nativo — resolve cor, timer e reexibição inconsistente de uma vez."""
     def eventFilter(self, obj, event):
         if event.type() == QEvent.ToolTip and obj.toolTip():
-            _get_toast_tip().show_for(obj, obj.toolTip())
+            self._page._show_button_toast(obj, obj.toolTip())
             return True
         if event.type() == QEvent.Leave:
-            _get_toast_tip().hide_now()
+            self._page._hide_button_toast()
         return super().eventFilter(obj, event)
 
 
 
 class SnapshotCard(QFrame):
-    def __init__(self, entry: SnapshotEntry, sibling: "SnapshotEntry | None" = None, parent=None):
+    def __init__(self, entry: SnapshotEntry, sibling: "SnapshotEntry | None" = None, page: QWidget = None, parent=None):
         super().__init__(parent)
         self.entry = entry
+        self._page = page
 
         self.setObjectName("SnapshotCard")
         self.setStyleSheet(
@@ -656,7 +603,7 @@ class SnapshotCard(QFrame):
         btn_row.addWidget(self.btn_sync)
         btn_row.addWidget(self.btn_delete)
 
-        self._tooltip_filter = _TopTooltipFilter(self)
+        self._tooltip_filter = _TopTooltipFilter(self._page)
         self.btn_restore.installEventFilter(self._tooltip_filter)
         self.btn_sync.installEventFilter(self._tooltip_filter)
         self.btn_delete.installEventFilter(self._tooltip_filter)
@@ -1067,8 +1014,81 @@ class SnapshotsPage(QWidget):
         root.addWidget(sep_line)
         root.addWidget(self.scroll, 1)
 
+        # ── Toast dos tooltips de RESTORE/SYNC/DELETE (canto superior
+        # direito, igual ao operation_status_row do eggs_page.py) ──
+        # É um QFrame filho DESTA página (não uma janela topo-nível como
+        # a primeira tentativa) — o compositor/mutter custom do Apollo não
+        # renderizava certo a transparência/cantos de uma janela Qt.ToolTip
+        # própria, então voltamos pro mesmo padrão que já funciona no Eggs.
+        # Sem spinner (removido por pedido — é só um texto, não uma
+        # operação em andamento).
+        self._button_toast = QFrame(self)
+        self._toast_target: QWidget | None = None
+        self._button_toast.setObjectName("ButtonToast")
+        self._button_toast.setStyleSheet(
+            """
+            QFrame#ButtonToast {
+                background: rgba(15, 18, 28, 235);
+                border: 1px solid rgba(35, 166, 255, 110);
+                border-radius: 12px;
+            }
+            """
+        )
+        toast_layout = QHBoxLayout(self._button_toast)
+        toast_layout.setContentsMargins(18, 12, 18, 12)
+
+        self._toast_label = QLabel("")
+        self._toast_label.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+        self._toast_label.setStyleSheet("color: #ecf4ff; background: transparent;")
+
+        toast_layout.addWidget(self._toast_label)
+        self._button_toast.hide()
+        self._button_toast.adjustSize()
+
+        # Timer próprio de esconder — nada de QToolTip.showText/cache.
+        self._toast_hide_timer = QTimer(self)
+        self._toast_hide_timer.setSingleShot(True)
+        self._toast_hide_timer.setInterval(8000)
+        self._toast_hide_timer.timeout.connect(self._hide_button_toast)
+
         self.refresh_destinations()
         self.set_scope("both")
+
+    def _reposition_button_toast(self) -> None:
+        """Posicionado logo ABAIXO do botão que disparou o hover (com uma
+        folga de 8px pra não ficar colado/por cima), centralizado
+        horizontalmente em relação a ele — em vez de um ponto fixo da
+        página. Precisa do widget-alvo guardado em `_toast_target` porque
+        é chamado de novo em resizeEvent, sem o evento de hover original."""
+        if self._toast_target is None:
+            return
+        self._button_toast.adjustSize()
+        gap = 20
+        target = self._toast_target
+        target_top_left_global = target.mapToGlobal(QPoint(0, target.height()))
+        center_x_global = target.mapToGlobal(QPoint(target.width() // 2, 0)).x()
+
+        toast_w = self._button_toast.width()
+        x_global = center_x_global - toast_w // 2
+        y_global = target_top_left_global.y() + gap
+
+        local = self.mapFromGlobal(QPoint(x_global, y_global))
+        # Não deixa vazar pra fora da página horizontalmente.
+        x = min(max(4, local.x()), self.width() - toast_w - 4)
+        self._button_toast.move(x, local.y())
+        self._button_toast.raise_()
+
+    def _show_button_toast(self, target: QWidget, text: str) -> None:
+        self._toast_target = target
+        self._toast_label.setText(text)
+        self._button_toast.show()
+        self._reposition_button_toast()
+        self._toast_hide_timer.start()
+
+    def _hide_button_toast(self) -> None:
+        self._toast_hide_timer.stop()
+        self._button_toast.hide()
+        self._toast_target = None
 
     def showEvent(self, event) -> None:
         """A página é criada uma vez só (QStackedWidget) — sem isso, a
@@ -1177,6 +1197,8 @@ class SnapshotsPage(QWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self.update_destination_summary()
+        if self._button_toast.isVisible():
+            self._reposition_button_toast()
 
     def current_backup_root(self) -> Path | None:
         dest = self.current_destination()
@@ -1297,7 +1319,7 @@ class SnapshotsPage(QWidget):
                 accent_color=accent_color,
             )
             for entry in grouped[kind]:
-                card = SnapshotCard(entry, sibling=_sibling_of(entry))
+                card = SnapshotCard(entry, sibling=_sibling_of(entry), page=self)
                 card.btn_restore.clicked.connect(
                     lambda _, e=entry: self.restore_snapshot(e)
                 )
