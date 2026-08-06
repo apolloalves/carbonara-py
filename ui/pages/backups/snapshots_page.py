@@ -670,7 +670,7 @@ class SectionCard(QFrame):
         b = int(accent_color[5:7], 16)
         divider = QFrame()
         divider.setFixedHeight(2)
-        divider.setStyleSheet(f"background: rgba({r}, {g}, {b}, 140); border: none;")
+        divider.setStyleSheet(f"background: rgba({r}, {g}, {b}, 70); border: none;")
 
         self.body = QGridLayout()
         self.body.setHorizontalSpacing(14)
