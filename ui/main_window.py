@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMenu,
     QPushButton,
     QSizePolicy,
     QStackedWidget,
@@ -298,6 +299,16 @@ class TopHeader(QFrame):
                 ("UPTIME", info.uptime),
             ]
 
+        # Coluna da direita: linha de specs (CPU/MEMORY/UPTIME) em cima,
+        # botão de menu embaixo dela, alinhado à direita — antes o botão
+        # ficava sozinho na TitleBar (faixa fina de 42px no topo da
+        # janela) e passava despercebido; aqui fica bem mais visível,
+        # perto da info que já chama atenção.
+        right_side = QVBoxLayout()
+        right_side.setSpacing(8)
+
+        specs_row = QHBoxLayout()
+        specs_row.setSpacing(0)
         for label, value in spec_items:
             cell = QVBoxLayout()
             cell.setSpacing(1)
@@ -316,8 +327,96 @@ class TopHeader(QFrame):
 
             cell.addWidget(lbl)
             cell.addWidget(val)
-            root.addLayout(cell)
-            root.addSpacing(20)
+            specs_row.addLayout(cell)
+            specs_row.addSpacing(20)
+
+        right_side.addLayout(specs_row)
+
+        menu_row = QHBoxLayout()
+        menu_row.setContentsMargins(0, 0, 0, 0)
+        menu_row.addStretch(1)
+
+        self.btn_menu = QPushButton()
+        self.btn_menu.setIcon(qta.icon("mdi6.menu", color=TEXT))
+        self.btn_menu.setIconSize(QSize(18, 18))
+        self.btn_menu.setToolTip("Menu")
+        self.btn_menu.setCursor(Qt.PointingHandCursor)
+        self.btn_menu.setFixedSize(30, 26)
+        self.btn_menu.setStyleSheet("""
+            QPushButton {
+                background: rgba(255, 255, 255, 8);
+                border: 1px solid rgba(255, 255, 255, 16);
+                border-radius: 7px;
+            }
+            QPushButton:hover {
+                background: rgba(255, 255, 255, 16);
+            }
+        """)
+        self.btn_menu.clicked.connect(self._show_top_menu)
+        menu_row.addWidget(self.btn_menu)
+
+        right_side.addLayout(menu_row)
+        root.addLayout(right_side)
+
+    def _window(self) -> QMainWindow | None:
+        w = self.window()
+        return w if isinstance(w, QMainWindow) else None
+
+    def _show_top_menu(self) -> None:
+        menu = QMenu(self)
+        menu.setStyleSheet(f"""
+            QMenu {{
+                background: #111318;
+                border: 1px solid rgba(255, 255, 255, 24);
+                border-radius: 10px;
+                padding: 6px;
+                font-family: "{FONT_FAMILY}";
+                font-size: 10pt;
+            }}
+            QMenu::item {{
+                color: {TEXT};
+                padding: 8px 14px 8px 10px;
+                border-radius: 6px;
+            }}
+            QMenu::item:selected {{
+                background: rgba(59, 130, 246, 40);
+                color: #ffffff;
+            }}
+            QMenu::item:disabled {{
+                color: {FAINT};
+            }}
+            QMenu::separator {{
+                height: 1px;
+                background: rgba(255, 255, 255, 14);
+                margin: 6px 4px;
+            }}
+        """)
+
+        act_theme = menu.addAction(qta.icon("mdi6.palette-outline", color=MUTED), "Temas")
+        act_lang = menu.addAction(qta.icon("mdi6.web", color=MUTED), "Idioma")
+        menu.addSeparator()
+        act_logs = menu.addAction(qta.icon("mdi6.file-document-outline", color=MUTED), "Central de logs")
+        act_update = menu.addAction(qta.icon("mdi6.refresh", color=MUTED), "Verificar atualização")
+        act_shortcuts = menu.addAction(qta.icon("mdi6.keyboard-outline", color=MUTED), "Atalhos de teclado")
+        menu.addSeparator()
+        act_about = menu.addAction(qta.icon("mdi6.information-outline", color=MUTED), "Sobre")
+
+        win = self._window()
+
+        act_theme.triggered.connect(lambda: self._show_soon_dialog("Temas", "Personalização de tema (claro/escuro/cores de destaque) ainda não foi implementada."))
+        act_lang.triggered.connect(lambda: self._show_soon_dialog("Idioma", "Suporte a múltiplos idiomas ainda não foi implementado — o Carbonara continua em português/inglês misto por enquanto."))
+        act_logs.triggered.connect(lambda: self._show_soon_dialog("Central de logs", "Um visualizador reunindo os logs do Carbonara (backup, restore, eggs) ainda não foi implementado."))
+        act_update.triggered.connect(lambda: self._show_soon_dialog("Verificar atualização", "Checagem de atualização do próprio Carbonara (via git) ainda não foi implementada."))
+        if win is not None:
+            act_shortcuts.triggered.connect(win._show_shortcuts_dialog)
+            act_about.triggered.connect(win._show_about_dialog)
+
+        menu.exec(self.btn_menu.mapToGlobal(self.btn_menu.rect().bottomLeft()))
+
+    def _show_soon_dialog(self, title: str, message: str) -> None:
+        win = self._window()
+        if win is not None and hasattr(win, "_show_placeholder_dialog"):
+            win._show_placeholder_dialog(title, message)
 
 
 class GreetingBlock(QFrame):
@@ -863,6 +962,335 @@ class ExitConfirmDialog(QDialog):
         super().mousePressEvent(event)
 
 
+class PlaceholderDialog(QDialog):
+    """Diálogo genérico 'ainda não implementado' — usado pelos itens do
+    menu superior que só existem como planejamento por enquanto (Temas,
+    Idioma, Central de logs, Verificar atualização). Evita fingir que a
+    funcionalidade existe; deixa claro e honesto que é backlog."""
+
+    def __init__(self, title: str, message: str, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self.setModal(True)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setAlignment(Qt.AlignCenter)
+
+        self.card = QFrame(self)
+        self.card.setObjectName("PlaceholderCard")
+        self.card.setFixedSize(400, 200)
+        self.card.setStyleSheet(f"""
+            QFrame#PlaceholderCard {{
+                background: #14151c;
+                border: 1px solid rgba(255, 255, 255, 24);
+                border-radius: 18px;
+            }}
+            QLabel {{
+                background: transparent;
+                border: none;
+            }}
+        """)
+
+        card_layout = QVBoxLayout(self.card)
+        card_layout.setContentsMargins(28, 26, 28, 26)
+        card_layout.setSpacing(0)
+
+        icon_badge = QLabel()
+        icon_badge.setFixedSize(44, 44)
+        icon_badge.setAlignment(Qt.AlignCenter)
+        icon_badge.setStyleSheet(f"background: rgba({_rgba(ACCENT_AMBER, 18)}); border-radius: 13px;")
+        icon_badge.setPixmap(qta.icon("mdi6.hammer-wrench", color=ACCENT_AMBER).pixmap(22, 22))
+        card_layout.addWidget(icon_badge)
+        card_layout.addSpacing(18)
+
+        title_lbl = QLabel(title)
+        title_lbl.setFont(QFont(FONT_FAMILY, 15, QFont.Bold))
+        title_lbl.setStyleSheet(f"color: {TEXT};")
+        card_layout.addWidget(title_lbl)
+        card_layout.addSpacing(8)
+
+        subtitle = QLabel(message)
+        subtitle.setFont(QFont(FONT_FAMILY, 10))
+        subtitle.setStyleSheet(f"color: {MUTED}; line-height: 140%;")
+        subtitle.setWordWrap(True)
+        card_layout.addWidget(subtitle)
+        card_layout.addStretch()
+        card_layout.addSpacing(18)
+
+        btn_ok = QPushButton("Entendi")
+        btn_ok.setFixedHeight(38)
+        btn_ok.setCursor(Qt.PointingHandCursor)
+        btn_ok.setStyleSheet(f"""
+            QPushButton {{
+                background: rgba(255,255,255,8);
+                border: 1px solid rgba(255,255,255,14);
+                border-radius: 10px;
+                color: {TEXT};
+                font-family: "{FONT_FAMILY}";
+                font-size: 11px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background: rgba(255,255,255,14);
+            }}
+        """)
+        btn_ok.clicked.connect(self.accept)
+        card_layout.addWidget(btn_ok)
+
+        outer.addWidget(self.card)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 150))
+
+    def keyPressEvent(self, event: QKeyEvent):
+        if event.key() in (Qt.Key_Escape, Qt.Key_Return, Qt.Key_Enter):
+            self.accept()
+            return
+        super().keyPressEvent(event)
+
+    def mousePressEvent(self, event):
+        if not self.card.geometry().contains(event.pos()):
+            self.accept()
+            return
+        super().mousePressEvent(event)
+
+
+class AboutDialog(QDialog):
+    """Diálogo 'Sobre' — informações do app, sem depender de nada externo."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self.setModal(True)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setAlignment(Qt.AlignCenter)
+
+        self.card = QFrame(self)
+        self.card.setObjectName("AboutCard")
+        self.card.setFixedSize(400, 280)
+        self.card.setStyleSheet(f"""
+            QFrame#AboutCard {{
+                background: #14151c;
+                border: 1px solid rgba(59, 130, 246, 60);
+                border-radius: 18px;
+            }}
+            QLabel {{
+                background: transparent;
+                border: none;
+            }}
+        """)
+
+        card_layout = QVBoxLayout(self.card)
+        card_layout.setContentsMargins(28, 26, 28, 26)
+        card_layout.setSpacing(0)
+        card_layout.setAlignment(Qt.AlignHCenter)
+
+        icon_badge = QLabel()
+        icon_badge.setFixedSize(56, 56)
+        icon_badge.setAlignment(Qt.AlignCenter)
+        icon_badge.setStyleSheet(f"background: rgba({_rgba(ACCENT_BLUE, 18)}); border-radius: 16px;")
+        icon_badge.setPixmap(qta.icon("mdi6.chart-donut", color=ACCENT_BLUE).pixmap(28, 28))
+        card_layout.addWidget(icon_badge, alignment=Qt.AlignHCenter)
+        card_layout.addSpacing(16)
+
+        title = QLabel("Carbonara")
+        title.setFont(QFont(FONT_FAMILY, 16, QFont.Bold))
+        title.setStyleSheet(f"color: {TEXT};")
+        title.setAlignment(Qt.AlignHCenter)
+        card_layout.addWidget(title)
+        card_layout.addSpacing(4)
+
+        version = QLabel(APP_VERSION)
+        version.setFont(QFont(FONT_FAMILY, 10, QFont.Bold))
+        version.setStyleSheet(f"color: {ACCENT_BLUE_LIGHT};")
+        version.setAlignment(Qt.AlignHCenter)
+        card_layout.addWidget(version)
+        card_layout.addSpacing(14)
+
+        desc = QLabel("Ferramenta de administração de sistema para Arch Linux —\nsnapshots, backups, ISOs live e diagnósticos.")
+        desc.setFont(QFont(FONT_FAMILY, 9))
+        desc.setStyleSheet(f"color: {MUTED}; line-height: 140%;")
+        desc.setAlignment(Qt.AlignHCenter)
+        desc.setWordWrap(True)
+        card_layout.addWidget(desc)
+        card_layout.addSpacing(6)
+
+        author = QLabel("Douglas Apollo Alves")
+        author.setFont(QFont(FONT_FAMILY, 9))
+        author.setStyleSheet(f"color: {FAINT};")
+        author.setAlignment(Qt.AlignHCenter)
+        card_layout.addWidget(author)
+        card_layout.addStretch()
+        card_layout.addSpacing(18)
+
+        btn_ok = QPushButton("Fechar")
+        btn_ok.setFixedHeight(38)
+        btn_ok.setCursor(Qt.PointingHandCursor)
+        btn_ok.setStyleSheet(f"""
+            QPushButton {{
+                background: {ACCENT_BLUE};
+                border: none;
+                border-radius: 10px;
+                color: #ffffff;
+                font-family: "{FONT_FAMILY}";
+                font-size: 11px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background: {ACCENT_BLUE_LIGHT};
+            }}
+        """)
+        btn_ok.clicked.connect(self.accept)
+        card_layout.addWidget(btn_ok)
+
+        outer.addWidget(self.card)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 150))
+
+    def keyPressEvent(self, event: QKeyEvent):
+        if event.key() in (Qt.Key_Escape, Qt.Key_Return, Qt.Key_Enter):
+            self.accept()
+            return
+        super().keyPressEvent(event)
+
+    def mousePressEvent(self, event):
+        if not self.card.geometry().contains(event.pos()):
+            self.accept()
+            return
+        super().mousePressEvent(event)
+
+
+class ShortcutsDialog(QDialog):
+    """Diálogo de atalhos de teclado — lista só os que realmente
+    existem no app hoje (navegação do menu + ESC), sem inventar nada."""
+
+    SHORTCUTS = [
+        ("↑ / W", "Navegar pra cima no menu"),
+        ("↓ / S", "Navegar pra baixo no menu"),
+        ("← / A", "Navegar pra esquerda no menu"),
+        ("→ / D", "Navegar pra direita no menu"),
+        ("Enter", "Selecionar item"),
+        ("Esc", "Voltar ao menu (ou confirmar saída, se já estiver nele)"),
+    ]
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self.setModal(True)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setAlignment(Qt.AlignCenter)
+
+        self.card = QFrame(self)
+        self.card.setObjectName("ShortcutsCard")
+        self.card.setFixedWidth(420)
+        self.card.setStyleSheet(f"""
+            QFrame#ShortcutsCard {{
+                background: #14151c;
+                border: 1px solid rgba(255, 255, 255, 24);
+                border-radius: 18px;
+            }}
+            QLabel {{
+                background: transparent;
+                border: none;
+            }}
+        """)
+
+        card_layout = QVBoxLayout(self.card)
+        card_layout.setContentsMargins(28, 26, 28, 26)
+        card_layout.setSpacing(0)
+
+        icon_badge = QLabel()
+        icon_badge.setFixedSize(44, 44)
+        icon_badge.setAlignment(Qt.AlignCenter)
+        icon_badge.setStyleSheet(f"background: rgba({_rgba(ACCENT_PURPLE, 18)}); border-radius: 13px;")
+        icon_badge.setPixmap(qta.icon("mdi6.keyboard-outline", color=ACCENT_PURPLE).pixmap(22, 22))
+        card_layout.addWidget(icon_badge)
+        card_layout.addSpacing(16)
+
+        title = QLabel("Atalhos de teclado")
+        title.setFont(QFont(FONT_FAMILY, 15, QFont.Bold))
+        title.setStyleSheet(f"color: {TEXT};")
+        card_layout.addWidget(title)
+        card_layout.addSpacing(16)
+
+        for key, desc in self.SHORTCUTS:
+            row = QHBoxLayout()
+            row.setSpacing(12)
+
+            key_lbl = QLabel(key)
+            key_lbl.setFixedWidth(80)
+            key_lbl.setFont(QFont(FONT_FAMILY, 9, QFont.Bold))
+            key_lbl.setStyleSheet(
+                f"color: {ACCENT_BLUE_LIGHT}; background: rgba(59,130,246,18); "
+                f"border-radius: 6px; padding: 3px 8px;"
+            )
+            key_lbl.setAlignment(Qt.AlignCenter)
+
+            desc_lbl = QLabel(desc)
+            desc_lbl.setFont(QFont(FONT_FAMILY, 9))
+            desc_lbl.setStyleSheet(f"color: {MUTED};")
+            desc_lbl.setWordWrap(True)
+
+            row.addWidget(key_lbl)
+            row.addWidget(desc_lbl, 1)
+            card_layout.addLayout(row)
+            card_layout.addSpacing(10)
+
+        card_layout.addSpacing(8)
+
+        btn_ok = QPushButton("Fechar")
+        btn_ok.setFixedHeight(38)
+        btn_ok.setCursor(Qt.PointingHandCursor)
+        btn_ok.setStyleSheet(f"""
+            QPushButton {{
+                background: rgba(255,255,255,8);
+                border: 1px solid rgba(255,255,255,14);
+                border-radius: 10px;
+                color: {TEXT};
+                font-family: "{FONT_FAMILY}";
+                font-size: 11px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background: rgba(255,255,255,14);
+            }}
+        """)
+        btn_ok.clicked.connect(self.accept)
+        card_layout.addWidget(btn_ok)
+
+        outer.addWidget(self.card)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 150))
+
+    def keyPressEvent(self, event: QKeyEvent):
+        if event.key() in (Qt.Key_Escape, Qt.Key_Return, Qt.Key_Enter):
+            self.accept()
+            return
+        super().keyPressEvent(event)
+
+    def mousePressEvent(self, event):
+        if not self.card.geometry().contains(event.pos()):
+            self.accept()
+            return
+        super().mousePressEvent(event)
+
+
 class MenuPage(QWidget):
     backups_requested = Signal()
     eggs_requested = Signal()
@@ -1307,6 +1735,21 @@ class MainWindow(QMainWindow):
         dialog.exec()
         if self.stack.currentWidget() is self.menu_page:
             self.menu_page.input_box.setFocus()
+
+    def _show_about_dialog(self) -> None:
+        dialog = AboutDialog(self)
+        dialog.setGeometry(self.geometry())
+        dialog.exec()
+
+    def _show_shortcuts_dialog(self) -> None:
+        dialog = ShortcutsDialog(self)
+        dialog.setGeometry(self.geometry())
+        dialog.exec()
+
+    def _show_placeholder_dialog(self, title: str, message: str) -> None:
+        dialog = PlaceholderDialog(title, message, self)
+        dialog.setGeometry(self.geometry())
+        dialog.exec()
 
     def show_menu(self):
         self.stack.setCurrentWidget(self.menu_page)
