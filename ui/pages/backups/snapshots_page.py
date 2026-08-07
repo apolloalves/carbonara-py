@@ -437,20 +437,14 @@ class SnapshotCard(QFrame):
         left = QHBoxLayout()
         left.setSpacing(16)
 
-        # ROOT usa o mesmo azul do botão "ROOT+HOME" selecionado
-        # (rgb(59,130,246) = #3b82f6, mais escuro que o #23a6ff usado
-        # antes) — com opacidade nos dois, ROOT e HOME, em vez de cor
-        # sólida.
-        kind_upper = entry.kind.upper()
-        card_accent = {"ROOT": "#3b82f6", "HOME": "#e0a840"}.get(kind_upper, "#FFFFFF")
-        icon_opacity = 0.8
-        r = int(card_accent[1:3], 16)
-        g = int(card_accent[3:5], 16)
-        b = int(card_accent[5:7], 16)
+        # Ícone de volta, mas em branco-suave (não branco puro, pra não
+        # ficar forte) em vez das cores por accent (azul/âmbar) usadas
+        # antes — pedido explícito após rejeitar todas as variações de
+        # opacidade sobre a cor de destaque.
         icon_label = icon_badge(
             SNAPSHOT_GLYPH, 46,
-            color=card_accent, bg_rgba=f"{r}, {g}, {b}, 34",
-            opacity=icon_opacity,
+            color="#f0f2f5", bg_rgba="255, 255, 255, 14",
+            opacity=0.9,
         )
 
         text_block = QVBoxLayout()
@@ -670,7 +664,7 @@ class SectionCard(QFrame):
         b = int(accent_color[5:7], 16)
         divider = QFrame()
         divider.setFixedHeight(2)
-        divider.setStyleSheet(f"background: rgba({r}, {g}, {b}, 70); border: none;")
+        divider.setStyleSheet(f"background: rgba({r}, {g}, {b}, 50); border: none;")
 
         self.body = QGridLayout()
         self.body.setHorizontalSpacing(14)
