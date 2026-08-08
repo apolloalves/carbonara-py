@@ -333,23 +333,24 @@ class TopHeader(QFrame):
         right_side.addLayout(specs_row)
 
         menu_row = QHBoxLayout()
-        menu_row.setContentsMargins(0, 0, 0, 0)
+        menu_row.setContentsMargins(0, 0, 20, 0)
         menu_row.addStretch(1)
 
         self.btn_menu = QPushButton()
-        self.btn_menu.setIcon(qta.icon("mdi6.menu", color=TEXT))
-        self.btn_menu.setIconSize(QSize(24, 24))
+        self.btn_menu.setIcon(qta.icon("mdi6.menu", color=ACCENT_BLUE_LIGHT))
+        self.btn_menu.setIconSize(QSize(30, 30))
         self.btn_menu.setToolTip("Menu")
         self.btn_menu.setCursor(Qt.PointingHandCursor)
-        self.btn_menu.setFixedSize(38, 32)
+        self.btn_menu.setFixedSize(46, 40)
         self.btn_menu.setStyleSheet("""
             QPushButton {
-                background: rgba(255, 255, 255, 8);
-                border: 1px solid rgba(255, 255, 255, 16);
-                border-radius: 7px;
+                background: rgba(255, 255, 255, 6);
+                border: 1px solid rgba(255, 255, 255, 130);
+                border-radius: 8px;
             }
             QPushButton:hover {
-                background: rgba(255, 255, 255, 16);
+                background: rgba(255, 255, 255, 12);
+                border: 1px solid rgba(255, 255, 255, 200);
             }
         """)
         self.btn_menu.clicked.connect(self._show_top_menu)
