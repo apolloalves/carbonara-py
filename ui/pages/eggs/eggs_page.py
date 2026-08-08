@@ -976,19 +976,9 @@ class EggsPage(QWidget):
         root.setContentsMargins(32, 24, 32, 24)
         root.setSpacing(22)
 
-        self.top_header = TopHeader()
+        self.top_header = TopHeader(back_button=True)
+        self.top_header.back_clicked.connect(self.back_requested.emit)
         root.addWidget(self.top_header)
-
-        top_row = QHBoxLayout()
-        top_row.setContentsMargins(0, 0, 0, 0)
-        top_row.setSpacing(10)
-
-        btn_back = QPushButton("← Back to menu")
-        btn_back.clicked.connect(self.back_requested.emit)
-        top_row.addWidget(btn_back)
-        top_row.addStretch(1)
-
-        root.addLayout(top_row)
 
         # ── Header ───────────────────────────────────────────────────────
         header = QFrame()

@@ -44,19 +44,9 @@ class BackupsPage(QWidget):
 
         from ui.main_window import TopHeader  # import adiado — evita import circular
 
-        self.top_header = TopHeader()
+        self.top_header = TopHeader(back_button=True)
+        self.top_header.back_clicked.connect(self.back_requested.emit)
         root.addWidget(self.top_header)
-
-        top_row = QHBoxLayout()
-        top_row.setContentsMargins(0, 0, 0, 0)
-        top_row.setSpacing(10)
-
-        self.btn_back = QPushButton("← Back to menu")
-        self.btn_back.clicked.connect(self.back_requested.emit)
-
-        top_row.addWidget(self.btn_back)
-        top_row.addStretch(1)
-        
 
         header = QFrame()
         header.setStyleSheet("background: transparent; border: none;")
@@ -100,7 +90,6 @@ class BackupsPage(QWidget):
 
         footer_layout.addWidget(footer_hint)
 
-        root.addLayout(top_row)
         root.addWidget(header)
         root.addWidget(self.snapshots_page, 1)
         root.addWidget(footer)

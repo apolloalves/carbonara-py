@@ -249,7 +249,9 @@ class LogoBadge(QFrame):
 
 
 class TopHeader(QFrame):
-    def __init__(self, parent=None):
+    back_clicked = Signal()
+
+    def __init__(self, parent=None, back_button: bool = False):
         super().__init__(parent)
         self.setStyleSheet("background: transparent; border: none;")
 
@@ -334,7 +336,29 @@ class TopHeader(QFrame):
 
         menu_row = QHBoxLayout()
         menu_row.setContentsMargins(0, 15, 20, 0)
+        menu_row.setSpacing(10)
         menu_row.addStretch(1)
+
+        if back_button:
+            self.btn_back = QPushButton("← Menu")
+            self.btn_back.setFont(QFont(FONT_FAMILY, 10))
+            self.btn_back.setCursor(Qt.PointingHandCursor)
+            self.btn_back.setFixedHeight(40)
+            self.btn_back.setStyleSheet("""
+                QPushButton {
+                    background: rgba(255, 255, 255, 6);
+                    border: 1px solid rgba(59, 130, 246, 110);
+                    border-radius: 8px;
+                    color: #ffffff;
+                    padding: 0 16px;
+                }
+                QPushButton:hover {
+                    background: rgba(255, 255, 255, 12);
+                    border: 1px solid rgba(59, 130, 246, 170);
+                }
+            """)
+            self.btn_back.clicked.connect(self.back_clicked.emit)
+            menu_row.addWidget(self.btn_back)
 
         self.btn_menu = QPushButton()
         self.btn_menu.setIcon(qta.icon("mdi6.menu", color="#ffffff"))
