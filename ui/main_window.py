@@ -128,12 +128,6 @@ class TitleBar(QWidget):
         layout.setContentsMargins(14, 6, 10, 6)
         layout.setSpacing(8)
 
-        self.logo = QLabel("Carbonara")
-        self.logo.setFont(QFont(FONT_FAMILY, 11, QFont.Bold))
-        self.logo.setAlignment(Qt.AlignCenter)
-
-        layout.addStretch(1)
-        layout.addWidget(self.logo)
         layout.addStretch(1)
 
         self.btn_min = QPushButton("–")
@@ -266,19 +260,24 @@ class TopHeader(QFrame):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(14)
 
-        logo_badge = LogoBadge(38)
+        logo_badge = LogoBadge(48)
         root.addWidget(logo_badge)
 
         title_block = QVBoxLayout()
+        title_block.setContentsMargins(0, 0, 0, 0)
         title_block.setSpacing(0)
 
+        title_font = QFont(FONT_FAMILY, 18, QFont.Bold)
         title_label = QLabel("Carbonara")
-        title_label.setFont(QFont(FONT_FAMILY, 14, QFont.Bold))
+        title_label.setFont(title_font)
         title_label.setStyleSheet(f"color: {TEXT};")
+        title_label.setFixedHeight(QFontMetrics(title_font).tightBoundingRect(title_label.text()).height())
 
+        sub_font = QFont(FONT_FAMILY, 9)
         sub_label = QLabel(f"{APP_VERSION} · {APP_AUTHOR}")
-        sub_label.setFont(QFont(FONT_FAMILY, 9))
+        sub_label.setFont(sub_font)
         sub_label.setStyleSheet(f"color: {FAINT};")
+        sub_label.setFixedHeight(QFontMetrics(sub_font).tightBoundingRect(sub_label.text()).height())
 
         title_block.addWidget(title_label)
         title_block.addWidget(sub_label)
