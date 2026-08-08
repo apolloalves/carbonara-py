@@ -209,10 +209,7 @@ class LogoBadge(QFrame):
         self.setFixedSize(size, size)
         self.setStyleSheet(f"""
             QFrame {{
-                background: qlineargradient(
-                    x1:0, y1:0, x2:1, y2:1,
-                    stop:0 {ACCENT_BLUE}, stop:1 {ACCENT_PURPLE}
-                );
+                background: #1793D1;
                 border-radius: {int(size * 0.26)}px;
                 border: none;
             }}
@@ -267,7 +264,7 @@ class TopHeader(QFrame):
         title_block.setContentsMargins(0, 0, 0, 0)
         title_block.setSpacing(0)
 
-        title_font = QFont(FONT_FAMILY, 18, QFont.Bold)
+        title_font = QFont(FONT_FAMILY, 22, QFont.Bold)
         title_label = QLabel("Carbonara")
         title_label.setFont(title_font)
         title_label.setStyleSheet(f"color: {TEXT};")
@@ -429,7 +426,7 @@ class GreetingBlock(QFrame):
         self.setStyleSheet("background: transparent; border: none;")
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
+        root.setContentsMargins(0, 0, 0, 20)
         root.setSpacing(3)
 
         import datetime
@@ -448,7 +445,7 @@ class GreetingBlock(QFrame):
             user = "there"
 
         title = QLabel(f"{greeting}, {user}")
-        title.setFont(QFont(FONT_FAMILY, 19, QFont.Bold))
+        title.setFont(QFont(FONT_FAMILY, 16, QFont.Bold))
         title.setStyleSheet(f"color: {TEXT};")
 
         subtitle = QLabel("Here's what's happening with your system")
