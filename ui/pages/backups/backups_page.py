@@ -4,7 +4,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QPushButton
 
-from ui.pages.backups.snapshots_page import SnapshotsPage
+from ui.pages.backups.snapshots_page import SnapshotsPage, icon_badge
 
 
 class BackupsPage(QWidget):
@@ -42,6 +42,11 @@ class BackupsPage(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(12)
 
+        from ui.main_window import TopHeader  # import adiado — evita import circular
+
+        self.top_header = TopHeader()
+        root.addWidget(self.top_header)
+
         top_row = QHBoxLayout()
         top_row.setContentsMargins(0, 0, 0, 0)
         top_row.setSpacing(10)
@@ -55,9 +60,15 @@ class BackupsPage(QWidget):
 
         header = QFrame()
         header.setStyleSheet("background: transparent; border: none;")
-        header_layout = QVBoxLayout(header)
+        header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(0, 0, 0, 0)
-        header_layout.setSpacing(2)
+        header_layout.setSpacing(14)
+
+        self.header_icon = icon_badge("mdi6.harddisk", 48, color="#23a6ff", bg_rgba="35, 166, 255, 34")
+
+        title_block = QVBoxLayout()
+        title_block.setContentsMargins(0, 0, 0, 0)
+        title_block.setSpacing(2)
 
         title = QLabel("Timeshift")
         title.setFont(QFont("DejaVu Sans Mono", 22, QFont.Bold))
@@ -67,8 +78,12 @@ class BackupsPage(QWidget):
         subtitle.setFont(QFont("DejaVu Sans Mono", 10))
         subtitle.setStyleSheet("color: #9aa6b2;")
 
-        header_layout.addWidget(title)
-        header_layout.addWidget(subtitle)
+        title_block.addWidget(title)
+        title_block.addWidget(subtitle)
+
+        header_layout.addWidget(self.header_icon)
+        header_layout.addLayout(title_block)
+        header_layout.addStretch(1)
 
         self.snapshots_page = SnapshotsPage(self)
 
