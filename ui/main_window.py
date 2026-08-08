@@ -304,12 +304,15 @@ class TopHeader(QFrame):
         # janela) e passava despercebido; aqui fica bem mais visível,
         # perto da info que já chama atenção.
         right_side = QVBoxLayout()
+        right_side.setContentsMargins(0, 0, 0, 0)
         right_side.setSpacing(8)
 
         specs_row = QHBoxLayout()
+        specs_row.setContentsMargins(0, 0, 0, 0)
         specs_row.setSpacing(0)
         for label, value in spec_items:
             cell = QVBoxLayout()
+            cell.setContentsMargins(0, 0, 0, 0)
             cell.setSpacing(1)
 
             lbl = QLabel(label)
@@ -330,6 +333,7 @@ class TopHeader(QFrame):
             specs_row.addSpacing(20)
 
         right_side.addLayout(specs_row)
+        right_side.setAlignment(specs_row, Qt.AlignRight)
 
         menu_row = QHBoxLayout()
         menu_row.setContentsMargins(0, 15, 20, 0)
