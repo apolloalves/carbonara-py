@@ -961,7 +961,7 @@ class EggsPage(QWidget):
         return bool(screen and screen.geometry().width() < 1400)
 
     def _build_ui(self) -> None:
-        from ui.main_window import TopHeader  # import adiado — evita import circular
+        from ui.main_window import AppHeaderBlock  # import adiado — evita import circular
 
         self._compact_cards = self._detect_compact_mode()
 
@@ -976,15 +976,15 @@ class EggsPage(QWidget):
         root.setContentsMargins(32, 24, 32, 24)
         root.setSpacing(22)
 
-        self.top_header = TopHeader(back_button=True)
-        self.top_header.back_clicked.connect(self.back_requested.emit)
-        root.addWidget(self.top_header)
+        self.app_header = AppHeaderBlock(back_button=True)
+        self.app_header.back_clicked.connect(self.back_requested.emit)
+        root.addWidget(self.app_header)
 
         # ── Header ───────────────────────────────────────────────────────
         header = QFrame()
         header.setStyleSheet("background: transparent; border: none;")
         h_layout = QVBoxLayout(header)
-        h_layout.setContentsMargins(0, 0, 0, 0)
+        h_layout.setContentsMargins(0, 14, 0, 0)
         h_layout.setSpacing(2)
 
         title_row = QHBoxLayout()

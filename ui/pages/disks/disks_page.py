@@ -419,15 +419,16 @@ class DisksPage(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(16)
 
-        # ── Botão voltar ─────────────────────────────────────────────────
-        self.btn_back = QPushButton("←  Back to menu")
-        self.btn_back.setObjectName("BackButton")
-        self.btn_back.setFixedWidth(140)
-        self.btn_back.clicked.connect(self.back_requested.emit)
-        root.addWidget(self.btn_back)
+        # ── Cabeçalho padrão do app (logo/specs/menu + Início) ─────────────
+        from ui.main_window import AppHeaderBlock  # import adiado — evita import circular
+
+        self.app_header = AppHeaderBlock(back_button=True)
+        self.app_header.back_clicked.connect(self.back_requested.emit)
+        root.addWidget(self.app_header)
 
         # ── Cabeçalho com botões ──────────────────────────────────────────
         header_row = QHBoxLayout()
+        header_row.setContentsMargins(0, 14, 0, 0)
 
         title_block = QVBoxLayout()
         title_block.setSpacing(2)

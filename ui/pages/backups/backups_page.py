@@ -39,19 +39,19 @@ class BackupsPage(QWidget):
         )
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
+        root.setContentsMargins(32, 24, 32, 24)
         root.setSpacing(12)
 
-        from ui.main_window import TopHeader  # import adiado — evita import circular
+        from ui.main_window import AppHeaderBlock  # import adiado — evita import circular
 
-        self.top_header = TopHeader(back_button=True)
-        self.top_header.back_clicked.connect(self.back_requested.emit)
-        root.addWidget(self.top_header)
+        self.app_header = AppHeaderBlock(back_button=True)
+        self.app_header.back_clicked.connect(self.back_requested.emit)
+        root.addWidget(self.app_header)
 
         header = QFrame()
         header.setStyleSheet("background: transparent; border: none;")
         header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setContentsMargins(0, 14, 0, 0)
         header_layout.setSpacing(14)
 
         self.header_icon = icon_badge("mdi6.harddisk", 48, color="#23a6ff", bg_rgba="35, 166, 255, 34")

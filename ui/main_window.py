@@ -261,10 +261,11 @@ class TopHeader(QFrame):
 
         logo_badge = LogoBadge(48)
         root.addWidget(logo_badge)
+        root.setAlignment(logo_badge, Qt.AlignVCenter)
 
         title_block = QVBoxLayout()
         title_block.setContentsMargins(0, 0, 0, 0)
-        title_block.setSpacing(0)
+        title_block.setSpacing(10)
 
         title_font = QFont(FONT_FAMILY, 22, QFont.Bold)
         title_label = QLabel("Carbonara")
@@ -281,6 +282,7 @@ class TopHeader(QFrame):
         title_block.addWidget(title_label)
         title_block.addWidget(sub_label)
         root.addLayout(title_block)
+        root.setAlignment(title_block, Qt.AlignVCenter)
 
         root.addStretch()
 
@@ -340,7 +342,9 @@ class TopHeader(QFrame):
         menu_row.addStretch(1)
 
         if back_button:
-            self.btn_back = QPushButton("← Menu")
+            self.btn_back = QPushButton(" Início")
+            self.btn_back.setIcon(qta.icon("mdi6.home-outline", color="#ffffff"))
+            self.btn_back.setIconSize(QSize(18, 18))
             self.btn_back.setFont(QFont(FONT_FAMILY, 10))
             self.btn_back.setCursor(Qt.PointingHandCursor)
             self.btn_back.setFixedHeight(40)
@@ -353,8 +357,8 @@ class TopHeader(QFrame):
                     padding: 0 16px;
                 }
                 QPushButton:hover {
-                    background: rgba(255, 255, 255, 12);
-                    border: 1px solid rgba(59, 130, 246, 170);
+                    background: #1793D1;
+                    border: 1px solid #1793D1;
                 }
             """)
             self.btn_back.clicked.connect(self.back_clicked.emit)
@@ -373,8 +377,8 @@ class TopHeader(QFrame):
                 border-radius: 8px;
             }
             QPushButton:hover {
-                background: rgba(255, 255, 255, 12);
-                border: 1px solid rgba(59, 130, 246, 170);
+                background: #1793D1;
+                border: 1px solid #1793D1;
             }
         """)
         self.btn_menu.clicked.connect(self._show_top_menu)
@@ -442,6 +446,41 @@ class TopHeader(QFrame):
         win = self._window()
         if win is not None and hasattr(win, "_show_placeholder_dialog"):
             win._show_placeholder_dialog(title, message)
+
+
+class AppHeaderBlock(QFrame):
+    """Bloco de cabeçalho padrão reutilizável: TopHeader (logo/specs/menu,
+    com botão "Início" opcional) + respiro + divisor translúcido sutil.
+
+    Usar no topo do layout de qualquer página nova em vez de replicar
+    TopHeader + spacing + divider manualmente — só instanciar e dar
+    addWidget(). Ex.:
+
+        self.app_header = AppHeaderBlock(back_button=True)
+        self.app_header.back_clicked.connect(self.back_requested.emit)
+        root.addWidget(self.app_header)
+    """
+
+    back_clicked = Signal()
+
+    def __init__(self, parent=None, back_button: bool = False):
+        super().__init__(parent)
+        self.setStyleSheet("background: transparent; border: none;")
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        self.top_header = TopHeader(back_button=back_button)
+        self.top_header.back_clicked.connect(self.back_clicked.emit)
+        root.addWidget(self.top_header)
+
+        root.addSpacing(14)
+
+        divider = QFrame()
+        divider.setFixedHeight(1)
+        divider.setStyleSheet("background: rgba(255, 255, 255, 20); border: none;")
+        root.addWidget(divider)
 
 
 class GreetingBlock(QFrame):
@@ -1359,7 +1398,7 @@ class MenuPage(QWidget):
         outer.setSpacing(22)
         outer.setAlignment(Qt.AlignTop)
 
-        self.header = TopHeader()
+        self.header = AppHeaderBlock()
         outer.addWidget(self.header)
 
         self.greeting = GreetingBlock()
