@@ -37,6 +37,8 @@ from ui.pages.backups.backups_page import BackupsPage
 from ui.pages.eggs.eggs_page import EggsPage
 from ui.pages.disks.disks_page import DisksPage, MountKnownDisksWorker
 from ui.pages.doctor.doctor_arch_page import DoctorArchPage
+from ui.pages.logs.logs_page import LogsPage
+from ui.pages.clonezilla.clonezilla_page import ClonezillaPage
 from core.system.sysinfo import get_system_info
 from core.system.live_mount import is_live_environment
 
@@ -74,6 +76,7 @@ MENU_ENTRIES = [
     MenuEntry(2, "Network", "Diagnose and configure network settings", "Wifi & links", "mdi6.wifi"),
     MenuEntry(3, "Packages", "Manage packages, mirrors and updates", "Mirrors & updates", "mdi6.package-variant"),
     MenuEntry(4, "Backups", "Create, restore and verify snapshots", "Create & restore snapshots", "mdi6.harddisk"),
+    MenuEntry(5, "Clonezilla", "Compress and manage Clonezilla disk image backups", "Manage Clonezilla backups", "mdi6.archive-outline"),
     MenuEntry(9, "Penguin's Eggs", "Create, check and install live ISOs", "ISO wizard", "mdi6.egg-outline"),
     MenuEntry(6, "Performance", "Optimize boot, swap and system responsiveness", "Boot & swap tuning", "mdi6.speedometer"),
     MenuEntry(7, "Doctor Arch", "Diagnose, clean and repair your Arch install", "Diagnostics, cleanup & repair", "mdi6.stethoscope"),
@@ -434,9 +437,9 @@ class TopHeader(QFrame):
 
         act_theme.triggered.connect(lambda: self._show_soon_dialog("Temas", "Personalização de tema (claro/escuro/cores de destaque) ainda não foi implementada."))
         act_lang.triggered.connect(lambda: self._show_soon_dialog("Idioma", "Suporte a múltiplos idiomas ainda não foi implementado — o Carbonara continua em português/inglês misto por enquanto."))
-        act_logs.triggered.connect(lambda: self._show_soon_dialog("Central de logs", "Um visualizador reunindo os logs do Carbonara (backup, restore, eggs) ainda não foi implementado."))
         act_update.triggered.connect(lambda: self._show_soon_dialog("Verificar atualização", "Checagem de atualização do próprio Carbonara (via git) ainda não foi implementada."))
         if win is not None:
+            act_logs.triggered.connect(win.show_logs)
             act_shortcuts.triggered.connect(win._show_shortcuts_dialog)
             act_about.triggered.connect(win._show_about_dialog)
 
@@ -883,6 +886,28 @@ class DoctorHost(QWidget):
         root.setContentsMargins(18, 18, 18, 18)
         root.setSpacing(0)
         self.page = DoctorArchPage(self)
+        root.addWidget(self.page, 1)
+
+
+class LogsHost(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setStyleSheet("QWidget { background: transparent; }")
+        root = QVBoxLayout(self)
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(0)
+        self.page = LogsPage(self)
+        root.addWidget(self.page, 1)
+
+
+class ClonezillaHost(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setStyleSheet("QWidget { background: transparent; }")
+        root = QVBoxLayout(self)
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(0)
+        self.page = ClonezillaPage(self)
         root.addWidget(self.page, 1)
 
 
@@ -1360,6 +1385,7 @@ class MenuPage(QWidget):
     eggs_requested = Signal()
     disks_requested = Signal()
     doctor_requested = Signal()
+    clonezilla_requested = Signal()
     exit_requested = Signal()
     exit_requested_confirm = Signal()
 
@@ -1580,6 +1606,9 @@ class MenuPage(QWidget):
         if entry.number == 7:
             self.doctor_requested.emit()
             return
+        if entry.number == 5:
+            self.clonezilla_requested.emit()
+            return
         if entry.title == "Exit":
             self.exit_requested.emit()
 
@@ -1675,12 +1704,16 @@ class MainWindow(QMainWindow):
         self.eggs_host = EggsHost(self)
         self.disks_host = DisksHost(self)
         self.doctor_host = DoctorHost(self)
+        self.logs_host = LogsHost(self)
+        self.clonezilla_host = ClonezillaHost(self)
 
         self.stack.addWidget(self.menu_page)
         self.stack.addWidget(self.backups_host)
         self.stack.addWidget(self.eggs_host)
         self.stack.addWidget(self.disks_host)
         self.stack.addWidget(self.doctor_host)
+        self.stack.addWidget(self.logs_host)
+        self.stack.addWidget(self.clonezilla_host)
 
         root.addWidget(self.titlebar)
         root.addWidget(self.stack, 1)
@@ -1689,12 +1722,15 @@ class MainWindow(QMainWindow):
         self.menu_page.eggs_requested.connect(self.show_eggs)
         self.menu_page.disks_requested.connect(self.show_disks)
         self.menu_page.doctor_requested.connect(self.show_doctor)
+        self.menu_page.clonezilla_requested.connect(self.show_clonezilla)
         self.menu_page.exit_requested.connect(self._show_exit_dialog)
         self.menu_page.exit_requested_confirm.connect(self._show_exit_dialog)
         self.backups_host.page.back_requested.connect(self.show_menu)
         self.eggs_host.page.back_requested.connect(self.show_menu)
         self.disks_host.page.back_requested.connect(self.show_menu)
         self.doctor_host.page.back_requested.connect(self.show_menu)
+        self.logs_host.page.back_requested.connect(self.show_menu)
+        self.clonezilla_host.page.back_requested.connect(self.show_menu)
 
         self.stack.setCurrentWidget(self.menu_page)
 
@@ -1831,9 +1867,16 @@ class MainWindow(QMainWindow):
     def show_doctor(self):
         self.stack.setCurrentWidget(self.doctor_host)
 
+    def show_logs(self):
+        self.stack.setCurrentWidget(self.logs_host)
+
+    def show_clonezilla(self):
+        self.stack.setCurrentWidget(self.clonezilla_host)
+
     def keyPressEvent(self, event: QKeyEvent):
         if event.key() == Qt.Key_Escape and self.stack.currentWidget() in (
-            self.backups_host, self.eggs_host, self.disks_host, self.doctor_host
+            self.backups_host, self.eggs_host, self.disks_host, self.doctor_host,
+            self.logs_host, self.clonezilla_host,
         ):
             self.show_menu()
             return
