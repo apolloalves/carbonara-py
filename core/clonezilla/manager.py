@@ -151,6 +151,8 @@ def compress_backup(dialog, name: str, month_dir: str) -> None:
     worker.log_line.connect(dialog.append_log)
     if hasattr(dialog, "set_progress_detail"):
         worker.detail_changed.connect(dialog.set_progress_detail)
+    if hasattr(dialog, "set_bytes_progress"):
+        worker.bytes_changed.connect(dialog.set_bytes_progress)
     if hasattr(dialog, "build_tree"):
         worker.tree_ready.connect(dialog.build_tree)
     if hasattr(dialog, "mark_file_done"):

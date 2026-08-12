@@ -5,7 +5,7 @@ import shutil
 import subprocess
 
 import qtawesome as qta
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import Qt, QTimer, Signal, QSize
 from PySide6.QtGui import QFont, QPainter, QColor, QKeyEvent
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
@@ -14,6 +14,17 @@ from PySide6.QtWidgets import (
 
 from core.operation_manager import OperationManager
 from core.clonezilla.manager import scan_clonezilla_backups, ClonezillaEntry
+from core.workers.gdrive_upload_worker import GDriveUploadWorker
+
+# Pasta de destino no Google Drive (via GVfs/GNOME Online Accounts) —
+# caminho fornecido pelo Apollo, apontando pra uma pasta específica já
+# existente no Drive dele.
+GDRIVE_TARGET_URI = (
+    "google-drive://apolloapolloalves@gmail.com/0ABEr922kpRI6Uk9PVA/"
+    "13CaRBCgO0gqZWhXubZBxI26iO9DDhqQv/1kN_omf6VfP9tBEr-Jzw6Gszot2WPFEPe/"
+    "1Lpa8mVwk0876bTyRirPOfPE-JUKrdCLy/1YPi4Dg5ACPfo7kDqKl200yhkARZe_flu/"
+    "1XArAXhMbLyhKMo3pXtS2O2F_gkgzhm6f"
+)
 
 TEXT = "#e4e7ec"
 MUTED = "#8b92a3"
@@ -268,6 +279,8 @@ class _SectionCard(QFrame):
 
 class _EntryCard(QFrame):
     compress_requested = Signal(object)  # ClonezillaEntry
+    delete_requested = Signal(object, bool)  # ClonezillaEntry, pending
+    upload_requested = Signal(object)    # ClonezillaEntry
 
     def __init__(self, entry: ClonezillaEntry, pending: bool, parent=None):
         super().__init__(parent)
@@ -356,6 +369,37 @@ class _EntryCard(QFrame):
             """)
             root.addWidget(badge)
 
+            self.btn_upload = self._make_icon_button(
+                "mdi6.cloud-upload-outline", ACCENT_BLUE_LIGHT, "Enviar para o Google Drive",
+            )
+            self.btn_upload.clicked.connect(lambda: self.upload_requested.emit(entry))
+            root.addWidget(self.btn_upload)
+
+        self.btn_delete = self._make_icon_button(
+            "mdi6.trash-can-outline", ACCENT_RED, "Excluir",
+        )
+        self.btn_delete.clicked.connect(lambda: self.delete_requested.emit(entry, pending))
+        root.addWidget(self.btn_delete)
+
+    def _make_icon_button(self, glyph: str, color: str, tooltip: str) -> QPushButton:
+        btn = QPushButton()
+        btn.setIcon(qta.icon(glyph, color=color))
+        btn.setIconSize(QSize(18, 18))
+        btn.setToolTip(tooltip)
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.setFixedSize(36, 36)
+        btn.setStyleSheet(f"""
+            QPushButton {{
+                background: rgba(255, 255, 255, 6);
+                border: 1px solid rgba({_rgba(color, 60)});
+                border-radius: 8px;
+            }}
+            QPushButton:hover {{
+                background: rgba({_rgba(color, 30)});
+            }}
+        """)
+        return btn
+
 
 class ClonezillaPage(QWidget):
     """Gerenciador de backups Clonezilla — lista pastas cruas e arquivos
@@ -374,6 +418,14 @@ class ClonezillaPage(QWidget):
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(500)
         self._poll_timer.timeout.connect(self._poll_compress_process)
+
+        self._delete_proc: subprocess.Popen | None = None
+        self._delete_poll_timer = QTimer(self)
+        self._delete_poll_timer.setInterval(400)
+        self._delete_poll_timer.timeout.connect(self._poll_delete_process)
+
+        self._upload_dialog = None
+        self._upload_worker = None
 
         root = QVBoxLayout(self)
         root.setContentsMargins(32, 24, 32, 24)
@@ -500,6 +552,7 @@ class ClonezillaPage(QWidget):
             for entry in pending:
                 card = _EntryCard(entry, pending=True)
                 card.compress_requested.connect(self._on_compress_requested)
+                card.delete_requested.connect(self._on_delete_requested)
                 section.add_card(card)
             self._list_layout.insertWidget(self._list_layout.count() - 1, section)
 
@@ -508,7 +561,10 @@ class ClonezillaPage(QWidget):
                 "JÁ COMPRIMIDOS", "Arquivos .tar.zst prontos", ACCENT_GREEN,
             )
             for entry in compressed:
-                section.add_card(_EntryCard(entry, pending=False))
+                card = _EntryCard(entry, pending=False)
+                card.delete_requested.connect(self._on_delete_requested)
+                card.upload_requested.connect(self._on_upload_requested)
+                section.add_card(card)
             self._list_layout.insertWidget(self._list_layout.count() - 1, section)
 
     def _on_compress_requested(self, entry: ClonezillaEntry) -> None:
@@ -620,6 +676,155 @@ class ClonezillaPage(QWidget):
                 parent=self,
                 detail=stderr_text,
             )
+
+    def _on_delete_requested(self, entry: ClonezillaEntry, pending: bool) -> None:
+        if pending:
+            target_path = entry.raw_path
+            is_dir = True
+            what = "a pasta original"
+        else:
+            target_path = entry.archive_path
+            is_dir = False
+            what = "o arquivo .tar.zst"
+
+        if target_path is None:
+            return
+
+        if OperationManager.is_running():
+            current = OperationManager.current()
+            _show_error(
+                "Carbonara", f"Outra operação exclusiva já está em andamento: {current}",
+                parent=self,
+            )
+            return
+
+        if not _ask_confirm(
+            self, "Excluir backup",
+            f"Excluir {what} de '{entry.name}'?\n\n{target_path}\n\n"
+            f"Essa ação não pode ser desfeita.",
+            confirm_label="Excluir",
+        ):
+            return
+
+        if not OperationManager.start("clonezilla", f"Excluindo {entry.name}"):
+            _show_error("Carbonara", "Outra operação exclusiva já está em andamento.", parent=self)
+            return
+
+        import json
+
+        args_json = json.dumps({"path": str(target_path), "is_dir": is_dir})
+
+        cmd = [
+            "pkexec",
+            "/usr/local/bin/carbonara-helper",
+            os.environ.get("DISPLAY", ""),
+            os.environ.get("XAUTHORITY", ""),
+            "clonezilla.delete",
+            args_json,
+        ]
+
+        try:
+            self._delete_proc = subprocess.Popen(cmd, stderr=subprocess.PIPE, text=True)
+            self._delete_poll_timer.start()
+        except Exception as exc:
+            OperationManager.finish()
+            _show_error("Carbonara Backup", str(exc), parent=self)
+
+    def _poll_delete_process(self) -> None:
+        if self._delete_proc is None:
+            return
+        rc = self._delete_proc.poll()
+        if rc is None:
+            return
+
+        self._delete_poll_timer.stop()
+        proc = self._delete_proc
+        self._delete_proc = None
+        OperationManager.finish()
+        self.refresh_list()
+
+        if rc not in (0, 126) and rc >= 0:
+            stderr_text = ""
+            try:
+                if proc.stderr is not None:
+                    stderr_text = proc.stderr.read().strip()
+            except Exception:
+                pass
+            _show_error(
+                "Carbonara Backup",
+                f"Processo de exclusão terminou com código {rc}.",
+                parent=self,
+                detail=stderr_text,
+            )
+
+    def _on_upload_requested(self, entry: ClonezillaEntry) -> None:
+        if entry.archive_path is None:
+            return
+
+        if OperationManager.is_running():
+            current = OperationManager.current()
+            _show_error(
+                "Carbonara", f"Outra operação exclusiva já está em andamento: {current}",
+                parent=self,
+            )
+            return
+
+        size_txt = f"\n\nTamanho: {_fmt_size(entry.archive_size_bytes)}" if entry.archive_size_bytes else ""
+        if not _ask_confirm(
+            self, "Enviar para o Google Drive",
+            f"Enviar '{entry.archive_path.name}' para o Google Drive?{size_txt}\n\n"
+            f"Usa a conta já conectada em Online Accounts (GNOME).",
+            confirm_label="Enviar",
+        ):
+            return
+
+        if not OperationManager.start("clonezilla", f"Enviando {entry.name} para o Drive"):
+            _show_error("Carbonara", "Outra operação exclusiva já está em andamento.", parent=self)
+            return
+
+        from ui.widgets.clonezilla_progress import ClonezillaProgressDialog
+
+        dialog = ClonezillaProgressDialog(
+            f"Enviando {entry.name}",
+            icon_glyph="mdi6.cloud-upload-outline",
+            body_title="Envio em andamento",
+        )
+        dialog.lbl_subtitle.setText(f"Enviando {entry.archive_path.name} para o Google Drive.")
+        dialog.set_running(True)
+        dialog.progress.setRange(0, 100)
+        dialog.progress.setValue(0)
+        dialog.set_status(f"Preparando envio de {entry.archive_path.name}...")
+        dialog.set_current_file(entry.archive_path.name)
+        dialog.append_log(f"=== UPLOAD {entry.archive_path.name} ===")
+        dialog.build_tree([entry.archive_path.name])
+
+        worker = GDriveUploadWorker(entry.archive_path, GDRIVE_TARGET_URI, parent=dialog)
+        dialog.register_worker(worker)
+
+        worker.progress_changed.connect(dialog.progress.setValue)
+        worker.status_changed.connect(dialog.set_status)
+        worker.log_line.connect(dialog.append_log)
+        worker.detail_changed.connect(dialog.set_progress_detail)
+
+        def _on_done() -> None:
+            dialog.mark_file_done(entry.archive_path.name)
+            dialog.set_status("Envio concluído.")
+            dialog.set_current_file("—")
+            dialog.progress.setValue(100)
+            dialog.set_running(False)
+            OperationManager.finish()
+
+        def _on_failed(msg: str) -> None:
+            dialog.append_log(f"ERRO: {msg}")
+            dialog.set_status("Envio falhou.")
+            dialog.set_running(False)
+            OperationManager.finish()
+
+        worker.finished_ok.connect(_on_done)
+        worker.failed.connect(_on_failed)
+
+        worker.start()
+        dialog.exec()
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Escape:

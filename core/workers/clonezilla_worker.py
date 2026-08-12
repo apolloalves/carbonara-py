@@ -32,6 +32,7 @@ class ClonezillaCompressWorker(QThread):
     progress_changed = Signal(int)
     status_changed = Signal(str)
     detail_changed = Signal(str)
+    bytes_changed = Signal(float, float)
     tree_ready = Signal(list)
     file_done = Signal(str)
     log_line = Signal(str)
@@ -127,11 +128,17 @@ class ClonezillaCompressWorker(QThread):
                             f"{self._total_bytes / 1024 ** 3:.1f} GB   ·   "
                             f"{rate_mb_s:.1f} MB/s"
                         )
+                        self.bytes_changed.emit(float(done_bytes), float(self._total_bytes))
                 else:
                     # Linha do tar -v (caminho relativo do arquivo já
                     # escrito no archive) — atualiza a árvore em vez de
                     # inundar o log com uma linha por arquivo.
                     self.file_done.emit(line)
+                    # Extrai só o nome do arquivo (não o caminho completo)
+                    # pra manter o log legível — o caminho completo já
+                    # aparece na árvore "Transferindo:" ao lado.
+                    short_name = line.rsplit("/", 1)[-1]
+                    self.log_line.emit(f"✓ {short_name}")
 
             rc = self._proc.wait()
 

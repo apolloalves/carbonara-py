@@ -19,8 +19,13 @@ class EggsProgressDialog(QDialog):
         self.setMinimumSize(1000, 700)
         self.resize(1060, 760)
 
-        # Remove titlebar nativa — usamos header customizado
-        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        # Remove titlebar nativa — usamos header customizado. Qt.Window
+        # (não Qt.Dialog) porque este dialog precisa ser maximizável —
+        # muitos WMs recusam silenciosamente maximizar janelas do tipo
+        # "Dialog". A causa real do empilhamento atrás do dock (ver
+        # _toggle_maximize abaixo) nunca foi esse flag — era a sobrescrita
+        # manual de geometria depois do showMaximized().
+        self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
 
         self._workers: list = []
         # Flag independente de _workers: cobre o período em que a operação
@@ -58,10 +63,7 @@ class EggsProgressDialog(QDialog):
 
     def showEvent(self, event):
         """Centraliza na tela primária ao exibir — evita aparecer no monitor
-        errado. Também força pra frente do dock customizado (raise_ +
-        activateWindow) — antes isso só rodava dentro de _toggle_maximize,
-        então uma janela que já nascia grande (sem precisar clicar em
-        maximizar) continuava nascendo atrás do dock."""
+        errado."""
         super().showEvent(event)
         from PySide6.QtGui import QGuiApplication
         screen = QGuiApplication.primaryScreen()
@@ -132,8 +134,6 @@ class EggsProgressDialog(QDialog):
         # (showMaximized/showNormal) para o gerenciador de janelas (GNOME
         # Shell) reconhecer o estado corretamente (ex: esconder dock
         # com auto-hide quando a janela está maximizada de verdade).
-        self._is_maximized = False
-        self._normal_geometry = None
         self._btn_header_maximize = QPushButton()
         self._btn_header_maximize.setIcon(qta.icon("mdi6.window-maximize", color="#9aa6b2"))
         self._btn_header_maximize.setIconSize(QSize(15, 15))
@@ -539,47 +539,23 @@ class EggsProgressDialog(QDialog):
         self.accept()
 
     def _toggle_maximize(self) -> None:
-        """Redimensionamento manual pra tela toda (via setGeometry), sem
-        usar o showMaximized() nativo do Qt. No dock customizado do
-        Apollo, o estado "maximizado" nativo registrado junto ao WM fazia
-        essa janela (frameless) empilhar ATRÁS do dock depois de
-        maximizar — usar só setGeometry(availableGeometry()) evita entrar
-        nesse estado do WM e resolve o empilhamento na maioria dos casos.
-
-        self.screen() pode ficar desatualizado numa janela frameless que
-        acabou de ser arrastada pra outro monitor (Qt só reatribui o
-        screen "oficial" da janela em certos eventos, que uma janela sem
-        decoração às vezes não dispara a tempo) — isso fazia a largura
-        vazar pro monitor vizinho quando maximizada logo após arrastar
-        pro Dell menor. screenAt(centro real da janela) pergunta pro Qt
-        qual monitor está fisicamente sob a janela agora, sem depender
-        desse cache."""
-        if not self._is_maximized:
-            self._normal_geometry = self.geometry()
-            screen = (
-                QApplication.screenAt(self.frameGeometry().center())
-                or self.screen()
-                or QApplication.primaryScreen()
-            )
-            if screen:
-                target = screen.availableGeometry()
-                self.setGeometry(target)
-            # Força a janela pra frente — alguns docks/painéis customizados
-            # não são um _NET_WM_STRUT real reconhecido pelo WM, então
-            # availableGeometry() não os exclui e a janela pode nascer
-            # atrás deles; raise_()+activateWindow() briga por cima disso.
-            self.raise_()
-            self.activateWindow()
-            self._btn_header_maximize.setIcon(qta.icon("mdi6.window-restore", color="#9aa6b2"))
-            self._btn_header_maximize.setToolTip("Restaurar")
-            self._is_maximized = True
-        else:
+        """Usa o maximize nativo do Qt (showMaximized/showNormal) puro,
+        confiando inteiramente no gerenciador de janelas. A versão antiga
+        deste método evitava showMaximized() e fazia setGeometry manual
+        porque um diagnóstico anterior (errado) achava que o estado
+        "maximizado" nativo é que empilhava a janela atrás do dock — na
+        real, era a própria sobrescrita manual de geometria que causava
+        isso, confirmado ao corrigir o mesmo bug no ClonezillaProgressDialog.
+        O showMaximized() nativo já maximiza corretamente no monitor onde
+        a janela está no momento, sem precisar de screenAt() manual."""
+        if self.isMaximized():
             self.showNormal()
-            if self._normal_geometry is not None:
-                self.setGeometry(self._normal_geometry)
             self._btn_header_maximize.setIcon(qta.icon("mdi6.window-maximize", color="#9aa6b2"))
             self._btn_header_maximize.setToolTip("Maximizar")
-            self._is_maximized = False
+        else:
+            self.showMaximized()
+            self._btn_header_maximize.setIcon(qta.icon("mdi6.window-restore", color="#9aa6b2"))
+            self._btn_header_maximize.setToolTip("Restaurar")
 
     def mouseDoubleClickEvent(self, event) -> None:
         """Duplo clique no header também alterna maximizar, como em janelas normais."""
@@ -788,15 +764,6 @@ class EggsProgressDialog(QDialog):
         m, s = divmod(rem, 60)
         text = f"{m:02d}:{s:02d}" if h == 0 else f"{h:02d}:{m:02d}:{s:02d}"
         self.lbl_elapsed.setText(text)
-        # Reafirma a janela acima do dock periodicamente — o showEvent já
-        # fazia isso uma vez na abertura, mas em operações longas (o
-        # xorriso sozinho já passou de 30min numa build) o dock
-        # customizado pode voltar a empilhar por cima depois de um
-        # tempo. A cada ~3s (não a cada tick, pra não competir demais
-        # por foco) reforça raise_+activateWindow.
-        if self._elapsed_seconds % 3 == 0:
-            self.raise_()
-            self.activateWindow()
 
     def set_running(self, running: bool) -> None:
         self._is_running = running

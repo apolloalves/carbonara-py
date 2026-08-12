@@ -23,8 +23,12 @@ class BackupProgressDialog(QDialog):
         self.setMinimumSize(900, 640)
         self.resize(960, 700)
 
-        # Remove titlebar nativa — usamos header customizado
-        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        # Remove titlebar nativa — usamos header customizado. Qt.Window
+        # (não Qt.Dialog) porque este dialog precisa ser maximizável —
+        # muitos WMs (Mutter incluso) recusam silenciosamente maximizar
+        # janelas do tipo "Dialog", já que diálogos convencionalmente não
+        # são redimensionáveis desse jeito.
+        self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
 
         self._workers: list = []
         self._cancel_countdown = 0
@@ -129,8 +133,6 @@ class BackupProgressDialog(QDialog):
 
         # Botão maximizar/restaurar — janela é frameless, então não tem
         # controle nativo do WM; alterna entre tamanho normal e maximizado.
-        self._is_maximized = False
-        self._normal_geometry = None
         self._btn_header_maximize = QPushButton()
         self._btn_header_maximize.setIcon(qta.icon("mdi6.window-maximize", color="#9aa6b2"))
         self._btn_header_maximize.setIconSize(QSize(15, 15))
@@ -624,32 +626,20 @@ class BackupProgressDialog(QDialog):
         self.accept()
 
     def _toggle_maximize(self) -> None:
-        """Usa o maximize nativo do Qt (showMaximized/showNormal) — isso
-        registra o estado de "maximizado" junto ao gerenciador de janelas,
-        que é o que faz docks com auto-hide (ex: no GNOME) reconhecerem a
-        janela e se esconderem corretamente. Mas alguns WMs (ex: mutter
-        customizado sem decoração) simplesmente ignoram o estado
-        "maximizado" para janelas frameless e não redimensionam nada —
-        por isso também força o setGeometry manual como garantia de que
-        o redimensionamento acontece de verdade, independente do WM
-        aplicar o estado ou não."""
-        if not self._is_maximized:
-            self._normal_geometry = self.geometry()
-            self.showMaximized()
-            from PySide6.QtWidgets import QApplication
-            screen = self.screen() or QApplication.primaryScreen()
-            if screen:
-                self.setGeometry(screen.availableGeometry())
-            self._btn_header_maximize.setIcon(qta.icon("mdi6.window-restore", color="#9aa6b2"))
-            self._btn_header_maximize.setToolTip("Restaurar")
-            self._is_maximized = True
-        else:
+        """Usa o maximize nativo do Qt (showMaximized/showNormal) puro,
+        confiando inteiramente no gerenciador de janelas — sem sobrescrever
+        a geometria manualmente depois. Uma sobrescrita manual (setGeometry
+        com availableGeometry(), como esse método já teve antes) na
+        verdade ATRAPALHA: ela substitui o cálculo correto do WM por um
+        cálculo próprio que não considera direito docks/painéis."""
+        if self.isMaximized():
             self.showNormal()
-            if self._normal_geometry is not None:
-                self.setGeometry(self._normal_geometry)
             self._btn_header_maximize.setIcon(qta.icon("mdi6.window-maximize", color="#9aa6b2"))
             self._btn_header_maximize.setToolTip("Maximizar")
-            self._is_maximized = False
+        else:
+            self.showMaximized()
+            self._btn_header_maximize.setIcon(qta.icon("mdi6.window-restore", color="#9aa6b2"))
+            self._btn_header_maximize.setToolTip("Restaurar")
 
     def mouseDoubleClickEvent(self, event) -> None:
         """Duplo clique no header também alterna maximizar, como em janelas normais."""

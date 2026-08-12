@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import qtawesome as qta
 from PySide6.QtCore import Qt, QTimer, QSize
-from PySide6.QtGui import QFont, QMouseEvent, QColor
+from PySide6.QtGui import QFont, QMouseEvent, QColor, QPixmap
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout,
     QLabel, QProgressBar, QPlainTextEdit, QPushButton, QFrame,
@@ -33,10 +33,14 @@ class ClonezillaProgressDialog(QDialog):
       dialog.btn_close
     """
 
-    def __init__(self, title: str = "Comprimindo backup", icon_glyph: str = "mdi6.archive-arrow-down-outline", parent=None):
+    def __init__(
+        self, title: str = "Comprimindo backup", icon_glyph: str = "mdi6.archive-arrow-down-outline",
+        body_title: str = "Compressão em andamento", parent=None,
+    ):
         super().__init__(parent)
         self.setWindowTitle(title)
         self._icon_glyph = icon_glyph
+        self._body_title = body_title
         self.setModal(True)
         self.setMinimumSize(980, 720)
         self.resize(1040, 780)
@@ -56,7 +60,15 @@ class ClonezillaProgressDialog(QDialog):
         self._elapsed_timer.setInterval(1000)
         self._elapsed_timer.timeout.connect(self._tick_elapsed)
 
-        self._log_buffer: list[str] = []
+        # Spinner braille no ícone do card de status — mesmo padrão já
+        # usado no resto do app (toast de operação em andamento do Eggs).
+        self._spinner_frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+        self._spinner_index = 0
+        self._spinner_timer = QTimer(self)
+        self._spinner_timer.setInterval(80)
+        self._spinner_timer.timeout.connect(self._tick_spinner)
+
+        self._log_buffer: list[tuple[str, str]] = []
         self._log_flush_timer = QTimer(self)
         self._log_flush_timer.setInterval(300)
         self._log_flush_timer.timeout.connect(self._flush_log_buffer)
@@ -117,21 +129,13 @@ class ClonezillaProgressDialog(QDialog):
         header_layout.addWidget(lbl_header)
         header_layout.addStretch(1)
 
-        self.elapsed_badge = QFrame()
-        self.elapsed_badge.setObjectName("ElapsedBadge")
-        eb_layout = QHBoxLayout(self.elapsed_badge)
-        eb_layout.setContentsMargins(10, 4, 12, 4)
-        eb_layout.setSpacing(6)
-        elapsed_icon = QLabel()
-        elapsed_icon.setPixmap(qta.icon("mdi6.clock-outline", color="#9bf0bd").pixmap(14, 14))
-        elapsed_icon.setStyleSheet("background: transparent;")
-        self.lbl_elapsed = QLabel("00:00")
-        self.lbl_elapsed.setObjectName("ElapsedTime")
-        self.lbl_elapsed.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
-        eb_layout.addWidget(elapsed_icon)
-        eb_layout.addWidget(self.lbl_elapsed)
-        header_layout.addWidget(self.elapsed_badge)
-        header_layout.addSpacing(12)
+        self._btn_header_minimize = QPushButton("–")
+        self._btn_header_minimize.setObjectName("HeaderMinimize")
+        self._btn_header_minimize.setFixedSize(32, 32)
+        self._btn_header_minimize.setToolTip("Minimizar")
+        self._btn_header_minimize.clicked.connect(self.showMinimized)
+        header_layout.addWidget(self._btn_header_minimize)
+        header_layout.addSpacing(4)
 
         self._btn_header_maximize = QPushButton()
         self._btn_header_maximize.setIcon(qta.icon("mdi6.window-maximize", color="#9aa6b2"))
@@ -158,12 +162,12 @@ class ClonezillaProgressDialog(QDialog):
         body_layout.setContentsMargins(24, 22, 24, 20)
         body_layout.setSpacing(0)
 
-        self.lbl_title = QLabel(self.windowTitle())
+        self.lbl_title = QLabel(self._body_title)
         self.lbl_title.setObjectName("ProgressTitle")
         body_layout.addWidget(self.lbl_title)
         body_layout.addSpacing(3)
 
-        self.lbl_subtitle = QLabel("Aguarde enquanto o Carbonara comprime o backup.")
+        self.lbl_subtitle = QLabel(self.windowTitle())
         self.lbl_subtitle.setObjectName("ProgressSubtitle")
         body_layout.addWidget(self.lbl_subtitle)
         body_layout.addSpacing(14)
@@ -172,15 +176,15 @@ class ClonezillaProgressDialog(QDialog):
         info_card = QFrame()
         info_card.setObjectName("InfoCard")
         info_layout = QHBoxLayout(info_card)
-        info_layout.setContentsMargins(18, 14, 18, 14)
+        info_layout.setContentsMargins(18, 22, 18, 22)
         info_layout.setSpacing(14)
 
-        info_icon = QLabel()
-        info_icon.setFixedSize(44, 44)
-        info_icon.setAlignment(Qt.AlignCenter)
-        info_icon.setPixmap(qta.icon(self._icon_glyph, color="#9bf0bd").pixmap(22, 22))
-        info_icon.setObjectName("InfoIcon")
-        info_layout.addWidget(info_icon)
+        self.info_icon = QLabel()
+        self.info_icon.setFixedSize(50, 50)
+        self.info_icon.setAlignment(Qt.AlignCenter)
+        self.info_icon.setPixmap(qta.icon(self._icon_glyph, color="#9bf0bd").pixmap(22, 22))
+        self.info_icon.setObjectName("InfoIcon")
+        info_layout.addWidget(self.info_icon)
 
         self.lbl_status = QLabel("Aguardando início...")
         self.lbl_status.setObjectName("ProgressStatus")
@@ -191,10 +195,17 @@ class ClonezillaProgressDialog(QDialog):
         elapsed_col.setSpacing(1)
         elapsed_caption = QLabel("Tempo decorrido")
         elapsed_caption.setObjectName("TimeCaption")
+        elapsed_value_row = QHBoxLayout()
+        elapsed_value_row.setSpacing(6)
+        elapsed_icon = QLabel()
+        elapsed_icon.setPixmap(qta.icon("mdi6.clock-outline", color="#9bf0bd").pixmap(15, 15))
+        elapsed_icon.setStyleSheet("background: transparent;")
         self.lbl_elapsed_big = QLabel("00:00")
         self.lbl_elapsed_big.setObjectName("TimeValue")
+        elapsed_value_row.addWidget(elapsed_icon)
+        elapsed_value_row.addWidget(self.lbl_elapsed_big)
         elapsed_col.addWidget(elapsed_caption)
-        elapsed_col.addWidget(self.lbl_elapsed_big)
+        elapsed_col.addLayout(elapsed_value_row)
         info_layout.addLayout(elapsed_col)
 
         sep = QFrame()
@@ -206,10 +217,17 @@ class ClonezillaProgressDialog(QDialog):
         eta_col.setSpacing(1)
         eta_caption = QLabel("Tempo estimado restante")
         eta_caption.setObjectName("TimeCaption")
+        eta_value_row = QHBoxLayout()
+        eta_value_row.setSpacing(6)
+        eta_icon = QLabel()
+        eta_icon.setPixmap(qta.icon("mdi6.timer-sand", color="#9bf0bd").pixmap(15, 15))
+        eta_icon.setStyleSheet("background: transparent;")
         self.lbl_eta = QLabel("—")
         self.lbl_eta.setObjectName("TimeValue")
+        eta_value_row.addWidget(eta_icon)
+        eta_value_row.addWidget(self.lbl_eta)
         eta_col.addWidget(eta_caption)
-        eta_col.addWidget(self.lbl_eta)
+        eta_col.addLayout(eta_value_row)
         info_layout.addLayout(eta_col)
 
         body_layout.addWidget(info_card)
@@ -240,6 +258,24 @@ class ClonezillaProgressDialog(QDialog):
         self.lbl_progress_detail = QLabel("")
         self.lbl_progress_detail.setObjectName("ProgressDetail")
         body_layout.addWidget(self.lbl_progress_detail)
+        body_layout.addSpacing(14)
+
+        # ── Cards de estatística (dados reais: contagem da árvore de
+        # arquivos + bytes processados pelo pv) ─────────────────────────
+        stats_row = QHBoxLayout()
+        stats_row.setSpacing(12)
+
+        self._file_count_total = 0
+        self._file_count_done = 0
+
+        self.stat_scanned = self._make_stat_card("mdi6.file-document-multiple-outline", "Arquivos totais")
+        self.stat_copied = self._make_stat_card("mdi6.file-check-outline", "Arquivos copiados")
+        self.stat_data = self._make_stat_card("mdi6.database-outline", "Dados copiados")
+
+        stats_row.addWidget(self.stat_scanned["card"])
+        stats_row.addWidget(self.stat_copied["card"])
+        stats_row.addWidget(self.stat_data["card"])
+        body_layout.addLayout(stats_row)
         body_layout.addSpacing(14)
 
         # ── Operação atual + árvore de transferência (lado a lado) ──────
@@ -339,12 +375,12 @@ class ClonezillaProgressDialog(QDialog):
                 border-top-right-radius: 14px;
             }
             QLabel#HeaderTitle { color: #ecf4ff; background: transparent; letter-spacing: 1px; }
+            QPushButton#HeaderMinimize { background: transparent; border: none; color: #9aa6b2; font-size: 16px; font-weight: bold; border-radius: 6px; }
+            QPushButton#HeaderMinimize:hover { background: rgba(255, 255, 255, 20); }
             QPushButton#HeaderMaximize { background: transparent; border: none; border-radius: 6px; }
             QPushButton#HeaderMaximize:hover { background: rgba(35, 166, 255, 50); }
             QPushButton#HeaderClose { background: transparent; border: none; color: #9aa6b2; font-size: 15px; border-radius: 6px; }
             QPushButton#HeaderClose:hover { background: rgba(200, 60, 60, 60); color: #ff8888; }
-            QFrame#ElapsedBadge { background: rgba(74, 222, 128, 22); border-radius: 8px; }
-            QLabel#ElapsedTime { color: #9bf0bd; background: transparent; }
 
             QFrame#DialogBody { background: #131417; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
 
@@ -359,7 +395,7 @@ class ClonezillaProgressDialog(QDialog):
             QFrame#TimeSeparator { background: rgba(255,255,255,14); }
 
             QLabel#SectionLabel { color: #c8d4e0; font-family: "DejaVu Sans Mono"; font-size: 10px; font-weight: 700; letter-spacing: 1px; }
-            QLabel#PctBig { color: #9bf0bd; font-family: "DejaVu Sans Mono"; font-size: 15px; font-weight: 700; }
+            QLabel#PctBig { color: #9bf0bd; font-family: "DejaVu Sans Mono"; font-size: 28px; font-weight: 700; }
             QLabel#ProgressDetail { color: #6b7a8d; font-family: "DejaVu Sans Mono"; font-size: 10px; }
 
             QProgressBar#BackupProgress { background-color: rgba(255,255,255,8); border: none; border-radius: 5px; }
@@ -369,6 +405,11 @@ class ClonezillaProgressDialog(QDialog):
             }
 
             QFrame#CurrentOpBox { background: rgba(255,255,255,4); border: 1px solid rgba(255,255,255,12); border-radius: 12px; }
+
+            QFrame#StatCard { background: rgba(255,255,255,4); border: 1px solid rgba(255,255,255,12); border-radius: 10px; }
+            QLabel#StatIcon { background: rgba(35, 166, 255, 26); border-radius: 9px; }
+            QLabel#StatLabel { color: #6b7a8d; font-family: "DejaVu Sans Mono"; font-size: 10px; }
+            QLabel#StatValue { color: #ecf4ff; font-family: "DejaVu Sans Mono"; font-size: 19px; font-weight: 700; }
             QLabel#ProgressCurrentFile { color: #9aa6b2; font-family: "DejaVu Sans Mono"; font-size: 10px; font-style: italic; }
 
             QTreeWidget#TransferTree {
@@ -528,27 +569,32 @@ class ClonezillaProgressDialog(QDialog):
             self._workers.remove(worker)
 
     def append_log(self, text: str) -> None:
-        self._log_buffer.append(text)
+        from datetime import datetime
+
+        if any(text.startswith(p) for p in ("ERRO:", "ERRO ", "✗")):
+            level, color = "ERRO", "#ff8888"
+        elif any(text.startswith(p) for p in ("✓", "--- ", "=== ")):
+            level, color = "OK", "#9bf0bd"
+        elif any(text.startswith(p) for p in ("AVISO:", "AVISO ")):
+            level, color = "AVISO", "#ffb86b"
+        elif text.startswith("$"):
+            level, color = "CMD", "#8fd4ff"
+        else:
+            level, color = "INFO", "#9aa6b2"
+
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        formatted = f"{timestamp}  [{level}]  {text}"
+        self._log_buffer.append((formatted, color))
 
     def _flush_log_buffer(self) -> None:
         if not self._log_buffer:
             return
         from PySide6.QtGui import QTextCharFormat, QColor as _QColor, QTextCursor
-        lines = self._log_buffer[:]
+        items = self._log_buffer[:]
         self._log_buffer.clear()
         cursor = self.log_view.textCursor()
         cursor.movePosition(QTextCursor.End)
-        for text in lines:
-            if any(text.startswith(p) for p in ("ERRO:", "ERRO ", "✗")):
-                color = "#ff8888"
-            elif any(text.startswith(p) for p in ("✓", "--- ", "=== ")):
-                color = "#9bf0bd"
-            elif any(text.startswith(p) for p in ("AVISO:", "AVISO ")):
-                color = "#ffb86b"
-            elif text.startswith("$"):
-                color = "#8fd4ff"
-            else:
-                color = "#9aa6b2"
+        for text, color in items:
             char_fmt = QTextCharFormat()
             char_fmt.setForeground(_QColor(color))
             cursor.insertText(("\n" if cursor.position() > 0 else "") + text, char_fmt)
@@ -564,6 +610,38 @@ class ClonezillaProgressDialog(QDialog):
 
     def set_progress_detail(self, text: str) -> None:
         self.lbl_progress_detail.setText(text)
+
+    def set_bytes_progress(self, done_bytes: float, total_bytes: float) -> None:
+        """Atualiza o card 'Dados copiados' com o valor real de bytes já
+        processados pelo pv."""
+        self.stat_data["value"].setText(f"{done_bytes / (1024 ** 3):.1f} GB")
+
+    def _make_stat_card(self, glyph: str, label_text: str) -> dict:
+        card = QFrame()
+        card.setObjectName("StatCard")
+        layout = QHBoxLayout(card)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(10)
+
+        icon_lbl = QLabel()
+        icon_lbl.setFixedSize(36, 36)
+        icon_lbl.setAlignment(Qt.AlignCenter)
+        icon_lbl.setPixmap(qta.icon(glyph, color="#8fd4ff").pixmap(18, 18))
+        icon_lbl.setObjectName("StatIcon")
+        layout.addWidget(icon_lbl)
+
+        text_col = QVBoxLayout()
+        text_col.setSpacing(1)
+        label_lbl = QLabel(label_text)
+        label_lbl.setObjectName("StatLabel")
+        value_lbl = QLabel("0")
+        value_lbl.setObjectName("StatValue")
+        text_col.addWidget(label_lbl)
+        text_col.addWidget(value_lbl)
+        layout.addLayout(text_col)
+        layout.addStretch(1)
+
+        return {"card": card, "value": value_lbl, "label": label_lbl}
 
     def build_tree(self, relative_paths: list[str]) -> None:
         """Monta a árvore 'Transferindo:' a partir da lista de caminhos
@@ -597,19 +675,26 @@ class ClonezillaProgressDialog(QDialog):
 
         self.tree.expandAll()
 
+        self._file_count_total = len(relative_paths)
+        self._file_count_done = 0
+        self.stat_scanned["value"].setText(str(self._file_count_total))
+        self.stat_copied["value"].setText("0")
+
     def mark_file_done(self, relative_path: str) -> None:
         """Marca o item folha correspondente como concluído (chamado
-        conforme o tar -v relata cada arquivo já escrito no archive)."""
+        conforme o tar -v relata cada arquivo já escrito no archive) e
+        atualiza o card 'Arquivos copiados'."""
         item = self._tree_items.get(relative_path)
         if item is not None:
             item.setIcon(0, qta.icon("mdi6.check-circle", color="#9bf0bd"))
+            self._file_count_done += 1
+            self.stat_copied["value"].setText(str(self._file_count_done))
 
     def _tick_elapsed(self) -> None:
         self._elapsed_seconds += 1
         h, rem = divmod(self._elapsed_seconds, 3600)
         m, s = divmod(rem, 60)
         text = f"{m:02d}:{s:02d}" if h == 0 else f"{h:02d}:{m:02d}:{s:02d}"
-        self.lbl_elapsed.setText(text)
         self.lbl_elapsed_big.setText(text)
         self._on_progress_value_changed(self.progress.value())
 
@@ -619,9 +704,27 @@ class ClonezillaProgressDialog(QDialog):
         if running and not self._timer_active:
             self._timer_active = True
             self._elapsed_timer.start()
+            self.info_icon.setPixmap(QPixmap())
+            self.info_icon.setStyleSheet(
+                "QLabel#InfoIcon { background: rgba(74, 222, 128, 30); border-radius: 12px; "
+                "color: #9bf0bd; font-size: 28px; font-weight: bold; }"
+            )
+            self._spinner_timer.start()
         elif not running and self._timer_active:
             self._timer_active = False
             self._elapsed_timer.stop()
+            self._spinner_timer.stop()
+            # Ao terminar, volta o ícone estático (arquivo comprimido
+            # com sucesso ou erro — o spinner só faz sentido rodando).
+            self.info_icon.setText("")
+            self.info_icon.setStyleSheet("")
+            icon_glyph = "mdi6.check-circle-outline" if not self._had_failure else "mdi6.alert-circle-outline"
+            self.info_icon.setPixmap(qta.icon(icon_glyph, color="#9bf0bd").pixmap(22, 22))
+
+    def _tick_spinner(self) -> None:
+        frame = self._spinner_frames[self._spinner_index % len(self._spinner_frames)]
+        self._spinner_index += 1
+        self.info_icon.setText(frame)
 
     def closeEvent(self, event) -> None:
         if not self.btn_close.isEnabled():
