@@ -91,7 +91,7 @@ class RcloneUploadWorker(QThread):
                 return
 
             dest = f"{self.remote_name}:{self.remote_folder}/"
-            self.status_changed.emit(f"Enviando {self.local_path.name} via rclone...")
+            self.status_changed.emit(f"Enviando {self.local_path.name}...")
 
             for attempt in range(1, _MAX_RETRIES + 1):
                 if self._cancelled:

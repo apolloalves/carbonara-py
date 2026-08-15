@@ -172,24 +172,35 @@ class ClonezillaProgressDialog(QDialog):
         body_layout.addWidget(self.lbl_subtitle)
         body_layout.addSpacing(14)
 
-        # ── Card de status + elapsed/estimated ──────────────────────────
-        info_card = QFrame()
-        info_card.setObjectName("InfoCard")
-        info_layout = QHBoxLayout(info_card)
-        info_layout.setContentsMargins(18, 22, 18, 22)
-        info_layout.setSpacing(14)
+        # ── Card de status (esquerda) + Card de tempo (direita) ─────────
+        cards_row = QHBoxLayout()
+        cards_row.setSpacing(14)
+
+        status_card = QFrame()
+        status_card.setObjectName("InfoCard")
+        status_layout = QHBoxLayout(status_card)
+        status_layout.setContentsMargins(20, 32, 20, 32)
+        status_layout.setSpacing(14)
 
         self.info_icon = QLabel()
-        self.info_icon.setFixedSize(50, 50)
+        self.info_icon.setFixedSize(64, 64)
         self.info_icon.setAlignment(Qt.AlignCenter)
         self.info_icon.setPixmap(qta.icon(self._icon_glyph, color="#9bf0bd").pixmap(22, 22))
         self.info_icon.setObjectName("InfoIcon")
-        info_layout.addWidget(self.info_icon)
+        status_layout.addWidget(self.info_icon)
 
         self.lbl_status = QLabel("Aguardando início...")
         self.lbl_status.setObjectName("ProgressStatus")
-        info_layout.addWidget(self.lbl_status)
-        info_layout.addStretch(1)
+        status_layout.addWidget(self.lbl_status)
+        status_layout.addStretch(1)
+
+        cards_row.addWidget(status_card, 1)
+
+        time_card = QFrame()
+        time_card.setObjectName("InfoCard")
+        time_layout = QHBoxLayout(time_card)
+        time_layout.setContentsMargins(24, 32, 24, 32)
+        time_layout.setSpacing(14)
 
         elapsed_col = QVBoxLayout()
         elapsed_col.setSpacing(1)
@@ -198,7 +209,7 @@ class ClonezillaProgressDialog(QDialog):
         elapsed_value_row = QHBoxLayout()
         elapsed_value_row.setSpacing(6)
         elapsed_icon = QLabel()
-        elapsed_icon.setPixmap(qta.icon("mdi6.clock-outline", color="#9bf0bd").pixmap(15, 15))
+        elapsed_icon.setPixmap(qta.icon("mdi6.clock-outline", color="#9bf0bd").pixmap(20, 20))
         elapsed_icon.setStyleSheet("background: transparent;")
         self.lbl_elapsed_big = QLabel("00:00")
         self.lbl_elapsed_big.setObjectName("TimeValue")
@@ -206,12 +217,12 @@ class ClonezillaProgressDialog(QDialog):
         elapsed_value_row.addWidget(self.lbl_elapsed_big)
         elapsed_col.addWidget(elapsed_caption)
         elapsed_col.addLayout(elapsed_value_row)
-        info_layout.addLayout(elapsed_col)
+        time_layout.addLayout(elapsed_col)
 
         sep = QFrame()
         sep.setObjectName("TimeSeparator")
         sep.setFixedWidth(1)
-        info_layout.addWidget(sep)
+        time_layout.addWidget(sep)
 
         eta_col = QVBoxLayout()
         eta_col.setSpacing(1)
@@ -220,7 +231,7 @@ class ClonezillaProgressDialog(QDialog):
         eta_value_row = QHBoxLayout()
         eta_value_row.setSpacing(6)
         eta_icon = QLabel()
-        eta_icon.setPixmap(qta.icon("mdi6.timer-sand", color="#9bf0bd").pixmap(15, 15))
+        eta_icon.setPixmap(qta.icon("mdi6.timer-sand", color="#9bf0bd").pixmap(20, 20))
         eta_icon.setStyleSheet("background: transparent;")
         self.lbl_eta = QLabel("—")
         self.lbl_eta.setObjectName("TimeValue")
@@ -228,10 +239,12 @@ class ClonezillaProgressDialog(QDialog):
         eta_value_row.addWidget(self.lbl_eta)
         eta_col.addWidget(eta_caption)
         eta_col.addLayout(eta_value_row)
-        info_layout.addLayout(eta_col)
+        time_layout.addLayout(eta_col)
 
-        body_layout.addWidget(info_card)
-        body_layout.addSpacing(14)
+        cards_row.addWidget(time_card, 1)
+
+        body_layout.addLayout(cards_row)
+        body_layout.addSpacing(24)
 
         # ── Progresso geral ──────────────────────────────────────────────
         overall_row = QHBoxLayout()
@@ -243,7 +256,7 @@ class ClonezillaProgressDialog(QDialog):
         overall_row.addStretch(1)
         overall_row.addWidget(self.lbl_pct_big)
         body_layout.addLayout(overall_row)
-        body_layout.addSpacing(6)
+        body_layout.addSpacing(10)
 
         self.progress = QProgressBar()
         self.progress.setRange(0, 100)
@@ -253,12 +266,12 @@ class ClonezillaProgressDialog(QDialog):
         self.progress.setObjectName("BackupProgress")
         self.progress.valueChanged.connect(self._on_progress_value_changed)
         body_layout.addWidget(self.progress)
-        body_layout.addSpacing(6)
+        body_layout.addSpacing(10)
 
         self.lbl_progress_detail = QLabel("")
         self.lbl_progress_detail.setObjectName("ProgressDetail")
         body_layout.addWidget(self.lbl_progress_detail)
-        body_layout.addSpacing(14)
+        body_layout.addSpacing(24)
 
         # ── Cards de estatística (dados reais: contagem da árvore de
         # arquivos + bytes processados pelo pv) ─────────────────────────
@@ -389,12 +402,12 @@ class ClonezillaProgressDialog(QDialog):
 
             QFrame#InfoCard { background: rgba(255,255,255,4); border: 1px solid rgba(255,255,255,12); border-radius: 12px; }
             QLabel#InfoIcon { background: rgba(74, 222, 128, 30); border-radius: 11px; }
-            QLabel#ProgressStatus { color: #c8d4e0; font-family: "DejaVu Sans Mono"; font-size: 11px; }
-            QLabel#TimeCaption { color: #6b7a8d; font-family: "DejaVu Sans Mono"; font-size: 9px; }
-            QLabel#TimeValue { color: #9bf0bd; font-family: "DejaVu Sans Mono"; font-size: 16px; font-weight: 700; }
+            QLabel#ProgressStatus { color: #c8d4e0; font-family: "DejaVu Sans Mono"; font-size: 15px; }
+            QLabel#TimeCaption { color: #6b7a8d; font-family: "DejaVu Sans Mono"; font-size: 12px; }
+            QLabel#TimeValue { color: #9bf0bd; font-family: "DejaVu Sans Mono"; font-size: 26px; font-weight: 700; }
             QFrame#TimeSeparator { background: rgba(255,255,255,14); }
 
-            QLabel#SectionLabel { color: #c8d4e0; font-family: "DejaVu Sans Mono"; font-size: 10px; font-weight: 700; letter-spacing: 1px; }
+            QLabel#SectionLabel { color: #c8d4e0; font-family: "DejaVu Sans Mono"; font-size: 13px; font-weight: 700; letter-spacing: 1px; }
             QLabel#PctBig { color: #9bf0bd; font-family: "DejaVu Sans Mono"; font-size: 28px; font-weight: 700; }
             QLabel#ProgressDetail { color: #6b7a8d; font-family: "DejaVu Sans Mono"; font-size: 10px; }
 
@@ -410,17 +423,17 @@ class ClonezillaProgressDialog(QDialog):
             QLabel#StatIcon { background: rgba(35, 166, 255, 26); border-radius: 9px; }
             QLabel#StatLabel { color: #6b7a8d; font-family: "DejaVu Sans Mono"; font-size: 12px; }
             QLabel#StatValue { color: #ecf4ff; font-family: "DejaVu Sans Mono"; font-size: 24px; font-weight: 700; }
-            QLabel#ProgressCurrentFile { color: #9aa6b2; font-family: "DejaVu Sans Mono"; font-size: 10px; font-style: italic; }
+            QLabel#ProgressCurrentFile { color: #9aa6b2; font-family: "DejaVu Sans Mono"; font-size: 12px; font-style: italic; }
 
             QTreeWidget#TransferTree {
                 background: transparent;
                 border: none;
                 color: #c8d4e0;
                 font-family: "DejaVu Sans Mono";
-                font-size: 10px;
+                font-size: 12px;
                 outline: none;
             }
-            QTreeWidget#TransferTree::item { padding: 2px 0px; }
+            QTreeWidget#TransferTree::item { padding: 4px 0px; }
 
             QPlainTextEdit#BackupLog {
                 border: 1px solid rgba(255,255,255,16);
@@ -713,7 +726,7 @@ class ClonezillaProgressDialog(QDialog):
             self.info_icon.setPixmap(QPixmap())
             self.info_icon.setStyleSheet(
                 "QLabel#InfoIcon { background: rgba(74, 222, 128, 30); border-radius: 12px; "
-                "color: #9bf0bd; font-size: 28px; font-weight: bold; }"
+                "color: #9bf0bd; font-size: 38px; font-weight: bold; }"
             )
             self._spinner_timer.start()
         elif not running and self._timer_active:
