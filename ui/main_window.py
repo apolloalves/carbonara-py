@@ -1443,16 +1443,15 @@ class MenuPage(QWidget):
         self.mid_eggs.clicked.connect(lambda: self._go_to(9))
         hero_row.addWidget(self.mid_eggs, 10)
 
-        self.mid_doctor = MidCard(
-            "mdi6.stethoscope", "Doctor Arch", "System diagnostics",
-            badge_text="3 issues found", badge_color=ACCENT_RED,
+        self.mid_clonezilla = MidCard(
+            "mdi6.archive-outline", "Clonezilla", "Manage Clonezilla backups",
         )
-        self.mid_doctor.clicked.connect(lambda: self._go_to(7))
-        hero_row.addWidget(self.mid_doctor, 10)
+        self.mid_clonezilla.clicked.connect(lambda: self._go_to(5))
+        hero_row.addWidget(self.mid_clonezilla, 10)
 
         # Linha de cima também entra na navegação por teclado — antes só
         # dava pra clicar nela com o mouse, setas não alcançavam.
-        self.top_cards = [(self.hero_backups, 4), (self.mid_eggs, 9), (self.mid_doctor, 7)]
+        self.top_cards = [(self.hero_backups, 4), (self.mid_eggs, 9), (self.mid_clonezilla, 5)]
 
         outer.addLayout(hero_row)
 
