@@ -14,17 +14,14 @@ from PySide6.QtWidgets import (
 
 from core.operation_manager import OperationManager
 from core.clonezilla.manager import scan_clonezilla_backups, ClonezillaEntry
-from core.workers.gdrive_upload_worker import GDriveUploadWorker
+from core.workers.rclone_upload_worker import RcloneUploadWorker
 
-# Pasta de destino no Google Drive (via GVfs/GNOME Online Accounts) —
-# caminho fornecido pelo Apollo, apontando pra uma pasta específica já
-# existente no Drive dele.
-GDRIVE_TARGET_URI = (
-    "google-drive://apolloapolloalves@gmail.com/0ABEr922kpRI6Uk9PVA/"
-    "13CaRBCgO0gqZWhXubZBxI26iO9DDhqQv/1kN_omf6VfP9tBEr-Jzw6Gszot2WPFEPe/"
-    "1Lpa8mVwk0876bTyRirPOfPE-JUKrdCLy/1YPi4Dg5ACPfo7kDqKl200yhkARZe_flu/"
-    "1XArAXhMbLyhKMo3pXtS2O2F_gkgzhm6f"
-)
+# Upload pro Google Drive vai via rclone (remote "gdrive", configurado
+# com `rclone config` — root_folder_id já aponta pra pasta CLONEZILLA
+# real no Drive do Apollo, resolvida manualmente uma vez via
+# Crypta > RAID 0 > RAID_BK > CLONEZILLA, já que "CLONEZILLA" na raiz
+# do Drive é só um atalho que o gio/rclone não seguem sozinhos). O
+# caminho <ano>/<mês> é relativo a essa raiz — ver RcloneUploadWorker.
 
 TEXT = "#e4e7ec"
 MUTED = "#8b92a3"
@@ -107,9 +104,21 @@ class _StyledDialog(QDialog):
         card_layout.addSpacing(8)
 
         msg_lbl = QLabel(message)
-        msg_lbl.setFont(QFont(FONT_FAMILY, 10))
+        msg_font = QFont(FONT_FAMILY, 10)
+        msg_lbl.setFont(msg_font)
         msg_lbl.setStyleSheet(f"color: {MUTED};")
         msg_lbl.setWordWrap(True)
+        # QLabel com wordWrap às vezes calcula um sizeHint baixo demais
+        # antes da largura do layout se firmar, cortando/sobrepondo o
+        # texto no título. Calcula a altura real necessária pra largura
+        # conhecida do card e força isso explicitamente.
+        available_width = width - 28 - 28  # descontando as margens do card
+        from PySide6.QtCore import QRect
+        from PySide6.QtGui import QFontMetrics
+        text_rect = QFontMetrics(msg_font).boundingRect(
+            QRect(0, 0, available_width, 0), Qt.TextWordWrap, message,
+        )
+        msg_lbl.setFixedHeight(text_rect.height() + 8)
         card_layout.addWidget(msg_lbl)
 
         if detail:
@@ -168,7 +177,7 @@ class _StyledDialog(QDialog):
                     font-size: 11px;
                     font-weight: bold;
                 }}
-                QPushButton:hover {{ background: {ACCENT_BLUE_LIGHT}; }}
+                QPushButton:hover {{ background: rgba({_rgba(accent, 210)}); }}
             """)
             btn_confirm.clicked.connect(self._on_confirm)
             btn_row.addWidget(btn_confirm)
@@ -217,9 +226,13 @@ def _show_error(title: str, message: str, parent=None, detail: str = "") -> None
     dlg.exec()
 
 
-def _ask_confirm(parent, title: str, message: str, confirm_label: str = "Confirmar") -> bool:
+def _ask_confirm(
+    parent, title: str, message: str, confirm_label: str = "Confirmar", danger: bool = False,
+) -> bool:
+    accent = ACCENT_RED if danger else ACCENT_BLUE_LIGHT
+    glyph = "mdi6.trash-can-outline" if danger else "mdi6.help-circle-outline"
     dlg = _StyledDialog(
-        parent, title, message, "mdi6.help-circle-outline", ACCENT_BLUE_LIGHT,
+        parent, title, message, glyph, accent,
         confirm_mode=True, confirm_label=confirm_label,
     )
     if parent is not None:
@@ -703,6 +716,7 @@ class ClonezillaPage(QWidget):
             f"Excluir {what} de '{entry.name}'?\n\n{target_path}\n\n"
             f"Essa ação não pode ser desfeita.",
             confirm_label="Excluir",
+            danger=True,
         ):
             return
 
@@ -769,11 +783,21 @@ class ClonezillaPage(QWidget):
             )
             return
 
+        # entry.month_dir é algo como /mnt/MDSATA/CLONEZILLA/2026/AUGUST —
+        # usa o nome da pasta (mês) e da pasta pai (ano) como caminho
+        # relativo dentro do remote rclone "gdrive" (cujo root_folder_id
+        # já aponta pra pasta CLONEZILLA real no Drive), criando as
+        # pastas automaticamente se ainda não existirem lá.
+        month_name = entry.month_dir.name
+        year_name = entry.month_dir.parent.name
+        remote_folder = f"{year_name}/{month_name}"
+
         size_txt = f"\n\nTamanho: {_fmt_size(entry.archive_size_bytes)}" if entry.archive_size_bytes else ""
         if not _ask_confirm(
             self, "Enviar para o Google Drive",
             f"Enviar '{entry.archive_path.name}' para o Google Drive?{size_txt}\n\n"
-            f"Usa a conta já conectada em Online Accounts (GNOME).",
+            f"Destino: CLONEZILLA/{year_name}/{month_name}\n\n"
+            f"Envia via rclone (remote 'gdrive').",
             confirm_label="Enviar",
         ):
             return
@@ -796,15 +820,17 @@ class ClonezillaPage(QWidget):
         dialog.set_status(f"Preparando envio de {entry.archive_path.name}...")
         dialog.set_current_file(entry.archive_path.name)
         dialog.append_log(f"=== UPLOAD {entry.archive_path.name} ===")
+        dialog.append_log(f"Destino: CLONEZILLA/{year_name}/{month_name}")
         dialog.build_tree([entry.archive_path.name])
 
-        worker = GDriveUploadWorker(entry.archive_path, GDRIVE_TARGET_URI, parent=dialog)
+        worker = RcloneUploadWorker(entry.archive_path, remote_folder, parent=dialog)
         dialog.register_worker(worker)
 
         worker.progress_changed.connect(dialog.progress.setValue)
         worker.status_changed.connect(dialog.set_status)
         worker.log_line.connect(dialog.append_log)
         worker.detail_changed.connect(dialog.set_progress_detail)
+        worker.bytes_changed.connect(dialog.set_bytes_progress)
 
         def _on_done() -> None:
             dialog.mark_file_done(entry.archive_path.name)

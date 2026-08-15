@@ -42,8 +42,8 @@ class ClonezillaProgressDialog(QDialog):
         self._icon_glyph = icon_glyph
         self._body_title = body_title
         self.setModal(True)
-        self.setMinimumSize(980, 720)
-        self.resize(1040, 780)
+        self.setMinimumSize(1140, 840)
+        self.resize(1220, 900)
         self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground, False)
 
@@ -408,8 +408,8 @@ class ClonezillaProgressDialog(QDialog):
 
             QFrame#StatCard { background: rgba(255,255,255,4); border: 1px solid rgba(255,255,255,12); border-radius: 10px; }
             QLabel#StatIcon { background: rgba(35, 166, 255, 26); border-radius: 9px; }
-            QLabel#StatLabel { color: #6b7a8d; font-family: "DejaVu Sans Mono"; font-size: 10px; }
-            QLabel#StatValue { color: #ecf4ff; font-family: "DejaVu Sans Mono"; font-size: 19px; font-weight: 700; }
+            QLabel#StatLabel { color: #6b7a8d; font-family: "DejaVu Sans Mono"; font-size: 12px; }
+            QLabel#StatValue { color: #ecf4ff; font-family: "DejaVu Sans Mono"; font-size: 24px; font-weight: 700; }
             QLabel#ProgressCurrentFile { color: #9aa6b2; font-family: "DejaVu Sans Mono"; font-size: 10px; font-style: italic; }
 
             QTreeWidget#TransferTree {
@@ -601,6 +601,12 @@ class ClonezillaProgressDialog(QDialog):
         self.log_view.setTextCursor(cursor)
         sb = self.log_view.verticalScrollBar()
         sb.setValue(sb.maximum())
+        # setTextCursor acompanha a posição horizontal do cursor (fim da
+        # última linha inserida, que pode ser bem longa — ex: o comando
+        # $ rclone/tar completo) — isso deixa a view scrollada pra
+        # direita por padrão. Volta pro início horizontal explicitamente.
+        hb = self.log_view.horizontalScrollBar()
+        hb.setValue(0)
 
     def set_status(self, text: str) -> None:
         self.lbl_status.setText(text)
@@ -620,13 +626,13 @@ class ClonezillaProgressDialog(QDialog):
         card = QFrame()
         card.setObjectName("StatCard")
         layout = QHBoxLayout(card)
-        layout.setContentsMargins(14, 12, 14, 12)
-        layout.setSpacing(10)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
 
         icon_lbl = QLabel()
-        icon_lbl.setFixedSize(36, 36)
+        icon_lbl.setFixedSize(44, 44)
         icon_lbl.setAlignment(Qt.AlignCenter)
-        icon_lbl.setPixmap(qta.icon(glyph, color="#8fd4ff").pixmap(18, 18))
+        icon_lbl.setPixmap(qta.icon(glyph, color="#8fd4ff").pixmap(22, 22))
         icon_lbl.setObjectName("StatIcon")
         layout.addWidget(icon_lbl)
 

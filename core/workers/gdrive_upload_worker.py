@@ -33,6 +33,10 @@ def _to_bytes(value: str, unit: str) -> float:
     return float(value) * _UNIT_MULTIPLIER[unit.upper()]
 
 
+_MAX_RETRIES = 3
+_RETRY_DELAY_SECONDS = 8
+
+
 class GDriveUploadWorker(QThread):
     """Envia um arquivo pro Google Drive via GVfs (a mesma conexão que o
     GNOME Online Accounts já mantém — sem precisar de OAuth/API própria).
@@ -74,56 +78,46 @@ class GDriveUploadWorker(QThread):
                 self.failed.emit(f"Arquivo não encontrado: {self.local_path}")
                 return
 
+            self._ensure_target_folder()
+
             dest_uri = f"{self.target_uri}/{self.local_path.name}"
-
             self.status_changed.emit(f"Enviando {self.local_path.name} para o Google Drive...")
-            self.log_line.emit(f"$ gio copy --progress {self.local_path} {dest_uri}")
 
-            self._proc = subprocess.Popen(
-                ["gio", "copy", "--progress", str(self.local_path), dest_uri],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
+            for attempt in range(1, _MAX_RETRIES + 1):
+                if self._cancelled:
+                    self.failed.emit("Envio cancelado pelo usuário.")
+                    return
+
+                rc = self._attempt_upload(dest_uri, attempt)
+
+                if self._cancelled:
+                    self.failed.emit("Envio cancelado pelo usuário.")
+                    return
+
+                if rc == 0:
+                    self.log_line.emit(f"✓ Enviado para: {dest_uri}")
+                    self.finished_ok.emit()
+                    return
+
+                if attempt < _MAX_RETRIES:
+                    # Upload resumível — tentar de novo geralmente continua
+                    # de onde parou em vez de reiniciar do zero, então vale
+                    # a pena insistir em falhas transitórias (queda de rede,
+                    # erro passageiro do servidor) antes de desistir.
+                    self.log_line.emit(
+                        f"AVISO: tentativa {attempt}/{_MAX_RETRIES} falhou (código {rc}) — "
+                        f"tentando de novo em {_RETRY_DELAY_SECONDS}s..."
+                    )
+                    self.status_changed.emit(
+                        f"Falha temporária — tentando de novo ({attempt}/{_MAX_RETRIES})..."
+                    )
+                    self.sleep(_RETRY_DELAY_SECONDS)
+
+            self.failed.emit(
+                f"gio copy falhou após {_MAX_RETRIES} tentativas (último código: {rc}). "
+                f"Confira sua conexão e se a conta Google ainda está conectada em "
+                f"Configurações → Online Accounts."
             )
-
-            last_emit = -1
-            assert self._proc.stdout is not None
-            for raw_line in self._proc.stdout:
-                line = _ANSI_ESCAPE_RE.sub("", raw_line).strip()
-                if not line:
-                    continue
-                m = _GIO_PROGRESS_RE.search(line)
-                if m:
-                    done_val, done_unit, total_val, total_unit, rate_val, rate_unit = m.groups()
-                    done_bytes = _to_bytes(done_val, done_unit)
-                    gio_total_bytes = _to_bytes(total_val, total_unit)
-                    pct = min(100, int(done_bytes / gio_total_bytes * 100)) if gio_total_bytes else 0
-                    if pct != last_emit:
-                        self.progress_changed.emit(pct)
-                        last_emit = pct
-                        rate_txt = f"   ·   {rate_val} {rate_unit}/s" if rate_val else ""
-                        self.detail_changed.emit(
-                            f"{done_val} {done_unit} de {total_val} {total_unit}{rate_txt}"
-                        )
-                else:
-                    self.log_line.emit(line)
-
-            rc = self._proc.wait()
-
-            if self._cancelled:
-                self.failed.emit("Envio cancelado pelo usuário.")
-                return
-
-            if rc != 0:
-                self.failed.emit(
-                    f"gio copy terminou com código {rc}. Confira se a conta Google "
-                    f"ainda está conectada em Configurações → Online Accounts."
-                )
-                return
-
-            self.log_line.emit(f"✓ Enviado para: {dest_uri}")
-            self.finished_ok.emit()
 
         except FileNotFoundError:
             self.failed.emit(
@@ -131,3 +125,59 @@ class GDriveUploadWorker(QThread):
             )
         except Exception as exc:
             self.failed.emit(str(exc))
+
+    def _ensure_target_folder(self) -> None:
+        """Cria a pasta de destino no Drive (e as pastas pai que
+        faltarem) se ainda não existir — `gio mkdir -p` é idempotente,
+        não dá erro se a pasta já existe."""
+        self.status_changed.emit("Verificando pasta de destino no Drive...")
+        self.log_line.emit(f"$ gio mkdir -p {self.target_uri}")
+        result = subprocess.run(
+            ["gio", "mkdir", "-p", self.target_uri],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0 and result.stderr:
+            # Não é fatal por si só — se a pasta já existir por outro
+            # caminho (ex: criada manualmente antes), o gio copy adiante
+            # ainda funciona normalmente; só loga como aviso.
+            self.log_line.emit(f"AVISO: {result.stderr.strip()}")
+
+    def _attempt_upload(self, dest_uri: str, attempt: int) -> int:
+        """Roda uma tentativa de `gio copy --progress`, atualizando
+        progresso/log conforme a saída chega. Retorna o código de saída."""
+        cmd_label = f"$ gio copy --progress {self.local_path} {dest_uri}"
+        if attempt > 1:
+            cmd_label += f"   (tentativa {attempt}/{_MAX_RETRIES})"
+        self.log_line.emit(cmd_label)
+
+        self._proc = subprocess.Popen(
+            ["gio", "copy", "--progress", str(self.local_path), dest_uri],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+
+        last_emit = -1
+        assert self._proc.stdout is not None
+        for raw_line in self._proc.stdout:
+            line = _ANSI_ESCAPE_RE.sub("", raw_line).strip()
+            if not line:
+                continue
+            m = _GIO_PROGRESS_RE.search(line)
+            if m:
+                done_val, done_unit, total_val, total_unit, rate_val, rate_unit = m.groups()
+                done_bytes = _to_bytes(done_val, done_unit)
+                gio_total_bytes = _to_bytes(total_val, total_unit)
+                pct = min(100, int(done_bytes / gio_total_bytes * 100)) if gio_total_bytes else 0
+                if pct != last_emit:
+                    self.progress_changed.emit(pct)
+                    last_emit = pct
+                    rate_txt = f"   ·   {rate_val} {rate_unit}/s" if rate_val else ""
+                    self.detail_changed.emit(
+                        f"{done_val} {done_unit} de {total_val} {total_unit}{rate_txt}"
+                    )
+            else:
+                self.log_line.emit(line)
+
+        return self._proc.wait()
