@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import os
+import json
 import shutil
 import subprocess
+from pathlib import Path
 from datetime import datetime
 
 import qtawesome as qta
-from PySide6.QtCore import Qt, QTimer, Signal, QSize
-from PySide6.QtGui import QFont, QFontMetrics, QPainter, QColor, QKeyEvent
+from PySide6.QtCore import Qt, QTimer, Signal, QSize, QUrl
+from PySide6.QtGui import QFont, QFontMetrics, QPainter, QColor, QKeyEvent, QDesktopServices
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QFrame,
     QPushButton, QScrollArea, QDialog, QPlainTextEdit, QGraphicsDropShadowEffect,
@@ -65,13 +67,141 @@ def _fmt_date(path) -> str:
 
 
 def _disk_for(month_dir) -> str:
-    """Sobe de <disco>/CLONEZILLA/<ano>/<mês> até o ponto de montagem do
-    disco (ex: /mnt/MDSATA) — mesmo papel do entry.path.parent do Eggs,
-    mas calculado aqui porque ClonezillaEntry não guarda esse campo."""
+    """Disco + ponto de montagem que contém month_dir — mesmo papel do
+    entry.path.parent do Eggs, mas calculado aqui porque ClonezillaEntry
+    não guarda esse campo. Usa os.path.ismount() subindo a árvore até
+    achar a fronteira de fato do filesystem (em vez de assumir uma
+    profundidade fixa de pastas — isso só coincidia com /mnt/MDSATA por
+    causa da estrutura de um usuário específico), depois consulta
+    /proc/mounts pra achar o dispositivo (/dev/sdX) montado ali."""
     try:
-        return str(month_dir.parents[2])
-    except IndexError:
-        return str(month_dir)
+        p = month_dir.resolve()
+    except OSError:
+        p = month_dir
+    while not os.path.ismount(p) and p != p.parent:
+        p = p.parent
+    mount_point = str(p)
+
+    device = ""
+    try:
+        with open("/proc/mounts", "r", encoding="utf-8") as fh:
+            for line in fh:
+                parts = line.split()
+                if len(parts) >= 2 and parts[1] == mount_point:
+                    device = parts[0]
+                    break
+    except OSError:
+        pass
+
+    return f"{device} · {mount_point}" if device else mount_point
+
+
+# Os arquivos do Clonezilla (raw + .tar.zst) são root-owned — só o
+# pkexec/carbonara-helper escreve nessa árvore (ver Excluir). Um sidecar
+# ".uploaded" ao lado do arquivo falharia silenciosamente por permissão.
+# Por isso a marca de "já enviado" fica num JSON simples em ~/.config,
+# que o processo normal do Carbonara sempre pode escrever. Guarda também
+# quando foi enviado, pra que pasta, e o link do Drive (pro botão
+# "Ver no Google Drive" do diálogo de detalhes).
+_UPLOADED_STATE_PATH = Path.home() / ".config" / "carbonara" / "clonezilla_uploads.json"
+
+
+def _load_uploaded_map() -> dict:
+    try:
+        with open(_UPLOADED_STATE_PATH, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    if isinstance(data, list):
+        # Formato antigo (round 26): só uma lista de caminhos, sem metadados.
+        return {path: {} for path in data}
+    if not isinstance(data, dict):
+        return {}
+    # Migração: links salvos antes desta versão apontavam pro ARQUIVO,
+    # não pra pasta do mês. Descarta esses links antigos (mantém
+    # uploaded_at/remote_folder) pra forçar buscar o link novo (de
+    # pasta) na próxima vez que os detalhes forem abertos.
+    for entry_info in data.values():
+        if isinstance(entry_info, dict) and entry_info.get("link_scope") != "folder":
+            entry_info["link"] = ""
+    return data
+
+
+def _is_uploaded(archive_path) -> bool:
+    if archive_path is None:
+        return False
+    return str(archive_path) in _load_uploaded_map()
+
+
+def _upload_info(archive_path) -> dict | None:
+    if archive_path is None:
+        return None
+    return _load_uploaded_map().get(str(archive_path))
+
+
+def _mark_uploaded(
+    archive_path, remote_folder: str = "", link: str = "", uploaded_at: str | None = None,
+) -> None:
+    if archive_path is None:
+        return
+    try:
+        uploaded = _load_uploaded_map()
+        uploaded[str(archive_path)] = {
+            "uploaded_at": uploaded_at or datetime.now().strftime("%d/%m/%Y %H:%M"),
+            "remote_folder": remote_folder,
+            "link": link,
+            "link_scope": "folder",
+        }
+        _UPLOADED_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(_UPLOADED_STATE_PATH, "w", encoding="utf-8") as fh:
+            json.dump(uploaded, fh, indent=2)
+    except OSError:
+        pass
+
+
+def _fetch_drive_link(remote_folder: str, filename: str = "") -> str:
+    """Pede pro rclone o link compartilhável de um item no Drive.
+    Sem `filename`, aponta pra PASTA do mês (`remote_folder`) em vez do
+    arquivo — é o que abrimos, já que um .tar.zst não tem preview no
+    Drive mesmo, mas a pasta mostra tudo que já foi enviado naquele mês.
+    Chamada síncrona rápida (só metadado, não transfere dados)."""
+    target = f"gdrive:{remote_folder}/{filename}" if filename else f"gdrive:{remote_folder}"
+    try:
+        result = subprocess.run(
+            ["rclone", "link", target],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return ""
+
+
+def _fetch_remote_metadata(remote_folder: str, filename: str) -> dict:
+    """Backfill pra envios antigos (feitos antes do rastreamento de
+    metadados existir): consulta o Drive pra pegar a data real de
+    modificação do arquivo (via `rclone lsjson`) e o link da PASTA do
+    mês (`rclone link`, sem filename) — sem re-transferir nada, só
+    metadado."""
+    info = {"link": "", "uploaded_at": ""}
+    try:
+        result = subprocess.run(
+            ["rclone", "lsjson", f"gdrive:{remote_folder}"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode == 0:
+            for item in json.loads(result.stdout):
+                if item.get("Name") == filename:
+                    mod_time = item.get("ModTime", "")
+                    if mod_time:
+                        dt = datetime.fromisoformat(mod_time.replace("Z", "+00:00"))
+                        info["uploaded_at"] = dt.astimezone().strftime("%d/%m/%Y %H:%M")
+                    break
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        pass
+    info["link"] = _fetch_drive_link(remote_folder)
+    return info
 
 
 class _StyledDialog(QDialog):
@@ -241,6 +371,141 @@ class _StyledDialog(QDialog):
         super().keyPressEvent(event)
 
 
+class _UploadDetailsDialog(QDialog):
+    """Detalhes de um backup já enviado ao Google Drive — mesmo chrome
+    visual do _StyledDialog (frameless, overlay escuro, card
+    centralizado), mas com linhas de info + botão 'Ver no Google Drive'
+    em vez de mensagem única."""
+
+    def __init__(self, parent, entry: ClonezillaEntry, info: dict):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self.setModal(True)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setAlignment(Qt.AlignCenter)
+
+        self.card = QFrame(self)
+        self.card.setObjectName("StyledDialogCard")
+        self.card.setFixedWidth(460)
+        self.card.setStyleSheet(f"""
+            QFrame#StyledDialogCard {{
+                background: #14151c;
+                border: 1px solid rgba({_rgba(ACCENT_GREEN, 60)});
+                border-radius: 18px;
+            }}
+            QLabel {{ background: transparent; border: none; }}
+        """)
+
+        card_layout = QVBoxLayout(self.card)
+        card_layout.setContentsMargins(28, 26, 28, 26)
+        card_layout.setSpacing(0)
+
+        icon_badge = QLabel()
+        icon_badge.setFixedSize(44, 44)
+        icon_badge.setAlignment(Qt.AlignCenter)
+        icon_badge.setStyleSheet(f"background: rgba({_rgba(ACCENT_GREEN, 18)}); border-radius: 13px;")
+        icon_badge.setPixmap(qta.icon("mdi6.cloud-check-outline", color=ACCENT_GREEN).pixmap(22, 22))
+        card_layout.addWidget(icon_badge)
+        card_layout.addSpacing(18)
+
+        title_lbl = QLabel("Backup no Google Drive")
+        title_lbl.setFont(QFont(FONT_FAMILY, 15, QFont.Bold))
+        title_lbl.setStyleSheet(f"color: {TEXT};")
+        card_layout.addWidget(title_lbl)
+        card_layout.addSpacing(4)
+
+        name_lbl = QLabel(entry.name)
+        name_lbl.setFont(QFont(FONT_FAMILY, 9))
+        name_lbl.setStyleSheet(f"color: {MUTED};")
+        name_lbl.setWordWrap(True)
+        card_layout.addWidget(name_lbl)
+        card_layout.addSpacing(18)
+
+        rows = QGridLayout()
+        rows.setHorizontalSpacing(18)
+        rows.setVerticalSpacing(10)
+
+        def _add_row(row: int, label: str, value: str) -> None:
+            lbl = QLabel(label)
+            lbl.setFont(QFont(FONT_FAMILY, 9, QFont.Bold))
+            lbl.setStyleSheet(f"color: {FAINT};")
+            rows.addWidget(lbl, row, 0)
+
+            val = QLabel(value or "—")
+            val.setFont(QFont(FONT_FAMILY, 9))
+            val.setStyleSheet(f"color: {TEXT};")
+            val.setWordWrap(True)
+            rows.addWidget(val, row, 1)
+
+        _add_row(0, "ENVIADO EM", info.get("uploaded_at", ""))
+        _add_row(1, "TAMANHO", _fmt_size(entry.archive_size_bytes))
+        _add_row(2, "PASTA NO DRIVE", f"CLONEZILLA/{info.get('remote_folder', '—')}")
+        card_layout.addLayout(rows)
+        card_layout.addSpacing(22)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(12)
+
+        btn_close = QPushButton("Fechar")
+        btn_close.setFixedHeight(40)
+        btn_close.setStyleSheet(f"""
+            QPushButton {{
+                background: rgba(255,255,255,8);
+                border: 1px solid rgba(255,255,255,14);
+                border-radius: 10px;
+                color: {TEXT};
+                font-family: "{FONT_FAMILY}";
+                font-size: 11px;
+                font-weight: bold;
+                padding: 0 14px;
+            }}
+            QPushButton:hover {{ background: rgba(255,255,255,14); }}
+        """)
+        btn_close.clicked.connect(self.reject)
+        btn_row.addWidget(btn_close, 1)
+
+        link = info.get("link", "")
+        btn_drive = QPushButton("Abrir no Drive")
+        btn_drive.setFixedHeight(40)
+        btn_drive.setEnabled(bool(link))
+        btn_drive.setToolTip(link if link else "Link do Drive não disponível para este envio")
+        btn_drive.setStyleSheet(f"""
+            QPushButton {{
+                background: {ACCENT_GREEN};
+                border: none;
+                border-radius: 10px;
+                color: #0a0b0f;
+                font-family: "{FONT_FAMILY}";
+                font-size: 11px;
+                font-weight: bold;
+                padding: 0 14px;
+            }}
+            QPushButton:hover {{ background: rgba({_rgba(ACCENT_GREEN, 210)}); }}
+            QPushButton:disabled {{ background: rgba({_rgba(ACCENT_GREEN, 40)}); color: {FAINT}; }}
+        """)
+        if link:
+            btn_drive.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(link)))
+        btn_row.addWidget(btn_drive, 1)
+
+        card_layout.addLayout(btn_row)
+        outer.addWidget(self.card)
+        outer.setAlignment(self.card, Qt.AlignCenter)
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 150))
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.key() == Qt.Key_Escape:
+            self.reject()
+            return
+        super().keyPressEvent(event)
+
+
 def _show_error(title: str, message: str, parent=None, detail: str = "") -> None:
     dlg = _StyledDialog(parent, title, message, "mdi6.alert-circle-outline", ACCENT_RED, detail=detail)
     if parent is not None:
@@ -291,21 +556,10 @@ class _SectionCard(QFrame):
             title.setStyleSheet(f"color: {accent_color};")
             labels.addWidget(title)
         elif right_text:
-            eyebrow_row = QHBoxLayout()
-            eyebrow_row.setContentsMargins(0, 0, 0, 0)
-            eyebrow_row.setSpacing(6)
-
-            eyebrow_icon = QLabel()
-            eyebrow_icon.setFixedSize(14, 14)
-            eyebrow_icon.setPixmap(qta.icon("mdi6.backup-restore", color=FAINT).pixmap(13, 13))
-            eyebrow_row.addWidget(eyebrow_icon)
-
             eyebrow_lbl = QLabel("BACKUPS COMPRIMIDOS")
             eyebrow_lbl.setFont(QFont(FONT_FAMILY, 9, QFont.Bold))
             eyebrow_lbl.setStyleSheet(f"color: {FAINT}; letter-spacing: 1px;")
-            eyebrow_row.addWidget(eyebrow_lbl)
-
-            labels.addLayout(eyebrow_row)
+            labels.addWidget(eyebrow_lbl)
 
         if not right_text:
             path = QLabel(path_text)
@@ -397,6 +651,10 @@ class _EntryCard(QFrame):
                     background: rgba({_rgba(color, 32)});
                     border: 1px solid rgba({_rgba(color, 190)});
                 }}
+                QPushButton:disabled {{
+                    background: rgba({_rgba(color, 10)});
+                    border: 1px solid rgba({_rgba(color, 50)});
+                }}
                 QPushButton:focus {{
                     outline: none;
                 }}
@@ -417,7 +675,7 @@ class _EntryCard(QFrame):
         icon_lbl = QLabel()
         icon_lbl.setFixedSize(44, 44)
         icon_lbl.setAlignment(Qt.AlignCenter)
-        icon_lbl.setPixmap(qta.icon("mdi6.backup-restore", color=ACCENT_AMBER).pixmap(26, 26))
+        icon_lbl.setPixmap(qta.icon("mdi6.content-save-outline", color=ACCENT_AMBER).pixmap(26, 26))
         icon_lbl.setStyleSheet(f"""
             QLabel {{
                 background: rgba({_rgba(ACCENT_AMBER, 24)});
@@ -440,11 +698,27 @@ class _EntryCard(QFrame):
             self.btn_compress.clicked.connect(lambda: self.compress_requested.emit(entry))
             name_row.addWidget(self.btn_compress)
         else:
-            self.btn_upload = _icon_button(
-                "mdi6.cloud-upload-outline", ACCENT_BLUE_LIGHT, "Enviar para Google Drive",
-            )
-            self.btn_upload.clicked.connect(lambda: self.upload_requested.emit(entry))
-            name_row.addWidget(self.btn_upload)
+            already_uploaded = _is_uploaded(entry.archive_path)
+            if already_uploaded:
+                self.btn_upload = _icon_button(
+                    "mdi6.cloud-check-outline", ACCENT_GREEN, "Já enviado para o Google Drive",
+                )
+                self.btn_upload.setEnabled(False)
+                name_row.addWidget(self.btn_upload)
+
+                self.btn_view = _icon_button(
+                    "mdi6.eye-outline", ACCENT_GREEN, "Ver detalhes do envio",
+                )
+                self.btn_view.clicked.connect(
+                    lambda: self._show_upload_details(entry),
+                )
+                name_row.addWidget(self.btn_view)
+            else:
+                self.btn_upload = _icon_button(
+                    "mdi6.cloud-upload-outline", ACCENT_BLUE_LIGHT, "Enviar para Google Drive",
+                )
+                self.btn_upload.clicked.connect(lambda: self.upload_requested.emit(entry))
+                name_row.addWidget(self.btn_upload)
 
             self.btn_delete = _icon_button(
                 "mdi6.trash-can-outline", ACCENT_RED, "Excluir",
@@ -478,6 +752,32 @@ class _EntryCard(QFrame):
         meta_row.addWidget(meta_lbl)
         meta_row.setAlignment(meta_lbl, Qt.AlignVCenter)
         root.addLayout(meta_row)
+
+    def _show_upload_details(self, entry: ClonezillaEntry) -> None:
+        info = _upload_info(entry.archive_path) or {}
+        if not info.get("link") or not info.get("uploaded_at"):
+            # Envio antigo, feito antes do rastreamento de metadados —
+            # busca no Drive uma vez (sem re-transferir o arquivo) e
+            # salva pra próxima abertura não precisar consultar de novo.
+            month_name = entry.month_dir.name
+            year_name = entry.month_dir.parent.name
+            remote_folder = info.get("remote_folder") or f"{year_name}/{month_name}"
+            fetched = _fetch_remote_metadata(remote_folder, entry.archive_path.name)
+            if fetched.get("link") or fetched.get("uploaded_at"):
+                info = {
+                    "uploaded_at": info.get("uploaded_at") or fetched.get("uploaded_at", ""),
+                    "remote_folder": remote_folder,
+                    "link": info.get("link") or fetched.get("link", ""),
+                }
+                _mark_uploaded(
+                    entry.archive_path,
+                    remote_folder=remote_folder,
+                    link=info["link"],
+                    uploaded_at=info["uploaded_at"] or None,
+                )
+        dlg = _UploadDetailsDialog(self, entry, info)
+        dlg.setGeometry(self.window().geometry())
+        dlg.exec()
 
 
 class ClonezillaPage(QWidget):
@@ -666,11 +966,16 @@ class ClonezillaPage(QWidget):
         if compressed:
             total_bytes = sum(e.archive_size_bytes or 0 for e in compressed)
             count_txt = "1 arquivo" if len(compressed) == 1 else f"{len(compressed)} arquivos"
+            uploaded_count = sum(1 for e in compressed if _is_uploaded(e.archive_path))
+            uploaded_txt = (
+                "1 no Google Drive" if uploaded_count == 1
+                else f"{uploaded_count} no Google Drive"
+            )
             section = _SectionCard(
                 "",
                 "",
                 ACCENT_GREEN,
-                right_text=f"{count_txt}   ·   {_fmt_size(total_bytes)} total",
+                right_text=f"{count_txt}   ·   {_fmt_size(total_bytes)} total   ·   {uploaded_txt}",
             )
             for entry in compressed:
                 card = _EntryCard(entry, pending=False)
@@ -938,6 +1243,14 @@ class ClonezillaPage(QWidget):
             dialog.progress.setValue(100)
             dialog.set_running(False)
             OperationManager.finish()
+            dialog.append_log("Obtendo link da pasta no Drive...")
+            link = _fetch_drive_link(remote_folder)
+            if link:
+                dialog.append_log(f"Link: {link}")
+            else:
+                dialog.append_log("Não foi possível obter o link (rclone link falhou).")
+            _mark_uploaded(entry.archive_path, remote_folder=remote_folder, link=link)
+            self.refresh_list()
 
         def _on_failed(msg: str) -> None:
             dialog.append_log(f"ERRO: {msg}")
