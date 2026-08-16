@@ -8,7 +8,7 @@ import qtawesome as qta
 from PySide6.QtCore import Qt, QTimer, Signal, QSize
 from PySide6.QtGui import QFont, QPainter, QColor, QKeyEvent
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QFrame,
     QPushButton, QScrollArea, QDialog, QPlainTextEdit,
 )
 
@@ -277,9 +277,10 @@ class _SectionCard(QFrame):
         divider.setFixedHeight(2)
         divider.setStyleSheet(f"background: rgba({_rgba(accent_color, 50)}); border: none;")
 
-        self.body = QVBoxLayout()
-        self.body.setSpacing(10)
+        self.body = QGridLayout()
+        self.body.setSpacing(12)
         self.body.setContentsMargins(0, 0, 0, 0)
+        self._card_count = 0
 
         root.addLayout(head)
         root.addWidget(divider)
@@ -287,7 +288,9 @@ class _SectionCard(QFrame):
         root.addLayout(self.body)
 
     def add_card(self, widget) -> None:
-        self.body.addWidget(widget)
+        row, col = divmod(self._card_count, 2)
+        self.body.addWidget(widget, row, col)
+        self._card_count += 1
 
 
 class _EntryCard(QFrame):
@@ -306,51 +309,67 @@ class _EntryCard(QFrame):
             }
         """)
 
-        root = QHBoxLayout(self)
+        root = QVBoxLayout(self)
         root.setContentsMargins(16, 14, 16, 14)
-        root.setSpacing(14)
+        root.setSpacing(0)
 
-        icon_lbl = QLabel()
-        icon_lbl.setFixedSize(40, 40)
-        icon_lbl.setAlignment(Qt.AlignCenter)
+        top_row = QHBoxLayout()
+        top_row.setSpacing(8)
+
         icon_color = ACCENT_AMBER if pending else ACCENT_GREEN
-        icon_lbl.setPixmap(qta.icon("mdi6.disc", color=icon_color).pixmap(20, 20))
+        icon_lbl = QLabel()
+        icon_lbl.setFixedSize(36, 36)
+        icon_lbl.setAlignment(Qt.AlignCenter)
+        icon_lbl.setPixmap(qta.icon("mdi6.disc", color=icon_color).pixmap(18, 18))
         icon_lbl.setStyleSheet(f"""
             QLabel {{
                 background: rgba({_rgba(icon_color, 24)});
                 border-radius: 9px;
             }}
         """)
-        root.addWidget(icon_lbl)
+        top_row.addWidget(icon_lbl)
+        top_row.addStretch(1)
 
-        info_col = QVBoxLayout()
-        info_col.setContentsMargins(0, 0, 0, 0)
-        info_col.setSpacing(3)
+        badge_text = "PENDENTE" if pending else "COMPRIMIDO"
+        badge = QLabel(f"  {badge_text}  ")
+        badge.setFont(QFont(FONT_FAMILY, 8, QFont.Bold))
+        badge.setStyleSheet(f"""
+            QLabel {{
+                background: rgba({_rgba(icon_color, 26)});
+                color: {icon_color};
+                border-radius: 8px;
+                padding: 4px 2px;
+                letter-spacing: 1px;
+            }}
+        """)
+        top_row.addWidget(badge)
+        root.addLayout(top_row)
+        root.addSpacing(10)
 
         name_lbl = QLabel(entry.name)
         name_lbl.setFont(QFont(FONT_FAMILY, 11, QFont.Bold))
         name_lbl.setStyleSheet(f"color: {TEXT};")
-        info_col.addWidget(name_lbl)
+        name_lbl.setWordWrap(True)
+        root.addWidget(name_lbl)
+        root.addSpacing(3)
 
         if pending:
-            meta_text = f"Pasta original: {_fmt_size(entry.raw_size_bytes)}   ·   {entry.month_dir}"
+            meta_text = f"{_fmt_size(entry.raw_size_bytes)}   ·   {entry.month_dir.name}"
         else:
-            archive_name = entry.archive_path.name if entry.archive_path else "—"
-            meta_text = (
-                f"{archive_name}   ·   {_fmt_size(entry.archive_size_bytes)}   ·   "
-                f"{entry.month_dir}"
-            )
+            meta_text = f"{_fmt_size(entry.archive_size_bytes)}   ·   {entry.month_dir.name}"
         meta_lbl = QLabel(meta_text)
         meta_lbl.setFont(QFont(FONT_FAMILY, 9))
         meta_lbl.setStyleSheet(f"color: {MUTED};")
-        info_col.addWidget(meta_lbl)
+        root.addWidget(meta_lbl)
+        root.addSpacing(12)
 
-        root.addLayout(info_col, 1)
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
 
         if pending:
             self.btn_compress = QPushButton("Comprimir")
             self.btn_compress.setCursor(Qt.PointingHandCursor)
-            self.btn_compress.setFixedHeight(36)
+            self.btn_compress.setFixedHeight(34)
             self.btn_compress.setStyleSheet(f"""
                 QPushButton {{
                     background: rgba({_rgba(ACCENT_BLUE, 30)});
@@ -360,58 +379,55 @@ class _EntryCard(QFrame):
                     font-family: "{FONT_FAMILY}";
                     font-size: 10px;
                     font-weight: bold;
-                    padding: 0 16px;
                 }}
                 QPushButton:hover {{
                     background: rgba({_rgba(ACCENT_BLUE, 50)});
                 }}
             """)
             self.btn_compress.clicked.connect(lambda: self.compress_requested.emit(entry))
-            root.addWidget(self.btn_compress)
+            btn_row.addWidget(self.btn_compress, 1)
         else:
-            badge = QLabel("  COMPRIMIDO  ")
-            badge.setFont(QFont(FONT_FAMILY, 8, QFont.Bold))
-            badge.setStyleSheet(f"""
-                QLabel {{
-                    background: rgba({_rgba(ACCENT_GREEN, 26)});
-                    color: {ACCENT_GREEN};
+            self.btn_upload = QPushButton("Enviar")
+            self.btn_upload.setCursor(Qt.PointingHandCursor)
+            self.btn_upload.setFixedHeight(34)
+            self.btn_upload.setStyleSheet(f"""
+                QPushButton {{
+                    background: rgba({_rgba(ACCENT_BLUE_LIGHT, 22)});
+                    border: 1px solid rgba({_rgba(ACCENT_BLUE_LIGHT, 90)});
                     border-radius: 8px;
-                    padding: 4px 2px;
-                    letter-spacing: 1px;
+                    color: {ACCENT_BLUE_LIGHT};
+                    font-family: "{FONT_FAMILY}";
+                    font-size: 10px;
+                    font-weight: bold;
+                }}
+                QPushButton:hover {{
+                    background: rgba({_rgba(ACCENT_BLUE_LIGHT, 40)});
                 }}
             """)
-            root.addWidget(badge)
-
-            self.btn_upload = self._make_icon_button(
-                "mdi6.cloud-upload-outline", ACCENT_BLUE_LIGHT, "Enviar para o Google Drive",
-            )
             self.btn_upload.clicked.connect(lambda: self.upload_requested.emit(entry))
-            root.addWidget(self.btn_upload)
+            btn_row.addWidget(self.btn_upload, 1)
 
-        self.btn_delete = self._make_icon_button(
-            "mdi6.trash-can-outline", ACCENT_RED, "Excluir",
-        )
-        self.btn_delete.clicked.connect(lambda: self.delete_requested.emit(entry, pending))
-        root.addWidget(self.btn_delete)
+            self.btn_delete = QPushButton("Excluir")
+            self.btn_delete.setCursor(Qt.PointingHandCursor)
+            self.btn_delete.setFixedHeight(34)
+            self.btn_delete.setStyleSheet(f"""
+                QPushButton {{
+                    background: rgba({_rgba(ACCENT_RED, 18)});
+                    border: 1px solid rgba({_rgba(ACCENT_RED, 90)});
+                    border-radius: 8px;
+                    color: {ACCENT_RED};
+                    font-family: "{FONT_FAMILY}";
+                    font-size: 10px;
+                    font-weight: bold;
+                }}
+                QPushButton:hover {{
+                    background: rgba({_rgba(ACCENT_RED, 34)});
+                }}
+            """)
+            self.btn_delete.clicked.connect(lambda: self.delete_requested.emit(entry, pending))
+            btn_row.addWidget(self.btn_delete, 1)
 
-    def _make_icon_button(self, glyph: str, color: str, tooltip: str) -> QPushButton:
-        btn = QPushButton()
-        btn.setIcon(qta.icon(glyph, color=color))
-        btn.setIconSize(QSize(18, 18))
-        btn.setToolTip(tooltip)
-        btn.setCursor(Qt.PointingHandCursor)
-        btn.setFixedSize(36, 36)
-        btn.setStyleSheet(f"""
-            QPushButton {{
-                background: rgba(255, 255, 255, 6);
-                border: 1px solid rgba({_rgba(color, 60)});
-                border-radius: 8px;
-            }}
-            QPushButton:hover {{
-                background: rgba({_rgba(color, 30)});
-            }}
-        """)
-        return btn
+        root.addLayout(btn_row)
 
 
 class ClonezillaPage(QWidget):

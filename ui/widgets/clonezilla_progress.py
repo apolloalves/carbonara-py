@@ -409,7 +409,7 @@ class ClonezillaProgressDialog(QDialog):
 
             QLabel#SectionLabel { color: #c8d4e0; font-family: "DejaVu Sans Mono"; font-size: 13px; font-weight: 700; letter-spacing: 1px; }
             QLabel#PctBig { color: #9bf0bd; font-family: "DejaVu Sans Mono"; font-size: 28px; font-weight: 700; }
-            QLabel#ProgressDetail { color: #6b7a8d; font-family: "DejaVu Sans Mono"; font-size: 10px; }
+            QLabel#ProgressDetail { color: #c8d4e0; font-family: "DejaVu Sans Mono"; font-size: 14px; font-weight: 700; }
 
             QProgressBar#BackupProgress { background-color: rgba(255,255,255,8); border: none; border-radius: 5px; }
             QProgressBar#BackupProgress::chunk {
