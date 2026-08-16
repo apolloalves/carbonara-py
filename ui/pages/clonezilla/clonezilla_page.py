@@ -3,13 +3,14 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+from datetime import datetime
 
 import qtawesome as qta
 from PySide6.QtCore import Qt, QTimer, Signal, QSize
-from PySide6.QtGui import QFont, QPainter, QColor, QKeyEvent
+from PySide6.QtGui import QFont, QFontMetrics, QPainter, QColor, QKeyEvent
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QFrame,
-    QPushButton, QScrollArea, QDialog, QPlainTextEdit,
+    QPushButton, QScrollArea, QDialog, QPlainTextEdit, QGraphicsDropShadowEffect,
 )
 
 from core.operation_manager import OperationManager
@@ -50,6 +51,27 @@ def _fmt_size(size: int | None) -> str:
     if size >= 1024 ** 2:
         return f"{size / 1024 ** 2:.0f} MB"
     return f"{size} B"
+
+
+def _fmt_date(path) -> str:
+    """Data/hora de modificação do arquivo, no mesmo formato usado pelo
+    Eggs (_IsoListCard): dd/mm/AAAA HH:MM."""
+    if path is None:
+        return "—"
+    try:
+        return datetime.fromtimestamp(os.path.getmtime(path)).strftime("%d/%m/%Y %H:%M")
+    except OSError:
+        return "—"
+
+
+def _disk_for(month_dir) -> str:
+    """Sobe de <disco>/CLONEZILLA/<ano>/<mês> até o ponto de montagem do
+    disco (ex: /mnt/MDSATA) — mesmo papel do entry.path.parent do Eggs,
+    mas calculado aqui porque ClonezillaEntry não guarda esse campo."""
+    try:
+        return str(month_dir.parents[2])
+    except IndexError:
+        return str(month_dir)
 
 
 class _StyledDialog(QDialog):
@@ -245,7 +267,10 @@ class _SectionCard(QFrame):
     """Mesmo padrão visual das seções ROOT/HOME do Timeshift: título
     colorido + subtítulo (caminho) + divisor sutil na cor de destaque."""
 
-    def __init__(self, title_text: str, path_text: str, accent_color: str, parent=None):
+    def __init__(
+        self, title_text: str, path_text: str, accent_color: str,
+        right_text: str | None = None, parent=None,
+    ):
         super().__init__(parent)
         self.setStyleSheet("QFrame { border: none; background: transparent; }")
 
@@ -260,22 +285,54 @@ class _SectionCard(QFrame):
         labels = QVBoxLayout()
         labels.setSpacing(1)
 
-        title = QLabel(title_text)
-        title.setFont(QFont(FONT_FAMILY, 15, QFont.Bold))
-        title.setStyleSheet(f"color: {accent_color};")
+        if title_text:
+            title = QLabel(title_text)
+            title.setFont(QFont(FONT_FAMILY, 15, QFont.Bold))
+            title.setStyleSheet(f"color: {accent_color};")
+            labels.addWidget(title)
+        elif right_text:
+            eyebrow_row = QHBoxLayout()
+            eyebrow_row.setContentsMargins(0, 0, 0, 0)
+            eyebrow_row.setSpacing(6)
 
-        path = QLabel(path_text)
-        path.setFont(QFont(FONT_FAMILY, 8))
-        path.setStyleSheet(f"color: {FAINT};")
+            eyebrow_icon = QLabel()
+            eyebrow_icon.setFixedSize(14, 14)
+            eyebrow_icon.setPixmap(qta.icon("mdi6.backup-restore", color=FAINT).pixmap(13, 13))
+            eyebrow_row.addWidget(eyebrow_icon)
 
-        labels.addWidget(title)
-        labels.addWidget(path)
+            eyebrow_lbl = QLabel("BACKUPS COMPRIMIDOS")
+            eyebrow_lbl.setFont(QFont(FONT_FAMILY, 9, QFont.Bold))
+            eyebrow_lbl.setStyleSheet(f"color: {FAINT}; letter-spacing: 1px;")
+            eyebrow_row.addWidget(eyebrow_lbl)
+
+            labels.addLayout(eyebrow_row)
+
+        if not right_text:
+            path = QLabel(path_text)
+            path.setFont(QFont(FONT_FAMILY, 8))
+            path.setStyleSheet(f"color: {FAINT};")
+            labels.addWidget(path)
+
         head.addLayout(labels)
         head.addStretch(1)
 
+        if right_text:
+            badge = QLabel(right_text)
+            badge.setFont(QFont(FONT_FAMILY, 11, QFont.Bold))
+            badge.setStyleSheet(f"""
+                QLabel {{
+                    color: {MUTED};
+                    background: transparent;
+                    padding: 6px 14px;
+                }}
+            """)
+            head.addWidget(badge)
+            head.setAlignment(badge, Qt.AlignVCenter)
+            head.setAlignment(labels, Qt.AlignVCenter)
+
         divider = QFrame()
         divider.setFixedHeight(2)
-        divider.setStyleSheet(f"background: rgba({_rgba(accent_color, 50)}); border: none;")
+        divider.setStyleSheet(f"background: rgba({_rgba(ACCENT_AMBER, 50)}); border: none;")
 
         self.body = QGridLayout()
         self.body.setSpacing(12)
@@ -284,7 +341,7 @@ class _SectionCard(QFrame):
 
         root.addLayout(head)
         root.addWidget(divider)
-        root.addSpacing(2)
+        root.addSpacing(25)
         root.addLayout(self.body)
 
     def add_card(self, widget) -> None:
@@ -301,133 +358,126 @@ class _EntryCard(QFrame):
     def __init__(self, entry: ClonezillaEntry, pending: bool, parent=None):
         super().__init__(parent)
         self.entry = entry
-        self.setStyleSheet("""
-            QFrame {
+        self.setObjectName("EntryCard")
+        self.setStyleSheet(f"""
+            QFrame#EntryCard {{
                 background: rgba(255, 255, 255, 4);
-                border: 1px solid rgba(255, 255, 255, 10);
+                border: 1px solid transparent;
                 border-radius: 10px;
-            }
+            }}
+            QFrame#EntryCard:hover {{
+                background: rgba(255, 255, 255, 7);
+                border: 1px solid rgba({_rgba(ACCENT_AMBER, 64)});
+            }}
+            QFrame#EntryCard QLabel {{
+                background: transparent;
+                border: none;
+                border-radius: 0px;
+            }}
         """)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 14, 16, 14)
         root.setSpacing(0)
 
-        top_row = QHBoxLayout()
-        top_row.setSpacing(8)
+        def _icon_button(glyph: str, color: str, tooltip: str) -> QPushButton:
+            btn = QPushButton()
+            btn.setIcon(qta.icon(glyph, color=color))
+            btn.setIconSize(QSize(20, 20))
+            btn.setFixedSize(44, 44)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setToolTip(tooltip)
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: rgba({_rgba(color, 16)});
+                    border: 1px solid rgba({_rgba(color, 110)});
+                    border-radius: 10px;
+                }}
+                QPushButton:hover {{
+                    background: rgba({_rgba(color, 32)});
+                    border: 1px solid rgba({_rgba(color, 190)});
+                }}
+                QPushButton:focus {{
+                    outline: none;
+                }}
+                QToolTip {{
+                    background: #14151c;
+                    color: {TEXT};
+                    border: 1px solid rgba({_rgba(color, 140)});
+                    padding: 4px 8px;
+                    border-radius: 6px;
+                }}
+            """)
+            return btn
 
-        icon_color = ACCENT_AMBER if pending else ACCENT_GREEN
+        name_row = QHBoxLayout()
+        name_row.setContentsMargins(0, 0, 0, 0)
+        name_row.setSpacing(10)
+
         icon_lbl = QLabel()
-        icon_lbl.setFixedSize(36, 36)
+        icon_lbl.setFixedSize(44, 44)
         icon_lbl.setAlignment(Qt.AlignCenter)
-        icon_lbl.setPixmap(qta.icon("mdi6.disc", color=icon_color).pixmap(18, 18))
+        icon_lbl.setPixmap(qta.icon("mdi6.backup-restore", color=ACCENT_AMBER).pixmap(26, 26))
         icon_lbl.setStyleSheet(f"""
             QLabel {{
-                background: rgba({_rgba(icon_color, 24)});
-                border-radius: 9px;
+                background: rgba({_rgba(ACCENT_AMBER, 24)});
+                border-radius: 11px;
             }}
         """)
-        top_row.addWidget(icon_lbl)
-        top_row.addStretch(1)
-
-        badge_text = "PENDENTE" if pending else "COMPRIMIDO"
-        badge = QLabel(f"  {badge_text}  ")
-        badge.setFont(QFont(FONT_FAMILY, 8, QFont.Bold))
-        badge.setStyleSheet(f"""
-            QLabel {{
-                background: rgba({_rgba(icon_color, 26)});
-                color: {icon_color};
-                border-radius: 8px;
-                padding: 4px 2px;
-                letter-spacing: 1px;
-            }}
-        """)
-        top_row.addWidget(badge)
-        root.addLayout(top_row)
-        root.addSpacing(10)
+        name_row.addWidget(icon_lbl)
 
         name_lbl = QLabel(entry.name)
         name_lbl.setFont(QFont(FONT_FAMILY, 11, QFont.Bold))
         name_lbl.setStyleSheet(f"color: {TEXT};")
         name_lbl.setWordWrap(True)
-        root.addWidget(name_lbl)
-        root.addSpacing(3)
+        name_row.addWidget(name_lbl, 1)
+        name_row.setAlignment(name_lbl, Qt.AlignVCenter)
 
         if pending:
-            meta_text = f"{_fmt_size(entry.raw_size_bytes)}   ·   {entry.month_dir.name}"
-        else:
-            meta_text = f"{_fmt_size(entry.archive_size_bytes)}   ·   {entry.month_dir.name}"
-        meta_lbl = QLabel(meta_text)
-        meta_lbl.setFont(QFont(FONT_FAMILY, 9))
-        meta_lbl.setStyleSheet(f"color: {MUTED};")
-        root.addWidget(meta_lbl)
-        root.addSpacing(12)
-
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(8)
-
-        if pending:
-            self.btn_compress = QPushButton("Comprimir")
-            self.btn_compress.setCursor(Qt.PointingHandCursor)
-            self.btn_compress.setFixedHeight(34)
-            self.btn_compress.setStyleSheet(f"""
-                QPushButton {{
-                    background: rgba({_rgba(ACCENT_BLUE, 30)});
-                    border: 1px solid {ACCENT_BLUE_LIGHT};
-                    border-radius: 8px;
-                    color: {TEXT};
-                    font-family: "{FONT_FAMILY}";
-                    font-size: 10px;
-                    font-weight: bold;
-                }}
-                QPushButton:hover {{
-                    background: rgba({_rgba(ACCENT_BLUE, 50)});
-                }}
-            """)
+            self.btn_compress = _icon_button(
+                "mdi6.archive-arrow-down-outline", ACCENT_BLUE_LIGHT, "Comprimir",
+            )
             self.btn_compress.clicked.connect(lambda: self.compress_requested.emit(entry))
-            btn_row.addWidget(self.btn_compress, 1)
+            name_row.addWidget(self.btn_compress)
         else:
-            self.btn_upload = QPushButton("Enviar")
-            self.btn_upload.setCursor(Qt.PointingHandCursor)
-            self.btn_upload.setFixedHeight(34)
-            self.btn_upload.setStyleSheet(f"""
-                QPushButton {{
-                    background: rgba({_rgba(ACCENT_BLUE_LIGHT, 22)});
-                    border: 1px solid rgba({_rgba(ACCENT_BLUE_LIGHT, 90)});
-                    border-radius: 8px;
-                    color: {ACCENT_BLUE_LIGHT};
-                    font-family: "{FONT_FAMILY}";
-                    font-size: 10px;
-                    font-weight: bold;
-                }}
-                QPushButton:hover {{
-                    background: rgba({_rgba(ACCENT_BLUE_LIGHT, 40)});
-                }}
-            """)
+            self.btn_upload = _icon_button(
+                "mdi6.cloud-upload-outline", ACCENT_BLUE_LIGHT, "Enviar para Google Drive",
+            )
             self.btn_upload.clicked.connect(lambda: self.upload_requested.emit(entry))
-            btn_row.addWidget(self.btn_upload, 1)
+            name_row.addWidget(self.btn_upload)
 
-            self.btn_delete = QPushButton("Excluir")
-            self.btn_delete.setCursor(Qt.PointingHandCursor)
-            self.btn_delete.setFixedHeight(34)
-            self.btn_delete.setStyleSheet(f"""
-                QPushButton {{
-                    background: rgba({_rgba(ACCENT_RED, 18)});
-                    border: 1px solid rgba({_rgba(ACCENT_RED, 90)});
-                    border-radius: 8px;
-                    color: {ACCENT_RED};
-                    font-family: "{FONT_FAMILY}";
-                    font-size: 10px;
-                    font-weight: bold;
-                }}
-                QPushButton:hover {{
-                    background: rgba({_rgba(ACCENT_RED, 34)});
-                }}
-            """)
+            self.btn_delete = _icon_button(
+                "mdi6.trash-can-outline", ACCENT_RED, "Excluir",
+            )
             self.btn_delete.clicked.connect(lambda: self.delete_requested.emit(entry, pending))
-            btn_row.addWidget(self.btn_delete, 1)
+            name_row.addWidget(self.btn_delete)
 
-        root.addLayout(btn_row)
+        root.addLayout(name_row)
+        root.addSpacing(2)
+
+        if pending:
+            path_for_date = entry.raw_path
+            size_bytes = entry.raw_size_bytes
+        else:
+            path_for_date = entry.archive_path
+            size_bytes = entry.archive_size_bytes
+
+        meta_text = (
+            f"{_fmt_date(path_for_date)}   ·   "
+            f"{_fmt_size(size_bytes)}   ·   "
+            f"{_disk_for(entry.month_dir)}"
+        )
+        meta_lbl = QLabel(meta_text)
+        meta_font = QFont(FONT_FAMILY, 9)
+        meta_lbl.setFont(meta_font)
+        meta_lbl.setStyleSheet(f"color: {MUTED};")
+        meta_lbl.setFixedHeight(QFontMetrics(meta_font).tightBoundingRect(meta_text).height() + 2)
+
+        meta_row = QHBoxLayout()
+        meta_row.setContentsMargins(54, 0, 0, 0)
+        meta_row.addWidget(meta_lbl)
+        meta_row.setAlignment(meta_lbl, Qt.AlignVCenter)
+        root.addLayout(meta_row)
 
 
 class ClonezillaPage(QWidget):
@@ -475,50 +525,31 @@ class ClonezillaPage(QWidget):
         icon_badge = QLabel()
         icon_badge.setFixedSize(48, 48)
         icon_badge.setAlignment(Qt.AlignCenter)
-        icon_badge.setPixmap(qta.icon("mdi6.disc", color="#23a6ff").pixmap(26, 26))
-        icon_badge.setStyleSheet("""
-            QLabel {
-                background: rgba(35, 166, 255, 34);
+        icon_badge.setPixmap(qta.icon("mdi6.backup-restore", color=ACCENT_AMBER).pixmap(26, 26))
+        icon_badge.setStyleSheet(f"""
+            QLabel {{
+                background: rgba({_rgba(ACCENT_AMBER, 34)});
                 border-radius: 10px;
-            }
+            }}
         """)
         header_row.addWidget(icon_badge)
 
         title_block = QVBoxLayout()
         title_block.setContentsMargins(0, 0, 0, 0)
         title_block.setSpacing(2)
-        title_lbl = QLabel("Clonezilla Backups")
+        title_lbl = QLabel("CLONEZILLA BACKUPS")
         title_lbl.setFont(QFont(FONT_FAMILY, 22, QFont.Bold))
-        title_lbl.setStyleSheet("color: #23a6ff;")
+        title_lbl.setStyleSheet(f"color: {ACCENT_AMBER};")
+        title_lbl.setWordWrap(False)
         sub_lbl = QLabel("Compressão e gerenciamento das imagens do Clonezilla")
         sub_lbl.setFont(QFont(FONT_FAMILY, 10))
         sub_lbl.setStyleSheet(f"color: {MUTED};")
+        sub_lbl.setWordWrap(False)
         title_block.addWidget(title_lbl)
         title_block.addWidget(sub_lbl)
         header_row.addLayout(title_block)
 
         header_row.addStretch(1)
-
-        self.btn_refresh = QPushButton("↻  Atualizar")
-        self.btn_refresh.setCursor(Qt.PointingHandCursor)
-        self.btn_refresh.setFixedHeight(38)
-        self.btn_refresh.setStyleSheet(f"""
-            QPushButton {{
-                background: rgba(255, 255, 255, 6);
-                border: 1px solid rgba(255, 255, 255, 14);
-                border-radius: 8px;
-                color: {TEXT};
-                font-family: "{FONT_FAMILY}";
-                font-size: 10px;
-                font-weight: bold;
-                padding: 0 16px;
-            }}
-            QPushButton:hover {{
-                background: rgba(255, 255, 255, 10);
-            }}
-        """)
-        self.btn_refresh.clicked.connect(self.refresh_list)
-        header_row.addWidget(self.btn_refresh)
 
         root.addLayout(header_row)
 
@@ -531,7 +562,7 @@ class ClonezillaPage(QWidget):
         self._list_host = QWidget()
         self._list_host.setStyleSheet("background: transparent;")
         self._list_layout = QVBoxLayout(self._list_host)
-        self._list_layout.setContentsMargins(0, 0, 0, 0)
+        self._list_layout.setContentsMargins(0, 12, 0, 0)
         self._list_layout.setSpacing(24)
         self._list_layout.addStretch(1)
 
@@ -550,6 +581,53 @@ class ClonezillaPage(QWidget):
         root.addWidget(self.empty_label)
 
         self.refresh_list()
+
+        # ── Botão flutuante (FAB) de atualizar, canto inferior direito ────
+        self.btn_refresh = QPushButton(self)
+        self.btn_refresh.setIcon(qta.icon("mdi6.refresh", color="#0a0b0f"))
+        self.btn_refresh.setIconSize(QSize(24, 24))
+        self.btn_refresh.setFixedSize(56, 56)
+        self.btn_refresh.setCursor(Qt.PointingHandCursor)
+        self.btn_refresh.setToolTip("Atualizar")
+        self.btn_refresh.setStyleSheet(f"""
+            QPushButton {{
+                background: {ACCENT_AMBER};
+                border: none;
+                border-radius: 28px;
+            }}
+            QPushButton:hover {{
+                background: rgba({_rgba(ACCENT_AMBER, 220)});
+            }}
+            QPushButton:focus {{
+                outline: none;
+            }}
+            QToolTip {{
+                background: #14151c;
+                color: {TEXT};
+                border: 1px solid rgba({_rgba(ACCENT_AMBER, 140)});
+                padding: 4px 8px;
+                border-radius: 6px;
+            }}
+        """)
+        shadow = QGraphicsDropShadowEffect(self.btn_refresh)
+        shadow.setBlurRadius(24)
+        shadow.setOffset(0, 4)
+        shadow.setColor(QColor(0, 0, 0, 160))
+        self.btn_refresh.setGraphicsEffect(shadow)
+        self.btn_refresh.clicked.connect(self.refresh_list)
+        self.btn_refresh.raise_()
+        self._position_fab()
+
+    def _position_fab(self) -> None:
+        margin = 28
+        self.btn_refresh.move(
+            self.width() - self.btn_refresh.width() - margin,
+            self.height() - self.btn_refresh.height() - margin,
+        )
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._position_fab()
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
@@ -586,8 +664,13 @@ class ClonezillaPage(QWidget):
             self._list_layout.insertWidget(self._list_layout.count() - 1, section)
 
         if compressed:
+            total_bytes = sum(e.archive_size_bytes or 0 for e in compressed)
+            count_txt = "1 arquivo" if len(compressed) == 1 else f"{len(compressed)} arquivos"
             section = _SectionCard(
-                "JÁ COMPRIMIDOS", "Arquivos .tar.zst prontos", ACCENT_GREEN,
+                "",
+                "",
+                ACCENT_GREEN,
+                right_text=f"{count_txt}   ·   {_fmt_size(total_bytes)} total",
             )
             for entry in compressed:
                 card = _EntryCard(entry, pending=False)
