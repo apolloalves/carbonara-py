@@ -35,6 +35,7 @@ ACCENT_BLUE_LIGHT = "#60a5fa"
 ACCENT_GREEN = "#34d399"
 ACCENT_AMBER = "#fbbf24"
 ACCENT_RED = "#f87171"
+ACCENT_AMBER_SOFT = "#c3a864"  # mescla de ACCENT_AMBER + MUTED (âmbar mais fraco)
 
 FONT_FAMILY = "DejaVu Sans Mono"
 
@@ -93,7 +94,7 @@ def _disk_for(month_dir) -> str:
     except OSError:
         pass
 
-    return f"{device} · {mount_point}" if device else mount_point
+    return f"{device} ({mount_point})" if device else mount_point
 
 
 # Os arquivos do Clonezilla (raw + .tar.zst) são root-owned — só o
@@ -573,6 +574,8 @@ class _SectionCard(QFrame):
         if right_text:
             badge = QLabel(right_text)
             badge.setFont(QFont(FONT_FAMILY, 11, QFont.Bold))
+            badge.setWordWrap(True)
+            badge.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
             badge.setStyleSheet(f"""
                 QLabel {{
                     color: {MUTED};
@@ -586,7 +589,7 @@ class _SectionCard(QFrame):
 
         divider = QFrame()
         divider.setFixedHeight(2)
-        divider.setStyleSheet(f"background: rgba({_rgba(ACCENT_AMBER, 50)}); border: none;")
+        divider.setStyleSheet(f"background: rgba({_rgba(accent_color, 50)}); border: none;")
 
         self.body = QGridLayout()
         self.body.setSpacing(12)
@@ -612,47 +615,48 @@ class _EntryCard(QFrame):
     def __init__(self, entry: ClonezillaEntry, pending: bool, parent=None):
         super().__init__(parent)
         self.entry = entry
+        card_accent = ACCENT_AMBER if pending else ACCENT_AMBER_SOFT
         self.setObjectName("EntryCard")
         self.setStyleSheet(f"""
             QFrame#EntryCard {{
-                background: rgba(255, 255, 255, 4);
-                border: 1px solid transparent;
-                border-radius: 10px;
+                border: 1px solid rgba(255, 255, 255, 12);
+                border-radius: 14px;
+                background: rgba(255, 255, 255, 6);
             }}
             QFrame#EntryCard:hover {{
-                background: rgba(255, 255, 255, 7);
-                border: 1px solid rgba({_rgba(ACCENT_AMBER, 64)});
+                border: 1px solid rgba(255, 255, 255, 22);
+                background: rgba(255, 255, 255, 9);
             }}
             QFrame#EntryCard QLabel {{
                 background: transparent;
                 border: none;
-                border-radius: 0px;
             }}
         """)
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(16, 14, 16, 14)
-        root.setSpacing(0)
+        root = QHBoxLayout(self)
+        root.setContentsMargins(18, 8, 18, 8)
+        root.setSpacing(16)
 
-        def _icon_button(glyph: str, color: str, tooltip: str) -> QPushButton:
+        def _action_button(glyph: str, color: str, tooltip: str) -> QPushButton:
             btn = QPushButton()
             btn.setIcon(qta.icon(glyph, color=color))
-            btn.setIconSize(QSize(20, 20))
-            btn.setFixedSize(44, 44)
+            btn.setIconSize(QSize(16, 16))
+            btn.setFixedSize(34, 34)
             btn.setCursor(Qt.PointingHandCursor)
             btn.setToolTip(tooltip)
             btn.setStyleSheet(f"""
                 QPushButton {{
-                    background: rgba({_rgba(color, 16)});
-                    border: 1px solid rgba({_rgba(color, 110)});
-                    border-radius: 10px;
+                    padding: 0px;
+                    border-radius: 9px;
+                    border: 1px solid rgba({_rgba(color, 100)});
+                    background: rgba(255, 255, 255, 6);
                 }}
                 QPushButton:hover {{
-                    background: rgba({_rgba(color, 32)});
-                    border: 1px solid rgba({_rgba(color, 190)});
+                    background: rgba({_rgba(color, 40)});
+                    border: 1px solid rgba({_rgba(color, 180)});
                 }}
                 QPushButton:disabled {{
-                    background: rgba({_rgba(color, 10)});
+                    background: rgba(255, 255, 255, 4);
                     border: 1px solid rgba({_rgba(color, 50)});
                 }}
                 QPushButton:focus {{
@@ -668,66 +672,18 @@ class _EntryCard(QFrame):
             """)
             return btn
 
-        name_row = QHBoxLayout()
-        name_row.setContentsMargins(0, 0, 0, 0)
-        name_row.setSpacing(10)
-
         icon_lbl = QLabel()
-        icon_lbl.setFixedSize(44, 44)
+        icon_lbl.setFixedSize(48, 48)
         icon_lbl.setAlignment(Qt.AlignCenter)
-        icon_lbl.setPixmap(qta.icon("mdi6.content-save-outline", color=ACCENT_AMBER).pixmap(26, 26))
-        icon_lbl.setStyleSheet(f"""
-            QLabel {{
-                background: rgba({_rgba(ACCENT_AMBER, 24)});
-                border-radius: 11px;
-            }}
-        """)
-        name_row.addWidget(icon_lbl)
+        icon_lbl.setPixmap(qta.icon("mdi6.content-save-outline", color=card_accent).pixmap(40, 40))
+        root.addWidget(icon_lbl)
 
-        name_lbl = QLabel(entry.name)
-        name_lbl.setFont(QFont(FONT_FAMILY, 11, QFont.Bold))
-        name_lbl.setStyleSheet(f"color: {TEXT};")
-        name_lbl.setWordWrap(True)
-        name_row.addWidget(name_lbl, 1)
-        name_row.setAlignment(name_lbl, Qt.AlignVCenter)
+        text_col = QVBoxLayout()
+        text_col.setSpacing(4)
 
-        if pending:
-            self.btn_compress = _icon_button(
-                "mdi6.archive-arrow-down-outline", ACCENT_BLUE_LIGHT, "Comprimir",
-            )
-            self.btn_compress.clicked.connect(lambda: self.compress_requested.emit(entry))
-            name_row.addWidget(self.btn_compress)
-        else:
-            already_uploaded = _is_uploaded(entry.archive_path)
-            if already_uploaded:
-                self.btn_upload = _icon_button(
-                    "mdi6.cloud-check-outline", ACCENT_GREEN, "Já enviado para o Google Drive",
-                )
-                self.btn_upload.setEnabled(False)
-                name_row.addWidget(self.btn_upload)
-
-                self.btn_view = _icon_button(
-                    "mdi6.eye-outline", ACCENT_GREEN, "Ver detalhes do envio",
-                )
-                self.btn_view.clicked.connect(
-                    lambda: self._show_upload_details(entry),
-                )
-                name_row.addWidget(self.btn_view)
-            else:
-                self.btn_upload = _icon_button(
-                    "mdi6.cloud-upload-outline", ACCENT_BLUE_LIGHT, "Enviar para Google Drive",
-                )
-                self.btn_upload.clicked.connect(lambda: self.upload_requested.emit(entry))
-                name_row.addWidget(self.btn_upload)
-
-            self.btn_delete = _icon_button(
-                "mdi6.trash-can-outline", ACCENT_RED, "Excluir",
-            )
-            self.btn_delete.clicked.connect(lambda: self.delete_requested.emit(entry, pending))
-            name_row.addWidget(self.btn_delete)
-
-        root.addLayout(name_row)
-        root.addSpacing(2)
+        title = QLabel(entry.name)
+        title.setFont(QFont(FONT_FAMILY, 10, QFont.Bold))
+        title.setStyleSheet(f"color: {TEXT};")
 
         if pending:
             path_for_date = entry.raw_path
@@ -736,22 +692,64 @@ class _EntryCard(QFrame):
             path_for_date = entry.archive_path
             size_bytes = entry.archive_size_bytes
 
-        meta_text = (
+        meta = QLabel(
             f"{_fmt_date(path_for_date)}   ·   "
             f"{_fmt_size(size_bytes)}   ·   "
             f"{_disk_for(entry.month_dir)}"
         )
-        meta_lbl = QLabel(meta_text)
-        meta_font = QFont(FONT_FAMILY, 9)
-        meta_lbl.setFont(meta_font)
-        meta_lbl.setStyleSheet(f"color: {MUTED};")
-        meta_lbl.setFixedHeight(QFontMetrics(meta_font).tightBoundingRect(meta_text).height() + 2)
+        meta.setFont(QFont(FONT_FAMILY, 9))
+        meta.setStyleSheet(f"color: {MUTED};")
 
-        meta_row = QHBoxLayout()
-        meta_row.setContentsMargins(54, 0, 0, 0)
-        meta_row.addWidget(meta_lbl)
-        meta_row.setAlignment(meta_lbl, Qt.AlignVCenter)
-        root.addLayout(meta_row)
+        text_col.addWidget(title)
+        text_col.addWidget(meta)
+        root.addLayout(text_col, 1)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+
+        if pending:
+            self.btn_compress = _action_button(
+                "mdi6.archive-arrow-down-outline", ACCENT_BLUE_LIGHT, "Comprimir",
+            )
+            self.btn_compress.clicked.connect(lambda: self.compress_requested.emit(entry))
+            btn_row.addWidget(self.btn_compress)
+        else:
+            already_uploaded = _is_uploaded(entry.archive_path)
+            if already_uploaded:
+                sent_at = (_upload_info(entry.archive_path) or {}).get("uploaded_at", "")
+                tooltip = (
+                    f"Já enviado em {sent_at} — clique pra reenviar"
+                    if sent_at else "Já enviado — clique pra reenviar"
+                )
+                self.btn_upload = _action_button(
+                    "mdi6.cloud-check-outline", ACCENT_GREEN, tooltip,
+                )
+                self.btn_upload.clicked.connect(
+                    lambda: self._confirm_reupload(entry, sent_at),
+                )
+                btn_row.addWidget(self.btn_upload)
+
+                self.btn_view = _action_button(
+                    "mdi6.eye-outline", ACCENT_GREEN, "Ver detalhes do envio",
+                )
+                self.btn_view.clicked.connect(
+                    lambda: self._show_upload_details(entry),
+                )
+                btn_row.addWidget(self.btn_view)
+            else:
+                self.btn_upload = _action_button(
+                    "mdi6.cloud-upload-outline", ACCENT_BLUE_LIGHT, "Enviar para Google Drive",
+                )
+                self.btn_upload.clicked.connect(lambda: self.upload_requested.emit(entry))
+                btn_row.addWidget(self.btn_upload)
+
+        self.btn_delete = _action_button(
+            "mdi6.trash-can-outline", ACCENT_RED, "Excluir",
+        )
+        self.btn_delete.clicked.connect(lambda: self.delete_requested.emit(entry, pending))
+        btn_row.addWidget(self.btn_delete)
+
+        root.addLayout(btn_row)
 
     def _show_upload_details(self, entry: ClonezillaEntry) -> None:
         info = _upload_info(entry.archive_path) or {}
@@ -778,6 +776,17 @@ class _EntryCard(QFrame):
         dlg = _UploadDetailsDialog(self, entry, info)
         dlg.setGeometry(self.window().geometry())
         dlg.exec()
+
+    def _confirm_reupload(self, entry: ClonezillaEntry, sent_at: str) -> None:
+        when_txt = f" em {sent_at}" if sent_at else ""
+        if not _ask_confirm(
+            self, "Reenviar para o Google Drive",
+            f"'{entry.archive_path.name}' já foi enviado{when_txt}.\n\n"
+            f"Reenviar mesmo assim? Isso vai sobrescrever a cópia no Drive.",
+            confirm_label="Reenviar",
+        ):
+            return
+        self.upload_requested.emit(entry)
 
 
 class ClonezillaPage(QWidget):
@@ -822,24 +831,12 @@ class ClonezillaPage(QWidget):
         header_row.setContentsMargins(0, 14, 0, 0)
         header_row.setSpacing(14)
 
-        icon_badge = QLabel()
-        icon_badge.setFixedSize(48, 48)
-        icon_badge.setAlignment(Qt.AlignCenter)
-        icon_badge.setPixmap(qta.icon("mdi6.backup-restore", color=ACCENT_AMBER).pixmap(26, 26))
-        icon_badge.setStyleSheet(f"""
-            QLabel {{
-                background: rgba({_rgba(ACCENT_AMBER, 34)});
-                border-radius: 10px;
-            }}
-        """)
-        header_row.addWidget(icon_badge)
-
         title_block = QVBoxLayout()
         title_block.setContentsMargins(0, 0, 0, 0)
         title_block.setSpacing(2)
         title_lbl = QLabel("CLONEZILLA BACKUPS")
         title_lbl.setFont(QFont(FONT_FAMILY, 22, QFont.Bold))
-        title_lbl.setStyleSheet(f"color: {ACCENT_AMBER};")
+        title_lbl.setStyleSheet(f"color: {ACCENT_AMBER_SOFT};")
         title_lbl.setWordWrap(False)
         sub_lbl = QLabel("Compressão e gerenciamento das imagens do Clonezilla")
         sub_lbl.setFont(QFont(FONT_FAMILY, 10))
@@ -891,12 +888,12 @@ class ClonezillaPage(QWidget):
         self.btn_refresh.setToolTip("Atualizar")
         self.btn_refresh.setStyleSheet(f"""
             QPushButton {{
-                background: {ACCENT_AMBER};
+                background: {ACCENT_AMBER_SOFT};
                 border: none;
                 border-radius: 28px;
             }}
             QPushButton:hover {{
-                background: rgba({_rgba(ACCENT_AMBER, 220)});
+                background: rgba({_rgba(ACCENT_AMBER_SOFT, 220)});
             }}
             QPushButton:focus {{
                 outline: none;
@@ -904,7 +901,7 @@ class ClonezillaPage(QWidget):
             QToolTip {{
                 background: #14151c;
                 color: {TEXT};
-                border: 1px solid rgba({_rgba(ACCENT_AMBER, 140)});
+                border: 1px solid rgba({_rgba(ACCENT_AMBER_SOFT, 140)});
                 padding: 4px 8px;
                 border-radius: 6px;
             }}
@@ -974,7 +971,7 @@ class ClonezillaPage(QWidget):
             section = _SectionCard(
                 "",
                 "",
-                ACCENT_GREEN,
+                ACCENT_AMBER_SOFT,
                 right_text=f"{count_txt}   ·   {_fmt_size(total_bytes)} total   ·   {uploaded_txt}",
             )
             for entry in compressed:
