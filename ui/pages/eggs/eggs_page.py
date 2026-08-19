@@ -742,7 +742,7 @@ class _EggsOptionButton(QFrame):
         # setMinimumHeight (não setFixedHeight): se a descrição quebrar em
         # mais linhas do que o previsto numa largura muito estreita, o
         # card cresce em vez de sobrepor/vazar texto pra fora da borda.
-        self.setMinimumHeight(108 if compact else 128)
+        self.setMinimumHeight(108 if compact else 104)
         self.setStyleSheet(f"""
             QFrame#EggsOptionBtn {{
                 background: rgba(255, 255, 255, 5);
@@ -760,7 +760,7 @@ class _EggsOptionButton(QFrame):
         """)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(6, 0, 6, 0) if compact else layout.setContentsMargins(16, 12, 16, 12)
+        layout.setContentsMargins(6, 0, 6, 0) if compact else layout.setContentsMargins(16, 10, 16, 10)
         layout.setSpacing(6 if compact else 12)
         layout.setAlignment(Qt.AlignVCenter)
 
@@ -1476,7 +1476,7 @@ class EggsPage(QWidget):
             )
         return (
             "Update Penguin's Eggs",
-            f"Atual: {current} — já está na versão mais recente.{checked_suffix}",
+            f"Atual: {current} — atualizado, última versão.{checked_suffix}",
             "Verificar",
         )
 
