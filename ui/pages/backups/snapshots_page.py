@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPlainTextEdit,
     QCheckBox,
+    QGraphicsDropShadowEffect,
 )
 
 from core.operation_manager import OperationManager
@@ -953,15 +954,6 @@ class SnapshotsPage(QWidget):
         self.btn_refresh.setFixedSize(190, 40)
         self.btn_refresh.setVisible(True)  # reabilitado: útil para recalcular espaço após mudanças fora do app
 
-        self.btn_verify = QPushButton("VERIFICAR SYNC")
-        self.btn_verify.setIcon(qta.icon(VERIFY_GLYPH, color="#9bf0bd"))
-        self.btn_verify.setIconSize(QSize(16, 16))
-        self.btn_verify.setFixedSize(180, 40)
-        self.btn_verify.setToolTip(
-            "Verifica de verdade (rsync --dry-run) se o ROOT e o HOME mais "
-            "recentes estão desatualizados em relação ao sistema."
-        )
-
         self.btn_create = QPushButton("CREATE SNAPSHOT")
         self.btn_create.setIcon(qta.icon(CREATE_GLYPH))
         self.btn_create.setIconSize(QSize(16, 16))
@@ -969,13 +961,52 @@ class SnapshotsPage(QWidget):
         self.btn_create.setObjectName("PrimaryButton")
 
         self.btn_refresh.clicked.connect(self.refresh_destinations)
-        self.btn_verify.clicked.connect(self.verify_all_snapshots)
         self.btn_create.clicked.connect(self.create_snapshot)
 
         buttons_row.addStretch()
         buttons_row.addWidget(self.btn_refresh)
-        buttons_row.addWidget(self.btn_verify)
         buttons_row.addWidget(self.btn_create)
+
+        # ── Verificar Sync — botão flutuante (FAB), canto inferior direito ──
+        # (mesmo padrão do Clonezilla: círculo, ícone, sombra, reposicionado
+        # no resizeEvent). Nome do atributo mantido (self.btn_verify) pra não
+        # quebrar set_busy()/outras referências existentes.
+        self.btn_verify = QPushButton(self)
+        self.btn_verify.setIcon(qta.icon(VERIFY_GLYPH, color="#0a0b0f"))
+        self.btn_verify.setIconSize(QSize(24, 24))
+        self.btn_verify.setFixedSize(56, 56)
+        self.btn_verify.setCursor(Qt.PointingHandCursor)
+        self.btn_verify.setToolTip("Sincronizar Snapshots")
+        self.btn_verify.setStyleSheet("""
+            QPushButton {
+                background: #9bf0bd;
+                border: none;
+                border-radius: 28px;
+            }
+            QPushButton:hover {
+                background: rgba(155, 240, 189, 220);
+            }
+            QPushButton:disabled {
+                background: rgba(155, 240, 189, 90);
+            }
+            QPushButton:focus {
+                outline: none;
+            }
+            QToolTip {
+                background: #14151c;
+                color: #e4e7ec;
+                border: 1px solid rgba(155, 240, 189, 140);
+                padding: 4px 8px;
+                border-radius: 6px;
+            }
+        """)
+        verify_shadow = QGraphicsDropShadowEffect(self.btn_verify)
+        verify_shadow.setBlurRadius(24)
+        verify_shadow.setOffset(0, 4)
+        verify_shadow.setColor(QColor(0, 0, 0, 160))
+        self.btn_verify.setGraphicsEffect(verify_shadow)
+        self.btn_verify.clicked.connect(self.verify_all_snapshots)
+        self.btn_verify.raise_()
 
         # coluna direita: label + card bordado alinhados com esquerda
         right_column = QVBoxLayout()
@@ -1047,6 +1078,8 @@ class SnapshotsPage(QWidget):
 
         self.refresh_destinations()
         self.set_scope("both")
+        self._position_verify_fab()
+        self.btn_verify.raise_()
 
     def _reposition_button_toast(self) -> None:
         """Posicionado logo ABAIXO do botão que disparou o hover (com uma
@@ -1088,9 +1121,14 @@ class SnapshotsPage(QWidget):
         """A página é criada uma vez só (QStackedWidget) — sem isso, a
         lista de destinos só era montada na primeira vez e nunca mais
         atualizava sozinha, mesmo que outro disco fosse montado depois
-        (ex: via o botão 'Montar discos do sistema' na página Disks)."""
+        (ex: via o botão 'Montar discos do sistema' na página Disks).
+        Também reposiciona o FAB aqui: no __init__ a página ainda não
+        tem o tamanho final dentro do QStackedWidget, então
+        self.width()/height() ali podem estar errados."""
         super().showEvent(event)
         self.refresh_destinations()
+        self._position_verify_fab()
+        self.btn_verify.raise_()
 
     def set_scope(self, scope: str):
         if scope not in {"root", "home", "both"}:
@@ -1188,11 +1226,20 @@ class SnapshotsPage(QWidget):
         )
         self.lbl_space_percent.setText(f"{free_pct}% livre")
 
+    def _position_verify_fab(self) -> None:
+        margin = 28
+        self.btn_verify.move(
+            self.width() - self.btn_verify.width() - margin,
+            self.height() - self.btn_verify.height() - margin,
+        )
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self.update_destination_summary()
         if self._button_toast.isVisible():
             self._reposition_button_toast()
+        self._position_verify_fab()
+        self.btn_verify.raise_()
 
     def current_backup_root(self) -> Path | None:
         dest = self.current_destination()

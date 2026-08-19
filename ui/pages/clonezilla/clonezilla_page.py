@@ -559,7 +559,7 @@ class _SectionCard(QFrame):
         elif right_text:
             eyebrow_lbl = QLabel("BACKUPS COMPRIMIDOS")
             eyebrow_lbl.setFont(QFont(FONT_FAMILY, 9, QFont.Bold))
-            eyebrow_lbl.setStyleSheet(f"color: {FAINT}; letter-spacing: 1px;")
+            eyebrow_lbl.setStyleSheet("color: #c8d4e0; letter-spacing: 1px;")
             labels.addWidget(eyebrow_lbl)
 
         if not right_text:
@@ -572,13 +572,20 @@ class _SectionCard(QFrame):
         head.addStretch(1)
 
         if right_text:
+            badge_font = QFont(FONT_FAMILY, 11, QFont.Bold)
             badge = QLabel(right_text)
-            badge.setFont(QFont(FONT_FAMILY, 11, QFont.Bold))
-            badge.setWordWrap(True)
+            badge.setFont(badge_font)
+            badge.setWordWrap(False)
             badge.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            # QLabel com wordWrap calcula o sizeHint antes do layout se
+            # assentar e pode quebrar linha mesmo sobrando espaço — força
+            # a largura mínima certa (texto numa linha só) pra evitar isso.
+            badge.setMinimumWidth(
+                QFontMetrics(badge_font).horizontalAdvance(right_text) + 20
+            )
             badge.setStyleSheet(f"""
                 QLabel {{
-                    color: {MUTED};
+                    color: #c8d4e0;
                     background: transparent;
                     padding: 6px 14px;
                 }}
@@ -589,7 +596,7 @@ class _SectionCard(QFrame):
 
         divider = QFrame()
         divider.setFixedHeight(2)
-        divider.setStyleSheet(f"background: rgba({_rgba(accent_color, 50)}); border: none;")
+        divider.setStyleSheet(f"background: rgba({_rgba(accent_color, 90)}); border: none;")
 
         self.body = QGridLayout()
         self.body.setSpacing(12)
@@ -640,8 +647,8 @@ class _EntryCard(QFrame):
         def _action_button(glyph: str, color: str, tooltip: str) -> QPushButton:
             btn = QPushButton()
             btn.setIcon(qta.icon(glyph, color=color))
-            btn.setIconSize(QSize(16, 16))
-            btn.setFixedSize(34, 34)
+            btn.setIconSize(QSize(20, 20))
+            btn.setFixedSize(42, 42)
             btn.setCursor(Qt.PointingHandCursor)
             btn.setToolTip(tooltip)
             btn.setStyleSheet(f"""
@@ -649,10 +656,10 @@ class _EntryCard(QFrame):
                     padding: 0px;
                     border-radius: 9px;
                     border: 1px solid rgba({_rgba(color, 100)});
-                    background: rgba(255, 255, 255, 6);
+                    background: rgba({_rgba(color, 22)});
                 }}
                 QPushButton:hover {{
-                    background: rgba({_rgba(color, 40)});
+                    background: rgba({_rgba(color, 45)});
                     border: 1px solid rgba({_rgba(color, 180)});
                 }}
                 QPushButton:disabled {{
@@ -682,7 +689,9 @@ class _EntryCard(QFrame):
         text_col.setSpacing(4)
 
         title = QLabel(entry.name)
-        title.setFont(QFont(FONT_FAMILY, 10, QFont.Bold))
+        title_font = QFont(FONT_FAMILY, -1, QFont.Bold)
+        title_font.setPointSizeF(11.5)
+        title.setFont(title_font)
         title.setStyleSheet(f"color: {TEXT};")
 
         if pending:
@@ -730,7 +739,7 @@ class _EntryCard(QFrame):
                 btn_row.addWidget(self.btn_upload)
 
                 self.btn_view = _action_button(
-                    "mdi6.eye-outline", ACCENT_GREEN, "Ver detalhes do envio",
+                    "mdi6.eye-outline", ACCENT_BLUE_LIGHT, "Ver detalhes do envio",
                 )
                 self.btn_view.clicked.connect(
                     lambda: self._show_upload_details(entry),
@@ -877,6 +886,15 @@ class ClonezillaPage(QWidget):
         self.empty_label.hide()
         root.addWidget(self.empty_label)
 
+        # ── Rodapé "Back to menu: button or Esc" — igual ao do Timeshift,
+        # pra reduzir a altura útil da página do mesmo jeito nas duas e
+        # os FABs ficarem alinhados entre si.
+        footer_lbl = QLabel("Back to menu: button or Esc")
+        footer_lbl.setFont(QFont(FONT_FAMILY, 9))
+        footer_lbl.setStyleSheet(f"color: {FAINT};")
+        footer_lbl.setAlignment(Qt.AlignCenter)
+        root.addWidget(footer_lbl)
+
         self.refresh_list()
 
         # ── Botão flutuante (FAB) de atualizar, canto inferior direito ────
@@ -929,6 +947,8 @@ class ClonezillaPage(QWidget):
     def showEvent(self, event) -> None:
         super().showEvent(event)
         self.refresh_list()
+        self._position_fab()
+        self.btn_refresh.raise_()
 
     def refresh_list(self) -> None:
         while self._list_layout.count() > 1:
