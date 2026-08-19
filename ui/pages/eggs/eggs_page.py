@@ -1278,6 +1278,16 @@ class EggsPage(QWidget):
         # inflando aquela linha em vez de deixar o espaço vazio no fim.
         root.addStretch(1)
 
+        # ── Rodapé "Back to menu: button or Esc" — mesmo padrão do
+        # Clonezilla/Timeshift. Fica depois do addStretch(1) acima, que já
+        # empurra tudo pro topo e absorve a sobra de altura — assim o
+        # rodapé fica ancorado no fim da página.
+        footer_lbl = QLabel("Back to menu: button or Esc")
+        footer_lbl.setFont(QFont("DejaVu Sans Mono", 9))
+        footer_lbl.setStyleSheet("color: #6b7280;")
+        footer_lbl.setAlignment(Qt.AlignCenter)
+        root.addWidget(footer_lbl)
+
         # Envolve a página inteira num QScrollArea — sem isso, numa tela
         # de menor resolução (ex: Dell 1280x1024) ou com o grid refluindo
         # pra mais linhas, o conteúdo podia ficar mais alto que a janela
