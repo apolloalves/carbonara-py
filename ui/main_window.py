@@ -41,6 +41,7 @@ from ui.pages.logs.logs_page import LogsPage
 from ui.pages.clonezilla.clonezilla_page import ClonezillaPage
 from core.system.sysinfo import get_system_info
 from core.system.live_mount import is_live_environment
+from core.i18n import tr, i18n, LANGUAGE_NAMES
 
 
 # Paleta
@@ -425,7 +426,7 @@ class TopHeader(QFrame):
         """)
 
         act_theme = menu.addAction(qta.icon("mdi6.palette-outline", color=MUTED), "Temas")
-        act_lang = menu.addAction(qta.icon("mdi6.web", color=MUTED), "Idioma")
+        act_lang = menu.addAction(qta.icon("mdi6.web", color=MUTED), tr("menu.idioma"))
         menu.addSeparator()
         act_logs = menu.addAction(qta.icon("mdi6.file-document-outline", color=MUTED), "Central de logs")
         act_update = menu.addAction(qta.icon("mdi6.refresh", color=MUTED), "Verificar atualização")
@@ -436,7 +437,7 @@ class TopHeader(QFrame):
         win = self._window()
 
         act_theme.triggered.connect(lambda: self._show_soon_dialog("Temas", "Personalização de tema (claro/escuro/cores de destaque) ainda não foi implementada."))
-        act_lang.triggered.connect(lambda: self._show_soon_dialog("Idioma", "Suporte a múltiplos idiomas ainda não foi implementado — o Carbonara continua em português/inglês misto por enquanto."))
+        act_lang.triggered.connect(lambda: self._show_language_dialog())
         act_update.triggered.connect(lambda: self._show_soon_dialog("Verificar atualização", "Checagem de atualização do próprio Carbonara (via git) ainda não foi implementada."))
         if win is not None:
             act_logs.triggered.connect(win.show_logs)
@@ -449,6 +450,13 @@ class TopHeader(QFrame):
         win = self._window()
         if win is not None and hasattr(win, "_show_placeholder_dialog"):
             win._show_placeholder_dialog(title, message)
+
+    def _show_language_dialog(self) -> None:
+        win = self._window()
+        dlg = LanguageDialog(win)
+        if win is not None:
+            dlg.setGeometry(win.geometry())
+        dlg.exec()
 
 
 class AppHeaderBlock(QFrame):
@@ -1137,6 +1145,136 @@ class PlaceholderDialog(QDialog):
 
     def keyPressEvent(self, event: QKeyEvent):
         if event.key() in (Qt.Key_Escape, Qt.Key_Return, Qt.Key_Enter):
+            self.accept()
+            return
+        super().keyPressEvent(event)
+
+    def mousePressEvent(self, event):
+        if not self.card.geometry().contains(event.pos()):
+            self.accept()
+            return
+        super().mousePressEvent(event)
+
+
+class LanguageDialog(QDialog):
+    """Diálogo de seleção de idioma — mesmo padrão visual do
+    PlaceholderDialog (frameless, overlay escuro, card centralizado),
+    mas com uma linha clicável por idioma em vez de mensagem única.
+    A troca é em tempo real via core.i18n (sinal language_changed) —
+    não precisa reiniciar o app."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self.setModal(True)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setAlignment(Qt.AlignCenter)
+
+        self.card = QFrame(self)
+        self.card.setObjectName("LanguageCard")
+        self.card.setFixedWidth(360)
+        self.card.setStyleSheet(f"""
+            QFrame#LanguageCard {{
+                background: #14151c;
+                border: 1px solid rgba(255, 255, 255, 24);
+                border-radius: 18px;
+            }}
+            QLabel {{
+                background: transparent;
+                border: none;
+            }}
+        """)
+
+        card_layout = QVBoxLayout(self.card)
+        card_layout.setContentsMargins(28, 26, 28, 26)
+        card_layout.setSpacing(0)
+
+        icon_badge = QLabel()
+        icon_badge.setFixedSize(44, 44)
+        icon_badge.setAlignment(Qt.AlignCenter)
+        icon_badge.setStyleSheet(f"background: rgba({_rgba(ACCENT_BLUE, 18)}); border-radius: 13px;")
+        icon_badge.setPixmap(qta.icon("mdi6.web", color=ACCENT_BLUE).pixmap(22, 22))
+        card_layout.addWidget(icon_badge)
+        card_layout.addSpacing(18)
+
+        title_lbl = QLabel(tr("menu.idioma"))
+        title_lbl.setFont(QFont(FONT_FAMILY, 15, QFont.Bold))
+        title_lbl.setStyleSheet(f"color: {TEXT};")
+        card_layout.addWidget(title_lbl)
+        card_layout.addSpacing(18)
+
+        self._lang_buttons: dict[str, QPushButton] = {}
+        for code, name in LANGUAGE_NAMES.items():
+            btn = QPushButton()
+            btn.setFixedHeight(44)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.clicked.connect(lambda checked=False, c=code: self._pick(c))
+            self._lang_buttons[code] = btn
+            card_layout.addWidget(btn)
+            card_layout.addSpacing(8)
+
+        card_layout.addSpacing(10)
+
+        btn_close = QPushButton(tr("common.close"))
+        btn_close.setFixedHeight(38)
+        btn_close.setCursor(Qt.PointingHandCursor)
+        btn_close.setStyleSheet(f"""
+            QPushButton {{
+                background: rgba(255,255,255,8);
+                border: 1px solid rgba(255,255,255,14);
+                border-radius: 10px;
+                color: {TEXT};
+                font-family: "{FONT_FAMILY}";
+                font-size: 11px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background: rgba(255,255,255,14);
+            }}
+        """)
+        btn_close.clicked.connect(self.accept)
+        card_layout.addWidget(btn_close)
+
+        outer.addWidget(self.card)
+        self._refresh_buttons()
+
+    def _pick(self, code: str) -> None:
+        i18n.set_language(code)
+        self._refresh_buttons()
+
+    def _refresh_buttons(self) -> None:
+        current = i18n.language
+        for code, btn in self._lang_buttons.items():
+            active = code == current
+            name = LANGUAGE_NAMES[code]
+            btn.setText(f"✓  {name}" if active else name)
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    text-align: left;
+                    padding: 0 16px;
+                    border-radius: 10px;
+                    font-family: "{FONT_FAMILY}";
+                    font-size: 11px;
+                    font-weight: bold;
+                    color: {ACCENT_BLUE if active else TEXT};
+                    background: {'rgba(' + _rgba(ACCENT_BLUE, 26) + ')' if active else 'rgba(255,255,255,6)'};
+                    border: 1px solid {'rgba(' + _rgba(ACCENT_BLUE, 110) + ')' if active else 'rgba(255,255,255,14)'};
+                }}
+                QPushButton:hover {{
+                    background: {'rgba(' + _rgba(ACCENT_BLUE, 40) + ')' if active else 'rgba(255,255,255,12)'};
+                }}
+            """)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 150))
+
+    def keyPressEvent(self, event: QKeyEvent):
+        if event.key() == Qt.Key_Escape:
             self.accept()
             return
         super().keyPressEvent(event)

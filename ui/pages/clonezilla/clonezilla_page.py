@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 from core.operation_manager import OperationManager
 from core.clonezilla.manager import scan_clonezilla_backups, ClonezillaEntry
 from core.workers.rclone_upload_worker import RcloneUploadWorker
+from core.i18n import tr, i18n
 
 # Upload pro Google Drive vai via rclone (remote "gdrive", configurado
 # com `rclone config` — root_folder_id já aponta pra pasta CLONEZILLA
@@ -214,8 +215,10 @@ class _StyledDialog(QDialog):
 
     def __init__(
         self, parent, title: str, message: str, glyph: str, accent: str,
-        detail: str = "", confirm_mode: bool = False, confirm_label: str = "Confirmar",
+        detail: str = "", confirm_mode: bool = False, confirm_label: str | None = None,
     ):
+        if confirm_label is None:
+            confirm_label = tr("common.confirm")
         super().__init__(parent)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
         self.setModal(True)
@@ -301,7 +304,7 @@ class _StyledDialog(QDialog):
         self._confirmed = False
 
         if confirm_mode:
-            btn_cancel = QPushButton("Cancelar")
+            btn_cancel = QPushButton(tr("common.cancel"))
             btn_cancel.setFixedHeight(40)
             btn_cancel.setStyleSheet(f"""
                 QPushButton {{
@@ -335,7 +338,7 @@ class _StyledDialog(QDialog):
             btn_confirm.clicked.connect(self._on_confirm)
             btn_row.addWidget(btn_confirm)
         else:
-            btn_close = QPushButton("Fechar")
+            btn_close = QPushButton(tr("common.close"))
             btn_close.setFixedHeight(40)
             btn_close.setStyleSheet(f"""
                 QPushButton {{
@@ -412,7 +415,7 @@ class _UploadDetailsDialog(QDialog):
         card_layout.addWidget(icon_badge)
         card_layout.addSpacing(18)
 
-        title_lbl = QLabel("Backup no Google Drive")
+        title_lbl = QLabel(tr("clonezilla.details_title"))
         title_lbl.setFont(QFont(FONT_FAMILY, 15, QFont.Bold))
         title_lbl.setStyleSheet(f"color: {TEXT};")
         card_layout.addWidget(title_lbl)
@@ -441,16 +444,16 @@ class _UploadDetailsDialog(QDialog):
             val.setWordWrap(True)
             rows.addWidget(val, row, 1)
 
-        _add_row(0, "ENVIADO EM", info.get("uploaded_at", ""))
-        _add_row(1, "TAMANHO", _fmt_size(entry.archive_size_bytes))
-        _add_row(2, "PASTA NO DRIVE", f"CLONEZILLA/{info.get('remote_folder', '—')}")
+        _add_row(0, tr("clonezilla.details_sent_at"), info.get("uploaded_at", ""))
+        _add_row(1, tr("clonezilla.details_size"), _fmt_size(entry.archive_size_bytes))
+        _add_row(2, tr("clonezilla.details_drive_folder"), f"CLONEZILLA/{info.get('remote_folder', '—')}")
         card_layout.addLayout(rows)
         card_layout.addSpacing(22)
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(12)
 
-        btn_close = QPushButton("Fechar")
+        btn_close = QPushButton(tr("common.close"))
         btn_close.setFixedHeight(40)
         btn_close.setStyleSheet(f"""
             QPushButton {{
@@ -469,10 +472,10 @@ class _UploadDetailsDialog(QDialog):
         btn_row.addWidget(btn_close, 1)
 
         link = info.get("link", "")
-        btn_drive = QPushButton("Abrir no Drive")
+        btn_drive = QPushButton(tr("clonezilla.details_open_drive"))
         btn_drive.setFixedHeight(40)
         btn_drive.setEnabled(bool(link))
-        btn_drive.setToolTip(link if link else "Link do Drive não disponível para este envio")
+        btn_drive.setToolTip(link if link else tr("clonezilla.details_no_link_tooltip"))
         btn_drive.setStyleSheet(f"""
             QPushButton {{
                 background: {ACCENT_GREEN};
@@ -515,8 +518,10 @@ def _show_error(title: str, message: str, parent=None, detail: str = "") -> None
 
 
 def _ask_confirm(
-    parent, title: str, message: str, confirm_label: str = "Confirmar", danger: bool = False,
+    parent, title: str, message: str, confirm_label: str | None = None, danger: bool = False,
 ) -> bool:
+    if confirm_label is None:
+        confirm_label = tr("common.confirm")
     accent = ACCENT_RED if danger else ACCENT_BLUE_LIGHT
     glyph = "mdi6.trash-can-outline" if danger else "mdi6.help-circle-outline"
     dlg = _StyledDialog(
@@ -557,7 +562,7 @@ class _SectionCard(QFrame):
             title.setStyleSheet(f"color: {accent_color};")
             labels.addWidget(title)
         elif right_text:
-            eyebrow_lbl = QLabel("BACKUPS COMPRIMIDOS")
+            eyebrow_lbl = QLabel(tr("clonezilla.section_compressed_eyebrow"))
             eyebrow_lbl.setFont(QFont(FONT_FAMILY, 9, QFont.Bold))
             eyebrow_lbl.setStyleSheet("color: #c8d4e0; letter-spacing: 1px;")
             labels.addWidget(eyebrow_lbl)
@@ -718,7 +723,7 @@ class _EntryCard(QFrame):
 
         if pending:
             self.btn_compress = _action_button(
-                "mdi6.archive-arrow-down-outline", ACCENT_BLUE_LIGHT, "Comprimir",
+                "mdi6.archive-arrow-down-outline", ACCENT_BLUE_LIGHT, tr("clonezilla.action_compress"),
             )
             self.btn_compress.clicked.connect(lambda: self.compress_requested.emit(entry))
             btn_row.addWidget(self.btn_compress)
@@ -727,8 +732,8 @@ class _EntryCard(QFrame):
             if already_uploaded:
                 sent_at = (_upload_info(entry.archive_path) or {}).get("uploaded_at", "")
                 tooltip = (
-                    f"Já enviado em {sent_at} — clique pra reenviar"
-                    if sent_at else "Já enviado — clique pra reenviar"
+                    tr("clonezilla.tooltip_uploaded_at").format(when=sent_at)
+                    if sent_at else tr("clonezilla.tooltip_uploaded_no_date")
                 )
                 self.btn_upload = _action_button(
                     "mdi6.cloud-check-outline", ACCENT_GREEN, tooltip,
@@ -739,7 +744,7 @@ class _EntryCard(QFrame):
                 btn_row.addWidget(self.btn_upload)
 
                 self.btn_view = _action_button(
-                    "mdi6.eye-outline", ACCENT_BLUE_LIGHT, "Ver detalhes do envio",
+                    "mdi6.eye-outline", ACCENT_BLUE_LIGHT, tr("clonezilla.action_view_details"),
                 )
                 self.btn_view.clicked.connect(
                     lambda: self._show_upload_details(entry),
@@ -747,13 +752,13 @@ class _EntryCard(QFrame):
                 btn_row.addWidget(self.btn_view)
             else:
                 self.btn_upload = _action_button(
-                    "mdi6.cloud-upload-outline", ACCENT_BLUE_LIGHT, "Enviar para Google Drive",
+                    "mdi6.cloud-upload-outline", ACCENT_BLUE_LIGHT, tr("clonezilla.action_upload"),
                 )
                 self.btn_upload.clicked.connect(lambda: self.upload_requested.emit(entry))
                 btn_row.addWidget(self.btn_upload)
 
         self.btn_delete = _action_button(
-            "mdi6.trash-can-outline", ACCENT_RED, "Excluir",
+            "mdi6.trash-can-outline", ACCENT_RED, tr("clonezilla.action_delete"),
         )
         self.btn_delete.clicked.connect(lambda: self.delete_requested.emit(entry, pending))
         btn_row.addWidget(self.btn_delete)
@@ -787,12 +792,13 @@ class _EntryCard(QFrame):
         dlg.exec()
 
     def _confirm_reupload(self, entry: ClonezillaEntry, sent_at: str) -> None:
-        when_txt = f" em {sent_at}" if sent_at else ""
+        when_txt = tr("clonezilla.reupload_when").format(sent_at=sent_at) if sent_at else ""
         if not _ask_confirm(
-            self, "Reenviar para o Google Drive",
-            f"'{entry.archive_path.name}' já foi enviado{when_txt}.\n\n"
-            f"Reenviar mesmo assim? Isso vai sobrescrever a cópia no Drive.",
-            confirm_label="Reenviar",
+            self, tr("clonezilla.dialog_reupload_title"),
+            tr("clonezilla.dialog_reupload_message").format(
+                filename=entry.archive_path.name, when=when_txt,
+            ),
+            confirm_label=tr("clonezilla.dialog_reupload_confirm"),
         ):
             return
         self.upload_requested.emit(entry)
@@ -843,16 +849,16 @@ class ClonezillaPage(QWidget):
         title_block = QVBoxLayout()
         title_block.setContentsMargins(0, 0, 0, 0)
         title_block.setSpacing(2)
-        title_lbl = QLabel("CLONEZILLA BACKUPS")
-        title_lbl.setFont(QFont(FONT_FAMILY, 22, QFont.Bold))
-        title_lbl.setStyleSheet(f"color: {ACCENT_AMBER_SOFT};")
-        title_lbl.setWordWrap(False)
-        sub_lbl = QLabel("Compressão e gerenciamento das imagens do Clonezilla")
-        sub_lbl.setFont(QFont(FONT_FAMILY, 10))
-        sub_lbl.setStyleSheet(f"color: {MUTED};")
-        sub_lbl.setWordWrap(False)
-        title_block.addWidget(title_lbl)
-        title_block.addWidget(sub_lbl)
+        self.title_lbl = QLabel(tr("clonezilla.title"))
+        self.title_lbl.setFont(QFont(FONT_FAMILY, 22, QFont.Bold))
+        self.title_lbl.setStyleSheet(f"color: {ACCENT_AMBER_SOFT};")
+        self.title_lbl.setWordWrap(False)
+        self.sub_lbl = QLabel(tr("clonezilla.subtitle"))
+        self.sub_lbl.setFont(QFont(FONT_FAMILY, 10))
+        self.sub_lbl.setStyleSheet(f"color: {MUTED};")
+        self.sub_lbl.setWordWrap(False)
+        title_block.addWidget(self.title_lbl)
+        title_block.addWidget(self.sub_lbl)
         header_row.addLayout(title_block)
 
         header_row.addStretch(1)
@@ -875,11 +881,7 @@ class ClonezillaPage(QWidget):
         self.scroll.setWidget(self._list_host)
         root.addWidget(self.scroll, 1)
 
-        self.empty_label = QLabel(
-            "Nenhum backup encontrado em /mnt/MDSATA/CLONEZILLA.\n\n"
-            "Gere um backup no Clonezilla primeiro — a pasta gerada por ele "
-            "aparece aqui automaticamente assim que existir."
-        )
+        self.empty_label = QLabel(tr("clonezilla.empty"))
         self.empty_label.setFont(QFont(FONT_FAMILY, 10))
         self.empty_label.setStyleSheet(f"color: {FAINT};")
         self.empty_label.setAlignment(Qt.AlignCenter)
@@ -889,11 +891,11 @@ class ClonezillaPage(QWidget):
         # ── Rodapé "Back to menu: button or Esc" — igual ao do Timeshift,
         # pra reduzir a altura útil da página do mesmo jeito nas duas e
         # os FABs ficarem alinhados entre si.
-        footer_lbl = QLabel("Back to menu: button or Esc")
-        footer_lbl.setFont(QFont(FONT_FAMILY, 9))
-        footer_lbl.setStyleSheet(f"color: {FAINT};")
-        footer_lbl.setAlignment(Qt.AlignCenter)
-        root.addWidget(footer_lbl)
+        self.footer_lbl = QLabel(tr("menu.back_to_menu"))
+        self.footer_lbl.setFont(QFont(FONT_FAMILY, 9))
+        self.footer_lbl.setStyleSheet(f"color: {FAINT};")
+        self.footer_lbl.setAlignment(Qt.AlignCenter)
+        root.addWidget(self.footer_lbl)
 
         self.refresh_list()
 
@@ -903,7 +905,7 @@ class ClonezillaPage(QWidget):
         self.btn_refresh.setIconSize(QSize(24, 24))
         self.btn_refresh.setFixedSize(56, 56)
         self.btn_refresh.setCursor(Qt.PointingHandCursor)
-        self.btn_refresh.setToolTip("Atualizar")
+        self.btn_refresh.setToolTip(tr("clonezilla.refresh_tooltip"))
         self.btn_refresh.setStyleSheet(f"""
             QPushButton {{
                 background: {ACCENT_AMBER_SOFT};
@@ -933,6 +935,19 @@ class ClonezillaPage(QWidget):
         self.btn_refresh.raise_()
         self._position_fab()
 
+        # ── Troca de idioma em tempo real, sem precisar reiniciar o app ──
+        i18n.language_changed.connect(self._retranslate)
+
+    def _retranslate(self) -> None:
+        self.title_lbl.setText(tr("clonezilla.title"))
+        self.sub_lbl.setText(tr("clonezilla.subtitle"))
+        self.empty_label.setText(tr("clonezilla.empty"))
+        self.footer_lbl.setText(tr("menu.back_to_menu"))
+        self.btn_refresh.setToolTip(tr("clonezilla.refresh_tooltip"))
+        # Os cards/seções são recriados do zero a cada refresh_list(), então
+        # já nascem com o idioma novo — não precisam de tratamento individual.
+        self.refresh_list()
+
     def _position_fab(self) -> None:
         margin = 28
         self.btn_refresh.move(
@@ -960,7 +975,7 @@ class ClonezillaPage(QWidget):
         try:
             entries = scan_clonezilla_backups()
         except Exception as exc:
-            _show_error("Clonezilla Backups", f"Erro ao listar backups: {exc}", parent=self)
+            _show_error("Clonezilla Backups", tr("clonezilla.list_error").format(exc=exc), parent=self)
             entries = []
 
         self.empty_label.setVisible(not entries)
@@ -971,7 +986,9 @@ class ClonezillaPage(QWidget):
 
         if pending:
             section = _SectionCard(
-                "PENDENTES", "Ainda não comprimidos — aguardando ação", ACCENT_AMBER,
+                tr("clonezilla.section_pending_title"),
+                tr("clonezilla.section_pending_subtitle"),
+                ACCENT_AMBER,
             )
             for entry in pending:
                 card = _EntryCard(entry, pending=True)
@@ -982,17 +999,23 @@ class ClonezillaPage(QWidget):
 
         if compressed:
             total_bytes = sum(e.archive_size_bytes or 0 for e in compressed)
-            count_txt = "1 arquivo" if len(compressed) == 1 else f"{len(compressed)} arquivos"
+            count_txt = (
+                tr("clonezilla.count_file_singular") if len(compressed) == 1
+                else tr("clonezilla.count_file_plural").format(n=len(compressed))
+            )
             uploaded_count = sum(1 for e in compressed if _is_uploaded(e.archive_path))
             uploaded_txt = (
-                "1 no Google Drive" if uploaded_count == 1
-                else f"{uploaded_count} no Google Drive"
+                tr("clonezilla.uploaded_singular") if uploaded_count == 1
+                else tr("clonezilla.uploaded_plural").format(n=uploaded_count)
             )
             section = _SectionCard(
                 "",
                 "",
                 ACCENT_AMBER_SOFT,
-                right_text=f"{count_txt}   ·   {_fmt_size(total_bytes)} total   ·   {uploaded_txt}",
+                right_text=(
+                    f"{count_txt}   ·   {_fmt_size(total_bytes)} {tr('clonezilla.total_suffix')}"
+                    f"   ·   {uploaded_txt}"
+                ),
             )
             for entry in compressed:
                 card = _EntryCard(entry, pending=False)
@@ -1005,7 +1028,7 @@ class ClonezillaPage(QWidget):
         if OperationManager.is_running():
             current = OperationManager.current()
             _show_error(
-                "Carbonara", f"Outra operação exclusiva já está em andamento: {current}",
+                "Carbonara", tr("clonezilla.operation_in_progress").format(current=current),
                 parent=self,
             )
             return
@@ -1020,7 +1043,7 @@ class ClonezillaPage(QWidget):
             except OSError as exc:
                 _show_error(
                     "Carbonara Backup",
-                    f"Não foi possível checar o espaço livre em {entry.month_dir}: {exc}",
+                    tr("clonezilla.dialog_check_space_error").format(dir=entry.month_dir, exc=exc),
                     parent=self,
                 )
                 return
@@ -1029,12 +1052,11 @@ class ClonezillaPage(QWidget):
                 needed_gb = entry.raw_size_bytes / 1024 ** 3
                 free_gb = free_bytes / 1024 ** 3
                 _show_error(
-                    "Espaço insuficiente",
-                    f"Não há espaço livre suficiente em {entry.month_dir} para "
-                    f"comprimir '{entry.name}' com segurança.\n\n"
-                    f"Necessário (estimado): {needed_gb:.1f} GB\n"
-                    f"Disponível: {free_gb:.1f} GB\n\n"
-                    f"Libere espaço no destino antes de tentar novamente.",
+                    tr("clonezilla.dialog_insufficient_space_title"),
+                    tr("clonezilla.dialog_insufficient_space_message").format(
+                        dir=entry.month_dir, name=entry.name,
+                        needed=f"{needed_gb:.1f}", free=f"{free_gb:.1f}",
+                    ),
                     parent=self,
                 )
                 return
@@ -1042,17 +1064,17 @@ class ClonezillaPage(QWidget):
         estimate = ""
         if entry.raw_size_bytes:
             gb = entry.raw_size_bytes / 1024 ** 3
-            estimate = f"\n\nTamanho: {gb:.1f} GB — pode levar bastante tempo (uso intenso de CPU)."
+            estimate = tr("clonezilla.dialog_compress_estimate").format(gb=f"{gb:.1f}")
 
         if not _ask_confirm(
-            self, "Comprimir backup",
-            f"Comprimir '{entry.name}' em .tar.zst?{estimate}",
-            confirm_label="Comprimir",
+            self, tr("clonezilla.dialog_compress_title"),
+            tr("clonezilla.dialog_compress_message").format(name=entry.name, estimate=estimate),
+            confirm_label=tr("clonezilla.dialog_compress_confirm"),
         ):
             return
 
-        if not OperationManager.start("clonezilla", f"Comprimindo {entry.name}"):
-            _show_error("Carbonara", "Outra operação exclusiva já está em andamento.", parent=self)
+        if not OperationManager.start("clonezilla", tr("clonezilla.compress_op_label").format(name=entry.name)):
+            _show_error("Carbonara", tr("clonezilla.operation_in_progress_generic"), parent=self)
             return
 
         import json
@@ -1106,7 +1128,7 @@ class ClonezillaPage(QWidget):
                 pass
             _show_error(
                 "Carbonara Backup",
-                f"Processo de compressão terminou com código {rc}.",
+                tr("clonezilla.compress_process_error").format(rc=rc),
                 parent=self,
                 detail=stderr_text,
             )
@@ -1115,11 +1137,11 @@ class ClonezillaPage(QWidget):
         if pending:
             target_path = entry.raw_path
             is_dir = True
-            what = "a pasta original"
+            what = tr("clonezilla.what_folder")
         else:
             target_path = entry.archive_path
             is_dir = False
-            what = "o arquivo .tar.zst"
+            what = tr("clonezilla.what_archive")
 
         if target_path is None:
             return
@@ -1127,22 +1149,21 @@ class ClonezillaPage(QWidget):
         if OperationManager.is_running():
             current = OperationManager.current()
             _show_error(
-                "Carbonara", f"Outra operação exclusiva já está em andamento: {current}",
+                "Carbonara", tr("clonezilla.operation_in_progress").format(current=current),
                 parent=self,
             )
             return
 
         if not _ask_confirm(
-            self, "Excluir backup",
-            f"Excluir {what} de '{entry.name}'?\n\n{target_path}\n\n"
-            f"Essa ação não pode ser desfeita.",
-            confirm_label="Excluir",
+            self, tr("clonezilla.dialog_delete_title"),
+            tr("clonezilla.dialog_delete_message").format(what=what, name=entry.name, path=target_path),
+            confirm_label=tr("clonezilla.dialog_delete_confirm"),
             danger=True,
         ):
             return
 
-        if not OperationManager.start("clonezilla", f"Excluindo {entry.name}"):
-            _show_error("Carbonara", "Outra operação exclusiva já está em andamento.", parent=self)
+        if not OperationManager.start("clonezilla", tr("clonezilla.delete_op_label").format(name=entry.name)):
+            _show_error("Carbonara", tr("clonezilla.operation_in_progress_generic"), parent=self)
             return
 
         import json
@@ -1187,7 +1208,7 @@ class ClonezillaPage(QWidget):
                 pass
             _show_error(
                 "Carbonara Backup",
-                f"Processo de exclusão terminou com código {rc}.",
+                tr("clonezilla.delete_process_error").format(rc=rc),
                 parent=self,
                 detail=stderr_text,
             )
@@ -1199,7 +1220,7 @@ class ClonezillaPage(QWidget):
         if OperationManager.is_running():
             current = OperationManager.current()
             _show_error(
-                "Carbonara", f"Outra operação exclusiva já está em andamento: {current}",
+                "Carbonara", tr("clonezilla.operation_in_progress").format(current=current),
                 parent=self,
             )
             return
@@ -1213,35 +1234,43 @@ class ClonezillaPage(QWidget):
         year_name = entry.month_dir.parent.name
         remote_folder = f"{year_name}/{month_name}"
 
-        size_txt = f"\n\nTamanho: {_fmt_size(entry.archive_size_bytes)}" if entry.archive_size_bytes else ""
+        size_txt = (
+            tr("clonezilla.size_suffix").format(size=_fmt_size(entry.archive_size_bytes))
+            if entry.archive_size_bytes else ""
+        )
         if not _ask_confirm(
-            self, "Enviar para o Google Drive",
-            f"Enviar '{entry.archive_path.name}' para o Google Drive?{size_txt}\n\n"
-            f"Destino: CLONEZILLA/{year_name}/{month_name}\n\n"
-            f"Envia via rclone (remote 'gdrive').",
-            confirm_label="Enviar",
+            self, tr("clonezilla.dialog_upload_title"),
+            tr("clonezilla.dialog_upload_message").format(
+                filename=entry.archive_path.name, size_txt=size_txt,
+                year=year_name, month=month_name,
+            ),
+            confirm_label=tr("clonezilla.dialog_upload_confirm"),
         ):
             return
 
-        if not OperationManager.start("clonezilla", f"Enviando {entry.name} para o Drive"):
-            _show_error("Carbonara", "Outra operação exclusiva já está em andamento.", parent=self)
+        if not OperationManager.start("clonezilla", tr("clonezilla.upload_op_label").format(name=entry.name)):
+            _show_error("Carbonara", tr("clonezilla.operation_in_progress_generic"), parent=self)
             return
 
         from ui.widgets.clonezilla_progress import ClonezillaProgressDialog
 
         dialog = ClonezillaProgressDialog(
-            f"Enviando {entry.name}",
+            tr("clonezilla.upload_progress_title").format(name=entry.name),
             icon_glyph="mdi6.cloud-upload-outline",
-            body_title="Envio em andamento",
+            body_title=tr("clonezilla.upload_progress_body_title"),
         )
-        dialog.lbl_subtitle.setText(f"Enviando {entry.archive_path.name} para o Google Drive.")
+        dialog.lbl_subtitle.setText(
+            tr("clonezilla.upload_progress_subtitle").format(filename=entry.archive_path.name)
+        )
         dialog.set_running(True)
         dialog.progress.setRange(0, 100)
         dialog.progress.setValue(0)
-        dialog.set_status(f"Preparando envio de {entry.archive_path.name}...")
+        dialog.set_status(
+            tr("clonezilla.upload_progress_preparing").format(filename=entry.archive_path.name)
+        )
         dialog.set_current_file(entry.archive_path.name)
-        dialog.append_log(f"=== UPLOAD {entry.archive_path.name} ===")
-        dialog.append_log(f"Destino: CLONEZILLA/{year_name}/{month_name}")
+        dialog.append_log(tr("clonezilla.upload_log_header").format(filename=entry.archive_path.name))
+        dialog.append_log(tr("clonezilla.upload_log_dest").format(year=year_name, month=month_name))
         dialog.build_tree([entry.archive_path.name])
 
         worker = RcloneUploadWorker(entry.archive_path, remote_folder, parent=dialog)
@@ -1255,23 +1284,23 @@ class ClonezillaPage(QWidget):
 
         def _on_done() -> None:
             dialog.mark_file_done(entry.archive_path.name)
-            dialog.set_status("Envio concluído.")
+            dialog.set_status(tr("clonezilla.upload_done_status"))
             dialog.set_current_file("—")
             dialog.progress.setValue(100)
             dialog.set_running(False)
             OperationManager.finish()
-            dialog.append_log("Obtendo link da pasta no Drive...")
+            dialog.append_log(tr("clonezilla.upload_log_fetching_link"))
             link = _fetch_drive_link(remote_folder)
             if link:
-                dialog.append_log(f"Link: {link}")
+                dialog.append_log(tr("clonezilla.upload_log_link").format(link=link))
             else:
-                dialog.append_log("Não foi possível obter o link (rclone link falhou).")
+                dialog.append_log(tr("clonezilla.upload_log_no_link"))
             _mark_uploaded(entry.archive_path, remote_folder=remote_folder, link=link)
             self.refresh_list()
 
         def _on_failed(msg: str) -> None:
-            dialog.append_log(f"ERRO: {msg}")
-            dialog.set_status("Envio falhou.")
+            dialog.append_log(tr("clonezilla.upload_log_error").format(msg=msg))
+            dialog.set_status(tr("clonezilla.upload_failed_status"))
             dialog.set_running(False)
             OperationManager.finish()
 
