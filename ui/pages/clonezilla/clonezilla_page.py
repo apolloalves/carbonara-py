@@ -37,6 +37,8 @@ ACCENT_GREEN = "#34d399"
 ACCENT_AMBER = "#fbbf24"
 ACCENT_RED = "#f87171"
 ACCENT_AMBER_SOFT = "#c3a864"  # mescla de ACCENT_AMBER + MUTED (âmbar mais fraco)
+ACCENT_TEAL = "#5cc9a7"        # identidade da página (Opção A aprovada) — substitui âmbar/azul
+ACCENT_TEAL_SOFT = "#73b0a5"   # mescla de ACCENT_TEAL + MUTED (verde-água mais fraco)
 
 FONT_FAMILY = "DejaVu Sans Mono"
 
@@ -522,7 +524,7 @@ def _ask_confirm(
 ) -> bool:
     if confirm_label is None:
         confirm_label = tr("common.confirm")
-    accent = ACCENT_RED if danger else ACCENT_BLUE_LIGHT
+    accent = ACCENT_RED if danger else ACCENT_TEAL
     glyph = "mdi6.trash-can-outline" if danger else "mdi6.help-circle-outline"
     dlg = _StyledDialog(
         parent, title, message, glyph, accent,
@@ -569,8 +571,8 @@ class _SectionCard(QFrame):
 
         if not right_text:
             path = QLabel(path_text)
-            path.setFont(QFont(FONT_FAMILY, 8))
-            path.setStyleSheet(f"color: {FAINT};")
+            path.setFont(QFont(FONT_FAMILY, 9, QFont.Bold))
+            path.setStyleSheet("color: #c8d4e0;")
             labels.addWidget(path)
 
         head.addLayout(labels)
@@ -627,7 +629,7 @@ class _EntryCard(QFrame):
     def __init__(self, entry: ClonezillaEntry, pending: bool, parent=None):
         super().__init__(parent)
         self.entry = entry
-        card_accent = ACCENT_AMBER if pending else ACCENT_AMBER_SOFT
+        card_accent = ACCENT_AMBER if pending else ACCENT_TEAL_SOFT
         self.setObjectName("EntryCard")
         self.setStyleSheet(f"""
             QFrame#EntryCard {{
@@ -723,7 +725,7 @@ class _EntryCard(QFrame):
 
         if pending:
             self.btn_compress = _action_button(
-                "mdi6.archive-arrow-down-outline", ACCENT_BLUE_LIGHT, tr("clonezilla.action_compress"),
+                "mdi6.archive-arrow-down-outline", ACCENT_TEAL, tr("clonezilla.action_compress"),
             )
             self.btn_compress.clicked.connect(lambda: self.compress_requested.emit(entry))
             btn_row.addWidget(self.btn_compress)
@@ -744,7 +746,7 @@ class _EntryCard(QFrame):
                 btn_row.addWidget(self.btn_upload)
 
                 self.btn_view = _action_button(
-                    "mdi6.eye-outline", ACCENT_BLUE_LIGHT, tr("clonezilla.action_view_details"),
+                    "mdi6.eye-outline", "#c8d4e0", tr("clonezilla.action_view_details"),
                 )
                 self.btn_view.clicked.connect(
                     lambda: self._show_upload_details(entry),
@@ -752,7 +754,7 @@ class _EntryCard(QFrame):
                 btn_row.addWidget(self.btn_view)
             else:
                 self.btn_upload = _action_button(
-                    "mdi6.cloud-upload-outline", ACCENT_BLUE_LIGHT, tr("clonezilla.action_upload"),
+                    "mdi6.cloud-upload-outline", ACCENT_TEAL, tr("clonezilla.action_upload"),
                 )
                 self.btn_upload.clicked.connect(lambda: self.upload_requested.emit(entry))
                 btn_row.addWidget(self.btn_upload)
@@ -846,12 +848,21 @@ class ClonezillaPage(QWidget):
         header_row.setContentsMargins(0, 14, 0, 0)
         header_row.setSpacing(14)
 
+        title_icon = QLabel()
+        title_icon.setFixedSize(48, 48)
+        title_icon.setAlignment(Qt.AlignCenter)
+        title_icon.setPixmap(qta.icon("mdi6.content-duplicate", color=ACCENT_TEAL_SOFT).pixmap(26, 26))
+        title_icon.setStyleSheet(
+            f"background: rgba({_rgba(ACCENT_TEAL_SOFT, 22)}); border-radius: 14px;"
+        )
+        header_row.addWidget(title_icon)
+
         title_block = QVBoxLayout()
         title_block.setContentsMargins(0, 0, 0, 0)
         title_block.setSpacing(2)
         self.title_lbl = QLabel(tr("clonezilla.title"))
         self.title_lbl.setFont(QFont(FONT_FAMILY, 22, QFont.Bold))
-        self.title_lbl.setStyleSheet(f"color: {ACCENT_AMBER_SOFT};")
+        self.title_lbl.setStyleSheet(f"color: {ACCENT_TEAL_SOFT};")
         self.title_lbl.setWordWrap(False)
         self.sub_lbl = QLabel(tr("clonezilla.subtitle"))
         self.sub_lbl.setFont(QFont(FONT_FAMILY, 10))
@@ -908,12 +919,12 @@ class ClonezillaPage(QWidget):
         self.btn_refresh.setToolTip(tr("clonezilla.refresh_tooltip"))
         self.btn_refresh.setStyleSheet(f"""
             QPushButton {{
-                background: {ACCENT_AMBER_SOFT};
+                background: {ACCENT_TEAL_SOFT};
                 border: none;
                 border-radius: 28px;
             }}
             QPushButton:hover {{
-                background: rgba({_rgba(ACCENT_AMBER_SOFT, 220)});
+                background: rgba({_rgba(ACCENT_TEAL_SOFT, 220)});
             }}
             QPushButton:focus {{
                 outline: none;
@@ -921,7 +932,7 @@ class ClonezillaPage(QWidget):
             QToolTip {{
                 background: #14151c;
                 color: {TEXT};
-                border: 1px solid rgba({_rgba(ACCENT_AMBER_SOFT, 140)});
+                border: 1px solid rgba({_rgba(ACCENT_TEAL_SOFT, 140)});
                 padding: 4px 8px;
                 border-radius: 6px;
             }}
@@ -1011,7 +1022,7 @@ class ClonezillaPage(QWidget):
             section = _SectionCard(
                 "",
                 "",
-                ACCENT_AMBER_SOFT,
+                ACCENT_TEAL_SOFT,
                 right_text=(
                     f"{count_txt}   ·   {_fmt_size(total_bytes)} {tr('clonezilla.total_suffix')}"
                     f"   ·   {uploaded_txt}"
