@@ -58,7 +58,7 @@ ACCENT_AMBER = "#fbbf24"
 ACCENT_RED = "#f87171"
 
 APP_VERSION = "v2.4.0"
-APP_AUTHOR = "Douglas Apollo Alves"
+APP_AUTHOR = "Apollo Alves"
 
 FONT_FAMILY = "DejaVu Sans Mono"
 
@@ -1299,13 +1299,15 @@ class AboutDialog(QDialog):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setAlignment(Qt.AlignCenter)
 
+        CARD_WIDTH = 560
+
         self.card = QFrame(self)
         self.card.setObjectName("AboutCard")
-        self.card.setFixedSize(400, 280)
+        self.card.setFixedWidth(CARD_WIDTH)
         self.card.setStyleSheet(f"""
             QFrame#AboutCard {{
                 background: #14151c;
-                border: 1px solid rgba(59, 130, 246, 60);
+                border: 1px solid rgba(255, 255, 255, 26);
                 border-radius: 18px;
             }}
             QLabel {{
@@ -1315,50 +1317,97 @@ class AboutDialog(QDialog):
         """)
 
         card_layout = QVBoxLayout(self.card)
-        card_layout.setContentsMargins(28, 26, 28, 26)
+        card_layout.setContentsMargins(32, 28, 32, 28)
         card_layout.setSpacing(0)
-        card_layout.setAlignment(Qt.AlignHCenter)
 
-        icon_badge = QLabel()
-        icon_badge.setFixedSize(56, 56)
-        icon_badge.setAlignment(Qt.AlignCenter)
-        icon_badge.setStyleSheet(f"background: rgba({_rgba(ACCENT_BLUE, 18)}); border-radius: 16px;")
-        icon_badge.setPixmap(qta.icon("mdi6.chart-donut", color=ACCENT_BLUE).pixmap(28, 28))
-        card_layout.addWidget(icon_badge, alignment=Qt.AlignHCenter)
-        card_layout.addSpacing(16)
+        # ── Cabeçalho: ícone à esquerda, título/versão empilhados à direita ──
+        header_row = QHBoxLayout()
+        header_row.setSpacing(18)
+
+        icon_badge = LogoBadge(56)
+        header_row.addWidget(icon_badge)
+
+        title_block = QVBoxLayout()
+        title_block.setSpacing(2)
 
         title = QLabel("Carbonara")
-        title.setFont(QFont(FONT_FAMILY, 16, QFont.Bold))
+        title.setFont(QFont(FONT_FAMILY, 18, QFont.Bold))
         title.setStyleSheet(f"color: {TEXT};")
-        title.setAlignment(Qt.AlignHCenter)
-        card_layout.addWidget(title)
-        card_layout.addSpacing(4)
+        title_block.addWidget(title)
 
         version = QLabel(APP_VERSION)
         version.setFont(QFont(FONT_FAMILY, 10, QFont.Bold))
         version.setStyleSheet(f"color: {ACCENT_BLUE_LIGHT};")
-        version.setAlignment(Qt.AlignHCenter)
-        card_layout.addWidget(version)
-        card_layout.addSpacing(14)
+        title_block.addWidget(version)
 
-        desc = QLabel("Ferramenta de administração de sistema para Arch Linux —\nsnapshots, backups, ISOs live e diagnósticos.")
-        desc.setFont(QFont(FONT_FAMILY, 9))
-        desc.setStyleSheet(f"color: {MUTED}; line-height: 140%;")
-        desc.setAlignment(Qt.AlignHCenter)
+        header_row.addLayout(title_block)
+        header_row.addStretch()
+        card_layout.addLayout(header_row)
+        card_layout.addSpacing(20)
+
+        divider = QFrame()
+        divider.setFixedHeight(1)
+        divider.setStyleSheet("background: rgba(255, 255, 255, 20);")
+        card_layout.addWidget(divider)
+        card_layout.addSpacing(20)
+
+        desc_text = tr("about.description")
+        desc = QLabel(desc_text)
+        desc_font = QFont(FONT_FAMILY, 10)
+        desc.setFont(desc_font)
+        desc.setStyleSheet(f"color: {MUTED}; line-height: 150%;")
         desc.setWordWrap(True)
+        # QLabel com wordWrap às vezes calcula um sizeHint baixo demais
+        # antes da largura do layout se firmar, cortando o texto — mesmo
+        # problema documentado no _StyledDialog do Clonezilla. Calcula a
+        # altura real necessária pra largura conhecida do card e força
+        # isso explicitamente em vez de confiar no sizeHint.
+        desc_available_width = CARD_WIDTH - 32 - 32  # descontando as margens do card
+        desc_text_rect = QFontMetrics(desc_font).boundingRect(
+            QRect(0, 0, desc_available_width, 0), Qt.TextWordWrap, desc_text,
+        )
+        desc.setFixedHeight(desc_text_rect.height() + 14)  # +14: folga pro line-height 150%
         card_layout.addWidget(desc)
-        card_layout.addSpacing(6)
+        card_layout.addSpacing(20)
 
-        author = QLabel("Douglas Apollo Alves")
-        author.setFont(QFont(FONT_FAMILY, 9))
-        author.setStyleSheet(f"color: {FAINT};")
-        author.setAlignment(Qt.AlignHCenter)
-        card_layout.addWidget(author)
-        card_layout.addStretch()
-        card_layout.addSpacing(18)
+        # ── Card do autor: avatar + "DESENVOLVIDO POR" + nome ──
+        author_card = QFrame()
+        author_card.setStyleSheet("""
+            QFrame {
+                background: rgba(255, 255, 255, 5);
+                border: 1px solid rgba(255, 255, 255, 14);
+                border-radius: 12px;
+            }
+        """)
+        author_row = QHBoxLayout(author_card)
+        author_row.setContentsMargins(16, 12, 16, 12)
+        author_row.setSpacing(14)
 
-        btn_ok = QPushButton("Fechar")
-        btn_ok.setFixedHeight(38)
+        avatar = QLabel()
+        avatar.setFixedSize(40, 40)
+        avatar.setStyleSheet(f"background: rgba({_rgba(ACCENT_BLUE, 22)}); border-radius: 20px;")
+        author_row.addWidget(avatar)
+
+        author_block = QVBoxLayout()
+        author_block.setSpacing(2)
+
+        author_label = QLabel(tr("about.developed_by"))
+        author_label.setFont(QFont(FONT_FAMILY, 8, QFont.Bold))
+        author_label.setStyleSheet(f"color: {FAINT}; letter-spacing: 1px;")
+        author_block.addWidget(author_label)
+
+        author = QLabel("Apollo Alves")
+        author.setFont(QFont(FONT_FAMILY, 11, QFont.Bold))
+        author.setStyleSheet(f"color: {TEXT};")
+        author_block.addWidget(author)
+
+        author_row.addLayout(author_block)
+        author_row.addStretch()
+        card_layout.addWidget(author_card)
+        card_layout.addSpacing(26)
+
+        btn_ok = QPushButton(tr("common.close"))
+        btn_ok.setFixedHeight(40)
         btn_ok.setCursor(Qt.PointingHandCursor)
         btn_ok.setStyleSheet(f"""
             QPushButton {{
@@ -1367,7 +1416,7 @@ class AboutDialog(QDialog):
                 border-radius: 10px;
                 color: #ffffff;
                 font-family: "{FONT_FAMILY}";
-                font-size: 11px;
+                font-size: 12px;
                 font-weight: bold;
             }}
             QPushButton:hover {{
@@ -1378,6 +1427,7 @@ class AboutDialog(QDialog):
         card_layout.addWidget(btn_ok)
 
         outer.addWidget(self.card)
+        outer.setAlignment(self.card, Qt.AlignCenter)
 
     def paintEvent(self, event):
         painter = QPainter(self)

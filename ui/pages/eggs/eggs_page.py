@@ -72,13 +72,14 @@ def style_combo_popup(combo: QComboBox) -> None:
 
 
 from core.system.disks import list_relevant_disks
+from core.i18n import tr, i18n
 
 
 def _format_disk_label(d) -> str:
     """Mesma formatação usada no combo de destino — reusada também no
     card 'ÚLTIMA ISO' quando o disco selecionado não tem nenhuma ISO,
     pra mostrar a descrição completa do disco, não só o path."""
-    return f"{d.mountpoint}  •  {d.model or d.name}  •  {d.avail} livre  •  {d.fstype}"
+    return f"{d.mountpoint}  •  {d.model or d.name}  •  {d.avail} {tr('eggs.disk_label_free')}  •  {d.fstype}"
 
 
 class _ElideLabel(QLabel):
@@ -304,7 +305,7 @@ class _DeleteIsoConfirmDialog(QDialog):
 
     def __init__(self, name: str, size_gb: float, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Confirmar exclusão")
+        self.setWindowTitle(tr("snapshots.delete_confirm_window_title"))
         self.setModal(True)
         self.setFixedSize(480, 220)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
@@ -328,7 +329,7 @@ class _DeleteIsoConfirmDialog(QDialog):
         icon.setPixmap(qta.icon("mdi6.delete", color="#ff6666").pixmap(18, 18))
         icon.setStyleSheet("QLabel { background: rgba(200,60,60,40); border-radius: 8px; }")
 
-        lbl = QLabel("Excluir ISO")
+        lbl = QLabel(tr("eggs.delete_iso_header"))
         lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
         lbl.setStyleSheet("color: #ecf4ff;")
 
@@ -347,7 +348,7 @@ class _DeleteIsoConfirmDialog(QDialog):
         b_layout.setContentsMargins(24, 18, 24, 20)
         b_layout.setSpacing(10)
 
-        warn = QLabel("Esta ação é irreversível. A ISO será permanentemente removida do disco.")
+        warn = QLabel(tr("eggs.delete_iso_warning"))
         warn.setWordWrap(True)
         warn.setFont(QFont("DejaVu Sans Mono", 9))
         warn.setStyleSheet("color: #c8d4e0;")
@@ -362,12 +363,12 @@ class _DeleteIsoConfirmDialog(QDialog):
         btn_row = QHBoxLayout()
         btn_row.setSpacing(10)
 
-        btn_cancel = QPushButton("Cancelar")
+        btn_cancel = QPushButton(tr("common.cancel"))
         btn_cancel.setObjectName("DelBtnCancel")
         btn_cancel.setFixedWidth(110)
         btn_cancel.clicked.connect(self.reject)
 
-        btn_confirm = QPushButton("Excluir")
+        btn_confirm = QPushButton(tr("common.delete"))
         btn_confirm.setObjectName("DelBtnConfirm")
         btn_confirm.setFixedWidth(110)
         btn_confirm.clicked.connect(self.accept)
@@ -490,7 +491,7 @@ class _VentoyCard(QFrame):
         title_lbl.setStyleSheet("color: #ecf4ff; background: transparent; border: none;")
         self.title_lbl = title_lbl
 
-        self.detail_lbl = QLabel("não montado")
+        self.detail_lbl = QLabel(tr("eggs.not_mounted"))
         self.detail_lbl.setFont(QFont("DejaVu Sans Mono", 9))
         self.detail_lbl.setStyleSheet("color: #7d8a99; background: transparent; border: none;")
 
@@ -546,7 +547,7 @@ class _VentoyCard(QFrame):
         iso_text_col = QVBoxLayout()
         iso_text_col.setSpacing(5)
 
-        self.iso_name_lbl = QLabel("Nenhuma ISO gerada ainda")
+        self.iso_name_lbl = QLabel(tr("eggs.no_iso_yet"))
         self.iso_name_lbl.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
         self.iso_name_lbl.setStyleSheet("color: #ecf4ff; background: transparent; border: none;")
 
@@ -566,7 +567,7 @@ class _VentoyCard(QFrame):
         """Última ISO encontrada NESTE disco (mesmo disco do card, então
         não precisa repetir o path/disco de novo aqui embaixo)."""
         if not name:
-            self.iso_name_lbl.setText("Sem ISO neste disco")
+            self.iso_name_lbl.setText(tr("eggs.no_iso_this_disk"))
             self.iso_meta_lbl.setText("")
             return
         self.iso_name_lbl.setText(name)
@@ -590,7 +591,7 @@ class _VentoyCard(QFrame):
         mount = mountpoint or "/mnt/VENTOY"
 
         if free_gb is None or total_gb is None or total_gb <= 0:
-            self.detail_lbl.setText(f"não montado  •  {mount}")
+            self.detail_lbl.setText(f"{tr('eggs.not_mounted')}  •  {mount}")
             self.pct_lbl.setText("—")
             self.bar_fill.setGeometry(0, 0, 0, 5)
             return
@@ -601,9 +602,9 @@ class _VentoyCard(QFrame):
         pct_free = free_pct if free_pct is not None else (free_gb / total_gb) * 100
         fs = fs_type or "?"
         self.detail_lbl.setText(
-            f"{free_gb:.1f} GB livres de {total_gb:.1f} GB  •  {mount}  •  {fs}"
+            tr("eggs.free_of_total").format(free=f"{free_gb:.1f}", total=f"{total_gb:.1f}", mount=mount, fs=fs)
         )
-        self.pct_lbl.setText(f"{pct_free:.0f}% livre")
+        self.pct_lbl.setText(tr("eggs.free_percent").format(pct=f"{pct_free:.0f}"))
 
         track_width = self.bar_track.width() or 200
         used_pct = 100 - pct_free
@@ -615,9 +616,10 @@ class _VentoyCard(QFrame):
         # Recalcula a largura da barra preenchida proporcionalmente ao
         # redimensionar a tela.
         text = self.pct_lbl.text()
-        if text != "—" and text.endswith("% livre"):
+        suffix = tr("eggs.free_percent").format(pct="").strip()
+        if text != "—" and suffix and text.endswith(suffix):
             try:
-                pct_free = float(text.replace("% livre", ""))
+                pct_free = float(text[: -len(suffix)].strip())
                 used_pct = 100 - pct_free
                 fill_width = int(self.bar_track.width() * min(max(used_pct / 100, 0), 1))
                 self.bar_fill.setGeometry(0, 0, fill_width, self.bar_track.height())
@@ -683,7 +685,7 @@ class _IsoListCard(QFrame):
         text_col.addWidget(title)
         text_col.addWidget(meta)
 
-        self.btn_delete = QPushButton("DELETE")
+        self.btn_delete = QPushButton(tr("eggs.btn_delete"))
         self.btn_delete.setIcon(qta.icon("mdi6.delete", color="#ff8888"))
         self.btn_delete.setIconSize(QSize(16, 16))
 
@@ -936,6 +938,19 @@ class EggsPage(QWidget):
         )
         self._build_ui()
 
+        # ── Troca de idioma em tempo real, sem precisar reiniciar o app ──
+        i18n.language_changed.connect(self._retranslate)
+
+    def _retranslate(self) -> None:
+        # Reaproveita a mesma rotina de "descarta o layout e reconstrói
+        # do zero" já usada por _check_screen_and_maybe_rebuild (troca de
+        # monitor) — mais simples e confiável do que atualizar cada label
+        # manualmente numa tela com este tanto de widget dinâmico.
+        old_layout = self.layout()
+        if old_layout is not None:
+            QWidget().setLayout(old_layout)
+        self._build_ui()
+
     def _detect_compact_mode(self) -> bool:
         """Único ponto de detecção de monitor — usado tanto na construção
         inicial quanto na checagem periódica (_check_screen_and_maybe_rebuild).
@@ -1000,7 +1015,7 @@ class EggsPage(QWidget):
         title.setFont(QFont("DejaVu Sans Mono", 22, QFont.Bold))
         title.setStyleSheet("color: #23a6ff;")
 
-        subtitle = QLabel("Create, check and install Arch Linux live ISOs")
+        subtitle = QLabel(tr("eggs.subtitle"))
         self.subtitle_lbl = subtitle
         subtitle.setFont(QFont("DejaVu Sans Mono", 10))
         subtitle.setStyleSheet("color: #9aa6b2;")
@@ -1028,9 +1043,9 @@ class EggsPage(QWidget):
         dest_col = QVBoxLayout()
         dest_col.setSpacing(8)
 
-        dest_label = QLabel("Destino da ISO:")
-        dest_label.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
-        dest_label.setStyleSheet("color: #9aa6b2;")
+        dest_label = QLabel(tr("eggs.destination_label"))
+        dest_label.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+        dest_label.setStyleSheet("color: #ecf4ff;")
 
         self.cmb_iso_destination = QComboBox()
         self.cmb_iso_destination.setEditable(False)
@@ -1112,7 +1127,7 @@ class EggsPage(QWidget):
             desc=install_desc,
             color="#ff9966",
             parent=self,
-            badge="requer root",
+            badge=tr("eggs.badge_requires_root"),
             action_label=install_action,
             compact=self._compact_cards,
         )
@@ -1121,30 +1136,30 @@ class EggsPage(QWidget):
         # ── Cards de ação ────────────────────────────────────────────────
         self.btn_create = _EggsOptionButton(
             glyph="mdi6.egg-easter",
-            title="Create Penguin's Eggs",
-            desc="Gera uma ISO live (ou move a já pronta pro Ventoy).",
+            title=tr("eggs.create_title"),
+            desc=tr("eggs.create_desc"),
             color="#9bf0bd",
             parent=self,
-            badge="requer root",
+            badge=tr("eggs.badge_requires_root"),
             compact=self._compact_cards,
         )
         self.btn_create.clicked.connect(self._on_create)
 
         self.btn_check = _EggsOptionButton(
             glyph="mdi6.file-search-outline",
-            title="Check Penguin's Eggs .iso",
-            desc="Verifica .iso pendente e faz backup automático.",
+            title=tr("eggs.check_title"),
+            desc=tr("eggs.check_desc"),
             color="#23a6ff",
             parent=self,
-            badge="requer root",
+            badge=tr("eggs.badge_requires_root"),
             compact=self._compact_cards,
         )
         self.btn_check.clicked.connect(self._on_check)
 
         self.btn_broot = _EggsOptionButton(
             glyph="mdi6.folder-search-outline",
-            title="Open files — broot",
-            desc="Abre o Ventoy (destino da ISO) no broot.",
+            title=tr("eggs.open_broot_title"),
+            desc=tr("eggs.open_broot_desc"),
             color="#c8a2ff",
             parent=self,
             compact=self._compact_cards,
@@ -1153,8 +1168,8 @@ class EggsPage(QWidget):
 
         self.btn_nautilus = _EggsOptionButton(
             glyph="mdi6.folder-open-outline",
-            title="Open files — Nautilus",
-            desc="Abre o Ventoy (destino da ISO) no Nautilus.",
+            title=tr("eggs.open_nautilus_title"),
+            desc=tr("eggs.open_nautilus_desc"),
             color="#ffb86b",
             parent=self,
             compact=self._compact_cards,
@@ -1217,7 +1232,7 @@ class EggsPage(QWidget):
         self._spinner_timer.setInterval(80)
         self._spinner_timer.timeout.connect(self._tick_spinner)
 
-        self.btn_force_kill = QPushButton("Parece travado? Forçar encerramento")
+        self.btn_force_kill = QPushButton(tr("eggs.force_kill_link"))
         self.btn_force_kill.setObjectName("ForceKillLink")
         self.btn_force_kill.setCursor(Qt.PointingHandCursor)
         self.btn_force_kill.setStyleSheet(
@@ -1248,7 +1263,7 @@ class EggsPage(QWidget):
         root.addSpacing(18)
 
         # ── Listagem de ISOs existentes (estilo Timeshift, item 3) ───────
-        iso_list_header = QLabel("ISOs existentes")
+        iso_list_header = QLabel(tr("eggs.iso_list_header"))
         iso_list_header.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
         iso_list_header.setStyleSheet("color: #ecf4ff;")
         root.addWidget(iso_list_header)
@@ -1282,7 +1297,7 @@ class EggsPage(QWidget):
         # Clonezilla/Timeshift. Fica depois do addStretch(1) acima, que já
         # empurra tudo pro topo e absorve a sobra de altura — assim o
         # rodapé fica ancorado no fim da página.
-        footer_lbl = QLabel("Back to menu: button or Esc")
+        footer_lbl = QLabel(tr("menu.back_to_menu"))
         footer_lbl.setFont(QFont("DejaVu Sans Mono", 9))
         footer_lbl.setStyleSheet("color: #6b7280;")
         footer_lbl.setAlignment(Qt.AlignCenter)
@@ -1366,7 +1381,7 @@ class EggsPage(QWidget):
         ISO_CARD_MIN_WIDTH = 420  # espaço mínimo pra nome+data+tamanho+DELETE não apertar
 
         if not entries:
-            empty = QLabel("Nenhuma ISO gerada ainda.")
+            empty = QLabel(tr("eggs.empty_iso_list"))
             empty.setAlignment(Qt.AlignCenter)
             empty.setFont(QFont("DejaVu Sans Mono", 9))
             empty.setStyleSheet("color: #6b7a8d; padding: 24px;")
@@ -1424,7 +1439,7 @@ class EggsPage(QWidget):
             if result.returncode == 126:
                 return  # usuário cancelou a autenticação
             err = result.stderr.strip() or f"exit code {result.returncode}"
-            _show_error("Carbonara", f"Falha ao remover: {err}", parent=self)
+            _show_error("Carbonara", tr("eggs.delete_failed").format(err=err), parent=self)
             self.refresh_list()
             return
         self.refresh_list()
@@ -1468,26 +1483,28 @@ class EggsPage(QWidget):
         e se há atualização disponível. Retorna (título, descrição, rótulo do botão)."""
         if not installed:
             return (
-                "Penguin's Eggs and Calamares Install",
-                "Instala o penguins-eggs e o módulo Calamares, se necessário.",
-                "Instalar",
+                tr("eggs.install_title_not_installed"),
+                tr("eggs.install_desc_not_installed"),
+                tr("eggs.install_action_install"),
             )
         check_time = getattr(self, "_last_update_check_time", None)
         checked_suffix = (
-            f' — <span style="color:#60a5fa;">verificado às {check_time.strftime("%d-%m-%Y - %H:%M")}</span>'
+            tr("eggs.install_checked_suffix").format(time=check_time.strftime("%d-%m-%Y - %H:%M"))
             if check_time else ""
         )
-        current = f"v{version}" if version else "versão instalada"
+        current = f"v{version}" if version else tr("eggs.install_version_unknown")
         if update_version:
             return (
-                "Update Penguin's Eggs",
-                f"Atual: {current} — nova versão v{update_version} disponível no AUR.{checked_suffix}",
-                "Atualizar",
+                tr("eggs.install_title_installed"),
+                tr("eggs.install_desc_update_available").format(
+                    current=current, update=update_version, suffix=checked_suffix,
+                ),
+                tr("eggs.install_action_update"),
             )
         return (
-            "Update Penguin's Eggs",
-            f"Atual: {current} — atualizado, última versão.{checked_suffix}",
-            "Verificar",
+            tr("eggs.install_title_installed"),
+            tr("eggs.install_desc_up_to_date").format(current=current, suffix=checked_suffix),
+            tr("eggs.install_action_check"),
         )
 
     def _check_screen_and_maybe_rebuild(self) -> bool:
@@ -1677,11 +1694,11 @@ class EggsPage(QWidget):
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
             )
         except Exception as exc:
-            _show_error("Penguin's Eggs", f"Erro ao executar:\n\n{exc}", parent=self)
+            _show_error("Penguin's Eggs", tr("eggs.error_running").format(err=exc), parent=self)
             return
 
         self._set_cards_enabled(False)
-        self._show_toast(f"Executando: {dialog_title}")
+        self._show_toast(tr("eggs.executing_prefix").format(title=dialog_title))
         self._spinner_index = 0
         self._spinner_timer.start()
         self._force_kill_timer.start()
@@ -1717,7 +1734,7 @@ class EggsPage(QWidget):
         if rc != 0:
             self._pending_after_action = None
             err = (output or f"exit code {rc}").strip()
-            _show_error("Penguin's Eggs", f"Erro ao executar:\n\n{err}", parent=self)
+            _show_error("Penguin's Eggs", tr("eggs.error_running").format(err=err), parent=self)
             return
 
         # Sucesso — se tinha uma ação encadeada (ex: create_eggs depois
@@ -1743,7 +1760,7 @@ class EggsPage(QWidget):
         # _pending_after_action, pra sempre gerar com a versão mais nova
         # em vez de checar só depois que a ISO já foi criada.
         create_action = (
-            "create_eggs", "Criando Penguin's Eggs...", "Criando ISO...", "mdi6.egg-easter",
+            "create_eggs", tr("eggs.creating_title"), tr("eggs.creating_status"), "mdi6.egg-easter",
             {
                 "destination": self.current_iso_destination(),
                 "update_check_version": self._last_update_version,
@@ -1752,14 +1769,14 @@ class EggsPage(QWidget):
         if self._last_update_version:
             self._pending_after_action = create_action
             self._run_with_progress(
-                "install_eggs", "Atualizando Penguin's Eggs...", "Atualizando antes de criar...", "mdi6.download-circle-outline",
+                "install_eggs", tr("eggs.updating_before_create_title"), tr("eggs.updating_before_create_status"), "mdi6.download-circle-outline",
             )
         else:
             self._run_with_progress(create_action[0], create_action[1], create_action[2], create_action[3], extra_kwargs=create_action[4])
 
     def _on_check(self) -> None:
         self._run_with_progress(
-            "check_eggs", "Verificando Penguin's Eggs...", "Verificando .iso...", "mdi6.file-search-outline",
+            "check_eggs", tr("eggs.checking_title"), tr("eggs.checking_status"), "mdi6.file-search-outline",
             extra_kwargs={"destination": self.current_iso_destination()},
         )
 
@@ -1773,7 +1790,7 @@ class EggsPage(QWidget):
         install_title, _, _ = self._install_card_texts(
             stats["eggs_installed"], stats["eggs_version"], self._last_update_version
         )
-        preparing = "Instalando..." if not stats["eggs_installed"] else "Verificando atualizações..."
+        preparing = tr("eggs.installing_status") if not stats["eggs_installed"] else tr("eggs.checking_updates_status")
         self._run_with_progress("install_eggs", install_title, preparing, "mdi6.download-circle-outline")
 
     def _open_files(self, kind: str) -> None:
@@ -1781,7 +1798,7 @@ class EggsPage(QWidget):
         try:
             open_file_manager(kind)
         except Exception as exc:  # noqa: BLE001
-            _show_error("Penguin's Eggs", f"Não foi possível abrir: {exc}", parent=self)
+            _show_error("Penguin's Eggs", tr("eggs.error_opening").format(exc=exc), parent=self)
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Escape:
