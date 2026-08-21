@@ -1856,7 +1856,7 @@ class SnapshotsPage(QWidget):
             QMessageBox.warning(
                 self,
                 "Carbonara",
-                "Another exclusive operation is already running.",
+                tr("snapshots.op_exclusive_running"),
             )
             return
 
@@ -1877,7 +1877,7 @@ class SnapshotsPage(QWidget):
             return
 
         if not OperationManager.start("delete", f"Delete snapshot {entry.path.name}"):
-            QMessageBox.warning(self, "Carbonara", "Another operation is already running.")
+            QMessageBox.warning(self, "Carbonara", tr("snapshots.op_exclusive_running"))
             return
 
         self.set_busy(True)
@@ -1902,7 +1902,7 @@ class SnapshotsPage(QWidget):
         self._delete_progress.close()
         OperationManager.finish()
         self.set_busy(False)
-        _show_error("Delete Snapshot", f"Falha ao remover snapshot:\n\n{msg}", parent=self)
+        _show_error("Delete Snapshot", tr("snapshots.delete_failed_message").format(msg=msg), parent=self)
         self.refresh_list()
 
 
@@ -2959,7 +2959,7 @@ class _FileBrowserDialog(QDialog):
         super().__init__(parent)
         self.entry = entry
         self.snapshot_root = entry.path
-        self.setWindowTitle("File Browser")
+        self.setWindowTitle(tr("snapshots.filebrowser_title"))
         self.setModal(True)
         self.resize(1100, 700)
         self.setMinimumSize(800, 500)
@@ -2990,7 +2990,7 @@ class _FileBrowserDialog(QDialog):
         ico.setPixmap(qta.icon("mdi6.folder-search", color="#4ade80").pixmap(22, 22))
         ico.setStyleSheet("QLabel { background: rgba(74,222,128,30); border-radius: 8px; }")
 
-        lbl = QLabel("File Browser")
+        lbl = QLabel(tr("snapshots.filebrowser_title"))
         lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
         lbl.setStyleSheet("color: #ecf4ff;")
 
@@ -3068,14 +3068,14 @@ class _FileBrowserDialog(QDialog):
         right_l.setContentsMargins(8, 0, 0, 0)
         right_l.setSpacing(8)
 
-        lbl_sel = QLabel("Selecionados para restore:")
+        lbl_sel = QLabel(tr("snapshots.filebrowser_selected_label"))
         lbl_sel.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
         lbl_sel.setStyleSheet("color: #c8d4e0;")
 
         self.list_selected = QPlainTextEdit()
         self.list_selected.setReadOnly(True)
         self.list_selected.setObjectName("FBSelected")
-        self.list_selected.setPlaceholderText("Nenhum item selecionado.\nSelecione arquivos/pastas na árvore.")
+        self.list_selected.setPlaceholderText(tr("snapshots.filebrowser_selected_placeholder"))
 
         # Conflito
         cf_frame = QFrame()
@@ -3084,17 +3084,17 @@ class _FileBrowserDialog(QDialog):
         cf_l.setContentsMargins(8, 8, 8, 8)
         cf_l.setSpacing(6)
 
-        lbl_cf = QLabel("Se o arquivo já existir no sistema:")
+        lbl_cf = QLabel(tr("snapshots.filebrowser_conflict_label"))
         lbl_cf.setFont(QFont("DejaVu Sans Mono", 9))
         lbl_cf.setStyleSheet("color: #9aa6b2;")
 
-        self.btn_overwrite = QPushButton("Sobrescrever")
+        self.btn_overwrite = QPushButton(tr("snapshots.filebrowser_overwrite"))
         self.btn_overwrite.setObjectName("FBConflictBtn")
         self.btn_overwrite.setCheckable(True)
         self.btn_overwrite.setChecked(True)
         self.btn_overwrite.clicked.connect(lambda: self._set_conflict("overwrite"))
 
-        self.btn_skip = QPushButton("Pular existentes")
+        self.btn_skip = QPushButton(tr("snapshots.filebrowser_skip"))
         self.btn_skip.setObjectName("FBConflictBtn")
         self.btn_skip.setCheckable(True)
         self.btn_skip.clicked.connect(lambda: self._set_conflict("skip"))
@@ -3106,7 +3106,7 @@ class _FileBrowserDialog(QDialog):
         cf_row.addWidget(self.btn_skip)
         cf_l.addLayout(cf_row)
 
-        self.btn_restore = QPushButton("  Restaurar selecionados")
+        self.btn_restore = QPushButton(tr("snapshots.filebrowser_btn_restore"))
         self.btn_restore.setIcon(qta.icon("mdi6.file-restore-outline", color="#08111d"))
         self.btn_restore.setIconSize(QSize(16, 16))
         self.btn_restore.setObjectName("FBBtnRestore")
@@ -3295,7 +3295,7 @@ class _FileBrowserDialog(QDialog):
             )
             if has_children:
                 sentinel = QTreeWidgetItem()
-                sentinel.setText(0, "carregando...")
+                sentinel.setText(0, tr("snapshots.filebrowser_loading"))
                 sentinel.setData(0, Qt.UserRole, None)  # marca sentinel
                 sentinel.setDisabled(True)
                 item.addChild(sentinel)
@@ -3422,13 +3422,13 @@ class _FileBrowserDialog(QDialog):
         self.restore_progress.setRange(0, 1)
         self.restore_progress.setValue(1)
         self.btn_restore.setEnabled(True)
-        self._on_log_line("─── Restore concluído ───")
+        self._on_log_line(tr("snapshots.filebrowser_restore_done"))
 
     def _on_restore_fail(self, msg):
         self.restore_progress.setRange(0, 1)
         self.restore_progress.setValue(0)
         self.btn_restore.setEnabled(True)
-        self._on_log_line(f"ERRO: {msg}")
+        self._on_log_line(tr("snapshots.filebrowser_error").format(msg=msg))
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -3460,7 +3460,7 @@ class _ConfirmRestoreDialog(QDialog):
         ico.setAlignment(Qt.AlignCenter)
         ico.setPixmap(qta.icon("mdi6.file-restore-outline", color="#4ade80").pixmap(16, 16))
         ico.setStyleSheet("QLabel { background: rgba(74,222,128,30); border-radius: 6px; }")
-        lbl = QLabel("Confirmar Restore")
+        lbl = QLabel(tr("snapshots.confirm_restore_title"))
         lbl.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
         lbl.setStyleSheet("color: #ecf4ff;")
         hl.addWidget(ico)
@@ -3474,17 +3474,20 @@ class _ConfirmRestoreDialog(QDialog):
         bl.setContentsMargins(20, 14, 20, 16)
         bl.setSpacing(12)
 
-        ct = "sobrescrevendo existentes" if conflict == "overwrite" else "pulando existentes"
-        msg = QLabel(f"Restaurar {label} para o sistema,\n{ct}?")
+        ct = (
+            tr("snapshots.confirm_restore_overwriting") if conflict == "overwrite"
+            else tr("snapshots.confirm_restore_skipping")
+        )
+        msg = QLabel(tr("snapshots.confirm_restore_message").format(label=label, ct=ct))
         msg.setFont(QFont("DejaVu Sans Mono", 9))
         msg.setStyleSheet("color: #c8d4e0;")
 
         btn_row = QHBoxLayout()
-        btn_cancel = QPushButton("Cancelar")
+        btn_cancel = QPushButton(tr("common.cancel"))
         btn_cancel.setObjectName("CRBtnCancel")
         btn_cancel.setFixedWidth(100)
         btn_cancel.clicked.connect(self.reject)
-        btn_ok = QPushButton("Restaurar")
+        btn_ok = QPushButton(tr("common.restore"))
         btn_ok.setObjectName("CRBtnOk")
         btn_ok.setFixedWidth(100)
         btn_ok.clicked.connect(self.accept)
@@ -3576,7 +3579,7 @@ class _AltRestoreDialog(QDialog):
     def __init__(self, entry: SnapshotEntry, parent=None):
         super().__init__(parent)
         self.entry = entry
-        self.setWindowTitle("Restore para disco alternativo")
+        self.setWindowTitle(tr("snapshots.altrestore_title"))
         self.setModal(True)
         self.setFixedSize(800, 480)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
@@ -3604,7 +3607,7 @@ class _AltRestoreDialog(QDialog):
         ico.setPixmap(qta.icon("mdi6.content-copy", color="#23a6ff").pixmap(24, 24))
         ico.setStyleSheet("QLabel { background: rgba(35,166,255,40); border-radius: 10px; }")
 
-        lbl = QLabel("Restore para disco alternativo")
+        lbl = QLabel(tr("snapshots.altrestore_title"))
         lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
         lbl.setStyleSheet("color: #ecf4ff;")
 
@@ -3652,7 +3655,7 @@ class _AltRestoreDialog(QDialog):
         snap_meta_row.addWidget(snap_meta)
 
         if self.entry.size_str:
-            snap_size_prefix = QLabel("snapshot size")
+            snap_size_prefix = QLabel(tr("snapshots.size_label"))
             snap_size_prefix.setFont(QFont("DejaVu Sans Mono", 9))
             snap_size_prefix.setStyleSheet("color: #6b7a8d;")
             snap_meta_row.addWidget(snap_size_prefix)
@@ -3675,7 +3678,7 @@ class _AltRestoreDialog(QDialog):
             snap_sync_icon = QLabel()
             snap_sync_icon.setPixmap(qta.icon(SYNC_GLYPH, color="#23a6ff").pixmap(14, 14))
 
-            snap_sync_lbl = QLabel(f"last sync  {self.entry.synced_at.replace('T', 'T ', 1)}")
+            snap_sync_lbl = QLabel(tr("snapshots.last_sync").format(date=self.entry.synced_at.replace('T', 'T ', 1)))
             snap_sync_lbl.setFont(QFont("DejaVu Sans Mono", 9))
             snap_sync_lbl.setStyleSheet("color: #23a6ff;")
 
@@ -3689,7 +3692,7 @@ class _AltRestoreDialog(QDialog):
         snap_row.addStretch()
 
         # Destino
-        lbl_dest = QLabel("Selecione o disco de destino:")
+        lbl_dest = QLabel(tr("snapshots.altrestore_select_dest"))
         lbl_dest.setFont(QFont("DejaVu Sans Mono", 10))
         lbl_dest.setStyleSheet("color: #c8d4e0;")
 
@@ -3699,14 +3702,14 @@ class _AltRestoreDialog(QDialog):
         style_combo_popup(self.cmb_dest)
 
         # Opções de cópia
-        lbl_opts = QLabel("Opções:")
+        lbl_opts = QLabel(tr("snapshots.altrestore_options_label"))
         lbl_opts.setFont(QFont("DejaVu Sans Mono", 10))
         lbl_opts.setStyleSheet("color: #c8d4e0;")
 
         opts_row = QHBoxLayout()
         opts_row.setSpacing(10)
 
-        self.chk_delete = QPushButton("Sincronizar (--delete)")
+        self.chk_delete = QPushButton(tr("snapshots.altrestore_opt_delete"))
         self.chk_delete.setCheckable(True)
         self.chk_delete.setChecked(False)
         self.chk_delete.setObjectName("AROptBtn")
@@ -3714,7 +3717,7 @@ class _AltRestoreDialog(QDialog):
         self.chk_delete.setMinimumWidth(200)
         self.chk_delete.setCursor(Qt.PointingHandCursor)
 
-        self.chk_hardlinks = QPushButton("Preservar hard-links (-H)")
+        self.chk_hardlinks = QPushButton(tr("snapshots.altrestore_opt_hardlinks"))
         self.chk_hardlinks.setCheckable(True)
         self.chk_hardlinks.setChecked(True)
         self.chk_hardlinks.setObjectName("AROptBtn")
@@ -3743,7 +3746,7 @@ class _AltRestoreDialog(QDialog):
         warn_icon.setAlignment(Qt.AlignCenter)
         warn_icon.setPixmap(qta.icon("mdi6.alert", color="#ff9966").pixmap(18, 18))
 
-        warn = QLabel("O conteúdo existente no destino pode ser alterado.")
+        warn = QLabel(tr("snapshots.altrestore_warning"))
         warn.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
         warn.setStyleSheet("color: #ff9966;")
 
@@ -3754,12 +3757,12 @@ class _AltRestoreDialog(QDialog):
         # Botões
         btn_row = QHBoxLayout()
         btn_row.setSpacing(10)
-        btn_cancel = QPushButton("Cancelar")
+        btn_cancel = QPushButton(tr("common.cancel"))
         btn_cancel.setObjectName("ARBtnCancel")
         btn_cancel.setFixedSize(120, 40)
         btn_cancel.clicked.connect(self.reject)
 
-        self.btn_start = QPushButton("Iniciar Restore")
+        self.btn_start = QPushButton(tr("snapshots.altrestore_btn_start"))
         self.btn_start.setObjectName("ARBtnStart")
         self.btn_start.setFixedSize(160, 40)
         self.btn_start.setEnabled(False)
@@ -3861,12 +3864,14 @@ class _AltRestoreDialog(QDialog):
             if dest.mountpoint == snap_mount:
                 continue  # exclui o disco onde o snapshot está
             self._destinations.append(dest)
-            label = f"{dest.label}  •  {format_gb(dest.free_gb)} livre  •  {dest.mountpoint}"
+            label = tr("snapshots.altrestore_combo_item").format(
+                label=dest.label, free=format_gb(dest.free_gb), mountpoint=dest.mountpoint,
+            )
             self.cmb_dest.addItem(label, dest)
 
         self.btn_start.setEnabled(bool(self._destinations))
         if not self._destinations:
-            self.lbl_dest_info.setText("Nenhum disco alternativo disponível.")
+            self.lbl_dest_info.setText(tr("snapshots.altrestore_no_disks"))
         else:
             self._on_dest_changed(0)
 
@@ -3874,16 +3879,16 @@ class _AltRestoreDialog(QDialog):
         if index < 0 or index >= len(self._destinations):
             return
         dest = self._destinations[index]
-        base_info = (
-            f"{format_gb(dest.free_gb)} livre de {format_gb(dest.total_gb)} "
-            f"• {dest.fs_type}"
+        base_info = tr("snapshots.altrestore_dest_info").format(
+            free=format_gb(dest.free_gb), total=format_gb(dest.total_gb), fs_type=dest.fs_type,
         )
 
         if self.entry.size_gb > 0 and dest.free_gb < self.entry.size_gb:
             self.lbl_dest_info.setText(
-                f"{base_info}  —  espaço insuficiente "
-                f"(snapshot tem {self.entry.size_str}, faltam "
-                f"{format_gb(self.entry.size_gb - dest.free_gb)})"
+                tr("snapshots.altrestore_insufficient_space").format(
+                    base_info=base_info, size=self.entry.size_str,
+                    missing=format_gb(self.entry.size_gb - dest.free_gb),
+                )
             )
             self.lbl_dest_info.setStyleSheet("color: #ff8888; font-weight: bold;")
             self.btn_start.setEnabled(False)
@@ -4854,7 +4859,7 @@ class _DeleteConfirmDialog(QDialog):
 
     def __init__(self, entry: SnapshotEntry, is_last_root: bool = False, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Confirmar exclusão")
+        self.setWindowTitle(tr("snapshots.delete_confirm_window_title"))
         self.setModal(True)
         self.setFixedSize(520, 300 if is_last_root else 240)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
@@ -4880,7 +4885,7 @@ class _DeleteConfirmDialog(QDialog):
         icon.setPixmap(qta.icon("mdi6.delete", color="#ff6666").pixmap(18, 18))
         icon.setStyleSheet("QLabel { background: rgba(200,60,60,40); border-radius: 8px; }")
 
-        lbl = QLabel("Excluir Snapshot")
+        lbl = QLabel(tr("snapshots.delete_confirm_header"))
         lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
         lbl.setStyleSheet("color: #ecf4ff;")
 
@@ -4902,17 +4907,14 @@ class _DeleteConfirmDialog(QDialog):
         b_layout.setContentsMargins(24, 18, 24, 20)
         b_layout.setSpacing(10)
 
-        warn = QLabel("Esta ação é irreversível. O snapshot será permanentemente removido do disco.")
+        warn = QLabel(tr("snapshots.delete_warning"))
         warn.setWordWrap(True)
         warn.setFont(QFont("DejaVu Sans Mono", 9))
         warn.setStyleSheet("color: #c8d4e0;")
 
         root_warn = None
         if is_last_root:
-            root_warn = QLabel(
-                "Este é o último snapshot ROOT — o carbonara-restore.sh "
-                "também será removido, já que não sobrará nada para restaurar."
-            )
+            root_warn = QLabel(tr("snapshots.delete_last_root_warning"))
             root_warn.setWordWrap(True)
             root_warn.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
             root_warn.setStyleSheet(
@@ -4920,7 +4922,7 @@ class _DeleteConfirmDialog(QDialog):
                 "border-radius: 6px; padding: 8px 10px;"
             )
 
-        pw_note = QLabel("Será solicitada a senha de root para concluir a exclusão.")
+        pw_note = QLabel(tr("snapshots.delete_password_note"))
         pw_note.setWordWrap(True)
         pw_note.setFont(QFont("DejaVu Sans Mono", 8))
         pw_note.setStyleSheet("color: #5f6b7a;")
@@ -4935,12 +4937,12 @@ class _DeleteConfirmDialog(QDialog):
         btn_row = QHBoxLayout()
         btn_row.setSpacing(10)
 
-        btn_cancel = QPushButton("Cancelar")
+        btn_cancel = QPushButton(tr("common.cancel"))
         btn_cancel.setObjectName("DelBtnCancel")
         btn_cancel.setFixedWidth(110)
         btn_cancel.clicked.connect(self.reject)
 
-        btn_confirm = QPushButton("Excluir")
+        btn_confirm = QPushButton(tr("common.delete"))
         btn_confirm.setObjectName("DelBtnConfirm")
         btn_confirm.setFixedWidth(110)
         btn_confirm.clicked.connect(self.accept)
@@ -5027,7 +5029,7 @@ class _DeleteProgressDialog(QDialog):
 
     def __init__(self, snap_name: str, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Removendo snapshot")
+        self.setWindowTitle(tr("snapshots.delete_progress_title"))
         self.setModal(True)
         self.setFixedSize(420, 160)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
@@ -5060,7 +5062,7 @@ class _DeleteProgressDialog(QDialog):
         icon.setPixmap(qta.icon("mdi6.delete", color="#ff6666").pixmap(16, 16))
         icon.setStyleSheet("QLabel { background: rgba(200,60,60,40); border-radius: 7px; }")
 
-        lbl = QLabel("Removendo Snapshot")
+        lbl = QLabel(tr("snapshots.delete_progress_title"))
         lbl.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
         lbl.setStyleSheet("color: #ecf4ff;")
 
@@ -5076,7 +5078,7 @@ class _DeleteProgressDialog(QDialog):
         b_layout.setContentsMargins(24, 16, 24, 20)
         b_layout.setSpacing(10)
 
-        self.lbl_status = QLabel("Aguardando autenticação...")
+        self.lbl_status = QLabel(tr("snapshots.delete_awaiting_auth"))
         self.lbl_status.setFont(QFont("DejaVu Sans Mono", 10))
         self.lbl_status.setStyleSheet("color: #c8d4e0;")
         self.lbl_status.setAlignment(Qt.AlignCenter)
@@ -5213,11 +5215,11 @@ class _DeleteWorker(QThread):
             if result.returncode != 0:
                 err = result.stderr.strip() or f"exit code {result.returncode}"
                 if result.returncode == 126 or "dismissed" in err.lower():
-                    err = "Operação cancelada."
+                    err = tr("snapshots.delete_cancelled")
                 self.failed.emit(err)
                 return
 
-            self.finished_ok.emit(f"Snapshot {self._path.name} removido com sucesso.")
+            self.finished_ok.emit(tr("snapshots.delete_success").format(name=self._path.name))
 
         except Exception as exc:
             self.failed.emit(str(exc))

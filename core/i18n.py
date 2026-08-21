@@ -35,6 +35,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "common.cancel": "Cancelar",
         "common.confirm": "Confirmar",
         "common.delete": "Excluir",
+        "common.restore": "Restaurar",
 
         # ── Clonezilla Backups ──────────────────────────────────────────
         "clonezilla.title": "CLONEZILLA BACKUPS",
@@ -181,6 +182,50 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "snapshots.instructions_script_label": "  Script:       {path}",
         "snapshots.instructions_notes_label": "  Instruções:   {path}",
         "snapshots.btn_understood": "Entendido",
+
+        # ── File Browser / Confirmar Restore / Restore disco alternativo ──
+        "snapshots.filebrowser_title": "File Browser",
+        "snapshots.filebrowser_selected_label": "Selecionados para restore:",
+        "snapshots.filebrowser_selected_placeholder": "Nenhum item selecionado.\nSelecione arquivos/pastas na árvore.",
+        "snapshots.filebrowser_conflict_label": "Se o arquivo já existir no sistema:",
+        "snapshots.filebrowser_overwrite": "Sobrescrever",
+        "snapshots.filebrowser_skip": "Pular existentes",
+        "snapshots.filebrowser_btn_restore": "  Restaurar selecionados",
+        "snapshots.filebrowser_loading": "carregando...",
+        "snapshots.filebrowser_restore_done": "─── Restore concluído ───",
+        "snapshots.filebrowser_error": "ERRO: {msg}",
+        "snapshots.confirm_restore_title": "Confirmar Restore",
+        "snapshots.confirm_restore_overwriting": "sobrescrevendo existentes",
+        "snapshots.confirm_restore_skipping": "pulando existentes",
+        "snapshots.confirm_restore_message": "Restaurar {label} para o sistema,\n{ct}?",
+        "snapshots.altrestore_title": "Restore para disco alternativo",
+        "snapshots.altrestore_select_dest": "Selecione o disco de destino:",
+        "snapshots.altrestore_options_label": "Opções:",
+        "snapshots.altrestore_opt_delete": "Sincronizar (--delete)",
+        "snapshots.altrestore_opt_hardlinks": "Preservar hard-links (-H)",
+        "snapshots.altrestore_warning": "O conteúdo existente no destino pode ser alterado.",
+        "snapshots.altrestore_btn_start": "Iniciar Restore",
+        "snapshots.altrestore_no_disks": "Nenhum disco alternativo disponível.",
+        "snapshots.altrestore_combo_item": "{label}  •  {free} livre  •  {mountpoint}",
+        "snapshots.altrestore_dest_info": "{free} livre de {total} • {fs_type}",
+        "snapshots.altrestore_insufficient_space": (
+            "{base_info}  —  espaço insuficiente (snapshot tem {size}, faltam {missing})"
+        ),
+
+        # ── Confirmar exclusão / progresso de remoção ──
+        "snapshots.delete_confirm_window_title": "Confirmar exclusão",
+        "snapshots.delete_confirm_header": "Excluir Snapshot",
+        "snapshots.delete_warning": "Esta ação é irreversível. O snapshot será permanentemente removido do disco.",
+        "snapshots.delete_last_root_warning": (
+            "Este é o último snapshot ROOT — o carbonara-restore.sh também será "
+            "removido, já que não sobrará nada para restaurar."
+        ),
+        "snapshots.delete_password_note": "Será solicitada a senha de root para concluir a exclusão.",
+        "snapshots.delete_progress_title": "Removendo Snapshot",
+        "snapshots.delete_awaiting_auth": "Aguardando autenticação...",
+        "snapshots.delete_failed_message": "Falha ao remover snapshot:\n\n{msg}",
+        "snapshots.delete_cancelled": "Operação cancelada.",
+        "snapshots.delete_success": "Snapshot {name} removido com sucesso.",
     },
     "en": {
         "menu.idioma": "Language",
@@ -189,6 +234,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "common.cancel": "Cancel",
         "common.confirm": "Confirm",
         "common.delete": "Delete",
+        "common.restore": "Restore",
 
         # ── Clonezilla Backups ──────────────────────────────────────────
         "clonezilla.title": "CLONEZILLA BACKUPS",
@@ -335,6 +381,50 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "snapshots.instructions_script_label": "  Script:       {path}",
         "snapshots.instructions_notes_label": "  Notes:        {path}",
         "snapshots.btn_understood": "Understood",
+
+        # ── File Browser / Confirm Restore / Restore to alternate disk ──
+        "snapshots.filebrowser_title": "File Browser",
+        "snapshots.filebrowser_selected_label": "Selected for restore:",
+        "snapshots.filebrowser_selected_placeholder": "No items selected.\nSelect files/folders in the tree.",
+        "snapshots.filebrowser_conflict_label": "If the file already exists on the system:",
+        "snapshots.filebrowser_overwrite": "Overwrite",
+        "snapshots.filebrowser_skip": "Skip existing",
+        "snapshots.filebrowser_btn_restore": "  Restore selected",
+        "snapshots.filebrowser_loading": "loading...",
+        "snapshots.filebrowser_restore_done": "─── Restore complete ───",
+        "snapshots.filebrowser_error": "ERROR: {msg}",
+        "snapshots.confirm_restore_title": "Confirm Restore",
+        "snapshots.confirm_restore_overwriting": "overwriting existing files",
+        "snapshots.confirm_restore_skipping": "skipping existing files",
+        "snapshots.confirm_restore_message": "Restore {label} to the system,\n{ct}?",
+        "snapshots.altrestore_title": "Restore to alternate disk",
+        "snapshots.altrestore_select_dest": "Select the destination disk:",
+        "snapshots.altrestore_options_label": "Options:",
+        "snapshots.altrestore_opt_delete": "Sync (--delete)",
+        "snapshots.altrestore_opt_hardlinks": "Preserve hard-links (-H)",
+        "snapshots.altrestore_warning": "Existing content at the destination may be altered.",
+        "snapshots.altrestore_btn_start": "Start Restore",
+        "snapshots.altrestore_no_disks": "No alternate disk available.",
+        "snapshots.altrestore_combo_item": "{label}  •  {free} free  •  {mountpoint}",
+        "snapshots.altrestore_dest_info": "{free} free of {total} • {fs_type}",
+        "snapshots.altrestore_insufficient_space": (
+            "{base_info}  —  insufficient space (snapshot is {size}, short by {missing})"
+        ),
+
+        # ── Confirm delete / removal progress ──
+        "snapshots.delete_confirm_window_title": "Confirm Deletion",
+        "snapshots.delete_confirm_header": "Delete Snapshot",
+        "snapshots.delete_warning": "This action is irreversible. The snapshot will be permanently removed from disk.",
+        "snapshots.delete_last_root_warning": (
+            "This is the last ROOT snapshot — carbonara-restore.sh will also be "
+            "removed, since there will be nothing left to restore."
+        ),
+        "snapshots.delete_password_note": "You'll be asked for the root password to complete the deletion.",
+        "snapshots.delete_progress_title": "Removing Snapshot",
+        "snapshots.delete_awaiting_auth": "Awaiting authentication...",
+        "snapshots.delete_failed_message": "Failed to remove snapshot:\n\n{msg}",
+        "snapshots.delete_cancelled": "Operation cancelled.",
+        "snapshots.delete_success": "Snapshot {name} removed successfully.",
     },
     "es": {
         "menu.idioma": "Idioma",
@@ -343,6 +433,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "common.cancel": "Cancelar",
         "common.confirm": "Confirmar",
         "common.delete": "Eliminar",
+        "common.restore": "Restaurar",
 
         # ── Clonezilla Backups — español a propósito con frases más largas
         # que pt/en, pra servir de stress-test do layout (botões, badges,
@@ -514,6 +605,58 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "snapshots.instructions_script_label": "  Script:       {path}",
         "snapshots.instructions_notes_label": "  Notas:        {path}",
         "snapshots.btn_understood": "Entendido",
+
+        # ── Explorador de archivos / Confirmar restauración / Restaurar
+        # en disco alternativo ──────────────────────────────────────────
+        "snapshots.filebrowser_title": "Explorador de archivos",
+        "snapshots.filebrowser_selected_label": "Seleccionados para restaurar:",
+        "snapshots.filebrowser_selected_placeholder": (
+            "Ningún elemento seleccionado.\nSeleccione archivos/carpetas en el árbol."
+        ),
+        "snapshots.filebrowser_conflict_label": "Si el archivo ya existe en el sistema:",
+        "snapshots.filebrowser_overwrite": "Sobrescribir",
+        "snapshots.filebrowser_skip": "Omitir existentes",
+        "snapshots.filebrowser_btn_restore": "  Restaurar seleccionados",
+        "snapshots.filebrowser_loading": "cargando...",
+        "snapshots.filebrowser_restore_done": "─── Restauración completada ───",
+        "snapshots.filebrowser_error": "ERROR: {msg}",
+        "snapshots.confirm_restore_title": "Confirmar restauración",
+        "snapshots.confirm_restore_overwriting": "sobrescribiendo los existentes",
+        "snapshots.confirm_restore_skipping": "omitiendo los existentes",
+        "snapshots.confirm_restore_message": "¿Restaurar {label} en el sistema,\n{ct}?",
+        "snapshots.altrestore_title": "Restaurar en un disco alternativo",
+        "snapshots.altrestore_select_dest": "Seleccione el disco de destino:",
+        "snapshots.altrestore_options_label": "Opciones:",
+        "snapshots.altrestore_opt_delete": "Sincronizar (--delete)",
+        "snapshots.altrestore_opt_hardlinks": "Conservar hard-links (-H)",
+        "snapshots.altrestore_warning": "El contenido existente en el destino puede modificarse.",
+        "snapshots.altrestore_btn_start": "Iniciar restauración",
+        "snapshots.altrestore_no_disks": "No hay ningún disco alternativo disponible.",
+        "snapshots.altrestore_combo_item": "{label}  •  {free} libres  •  {mountpoint}",
+        "snapshots.altrestore_dest_info": "{free} libres de {total} • {fs_type}",
+        "snapshots.altrestore_insufficient_space": (
+            "{base_info}  —  espacio insuficiente (el snapshot pesa {size}, "
+            "faltan {missing})"
+        ),
+
+        # ── Confirmar eliminación / progreso de eliminación ──
+        "snapshots.delete_confirm_window_title": "Confirmar eliminación",
+        "snapshots.delete_confirm_header": "Eliminar Snapshot",
+        "snapshots.delete_warning": (
+            "Esta acción es irreversible. El snapshot se eliminará permanentemente del disco."
+        ),
+        "snapshots.delete_last_root_warning": (
+            "Este es el último snapshot ROOT — carbonara-restore.sh también se "
+            "eliminará, ya que no quedará nada para restaurar."
+        ),
+        "snapshots.delete_password_note": (
+            "Se le pedirá la contraseña de root para completar la eliminación."
+        ),
+        "snapshots.delete_progress_title": "Eliminando Snapshot",
+        "snapshots.delete_awaiting_auth": "Esperando autenticación...",
+        "snapshots.delete_failed_message": "Error al eliminar el snapshot:\n\n{msg}",
+        "snapshots.delete_cancelled": "Operación cancelada.",
+        "snapshots.delete_success": "Snapshot {name} eliminado correctamente.",
     },
 }
 
