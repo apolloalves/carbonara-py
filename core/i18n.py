@@ -227,6 +227,29 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "snapshots.delete_cancelled": "Operação cancelada.",
         "snapshots.delete_success": "Snapshot {name} removido com sucesso.",
 
+        # ── Sincronização automática (badge + diálogo) ──
+        "snapshots.sync_badge_title": "Sync automática",
+        "snapshots.sync_badge_disabled": "desativada",
+        "snapshots.sync_badge_next": "próxima {when}",
+        "snapshots.sync_dialog_title": "Sincronização Automática",
+        "snapshots.sync_enabled": "Ativada",
+        "snapshots.sync_disabled": "Desativada",
+        "snapshots.sync_frequency_label": "FREQUÊNCIA",
+        "snapshots.sync_freq_daily": "Diária",
+        "snapshots.sync_freq_weekly": "Semanal",
+        "snapshots.sync_freq_custom": "Personalizada",
+        "snapshots.sync_time_label": "HORÁRIO",
+        "snapshots.sync_scope_label": "ESCOPO",
+        "snapshots.sync_last_run_label": "Última execução",
+        "snapshots.sync_next_run_label": "Próxima execução",
+        "snapshots.sync_never_run": "Nunca executado",
+        "snapshots.sync_not_scheduled": "Não agendado",
+        "snapshots.sync_save_button": "Salvar agendamento",
+        "snapshots.sync_backend_note": (
+            "O agendamento ainda não está ativo no sistema — essa tela guarda "
+            "suas preferências pra quando o serviço de fundo for implementado."
+        ),
+
         # ── Diálogo Sobre ──
         "about.description": "Ferramenta de administração de sistema para Arch Linux —\nsnapshots, backups, ISOs live e diagnósticos.",
         "about.developed_by": "DESENVOLVIDO POR",
@@ -476,6 +499,29 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "snapshots.delete_failed_message": "Failed to remove snapshot:\n\n{msg}",
         "snapshots.delete_cancelled": "Operation cancelled.",
         "snapshots.delete_success": "Snapshot {name} removed successfully.",
+
+        # ── Automatic sync (badge + dialog) ──
+        "snapshots.sync_badge_title": "Auto sync",
+        "snapshots.sync_badge_disabled": "disabled",
+        "snapshots.sync_badge_next": "next {when}",
+        "snapshots.sync_dialog_title": "Automatic Sync",
+        "snapshots.sync_enabled": "Enabled",
+        "snapshots.sync_disabled": "Disabled",
+        "snapshots.sync_frequency_label": "FREQUENCY",
+        "snapshots.sync_freq_daily": "Daily",
+        "snapshots.sync_freq_weekly": "Weekly",
+        "snapshots.sync_freq_custom": "Custom",
+        "snapshots.sync_time_label": "TIME",
+        "snapshots.sync_scope_label": "SCOPE",
+        "snapshots.sync_last_run_label": "Last run",
+        "snapshots.sync_next_run_label": "Next run",
+        "snapshots.sync_never_run": "Never ran",
+        "snapshots.sync_not_scheduled": "Not scheduled",
+        "snapshots.sync_save_button": "Save schedule",
+        "snapshots.sync_backend_note": (
+            "Scheduling isn't active on the system yet — this screen just "
+            "stores your preferences for when the background service is built."
+        ),
 
         # ── About dialog ──
         "about.description": "System administration tool for Arch Linux —\nsnapshots, backups, live ISOs, and diagnostics.",
@@ -759,6 +805,30 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "snapshots.delete_failed_message": "Error al eliminar el snapshot:\n\n{msg}",
         "snapshots.delete_cancelled": "Operación cancelada.",
         "snapshots.delete_success": "Snapshot {name} eliminado correctamente.",
+
+        # ── Sincronización automática (badge + diálogo) ──
+        "snapshots.sync_badge_title": "Sincronización automática",
+        "snapshots.sync_badge_disabled": "desactivada",
+        "snapshots.sync_badge_next": "próxima {when}",
+        "snapshots.sync_dialog_title": "Sincronización Automática",
+        "snapshots.sync_enabled": "Activada",
+        "snapshots.sync_disabled": "Desactivada",
+        "snapshots.sync_frequency_label": "FRECUENCIA",
+        "snapshots.sync_freq_daily": "Diaria",
+        "snapshots.sync_freq_weekly": "Semanal",
+        "snapshots.sync_freq_custom": "Personalizada",
+        "snapshots.sync_time_label": "HORA",
+        "snapshots.sync_scope_label": "ALCANCE",
+        "snapshots.sync_last_run_label": "Última ejecución",
+        "snapshots.sync_next_run_label": "Próxima ejecución",
+        "snapshots.sync_never_run": "Nunca se ejecutó",
+        "snapshots.sync_not_scheduled": "No programado",
+        "snapshots.sync_save_button": "Guardar programación",
+        "snapshots.sync_backend_note": (
+            "La programación todavía no está activa en el sistema — esta "
+            "pantalla solo guarda sus preferencias para cuando se implemente "
+            "el servicio en segundo plano."
+        ),
 
         # ── Diálogo Acerca de ──
         "about.description": "Herramienta de administración de sistema para Arch Linux —\nsnapshots, copias de seguridad, ISOs live y diagnósticos.",

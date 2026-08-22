@@ -11,7 +11,7 @@ import shutil
 import subprocess
 import tempfile
 import qtawesome as qta
-from PySide6.QtCore import Qt, QTimer, Signal, QSize, QThread, QObject, QEvent, QPoint
+from PySide6.QtCore import Qt, QTimer, Signal, QSize, QThread, QObject, QEvent, QPoint, QTime
 from PySide6.QtGui import QFont, QColor
 
 from PySide6.QtWidgets import (
@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QCheckBox,
     QGraphicsDropShadowEffect,
+    QTimeEdit,
 )
 
 from core.operation_manager import OperationManager
@@ -5159,6 +5160,390 @@ class _DeleteProgressDialog(QDialog):
     def mouseMoveEvent(self, event):
         if event.buttons() == Qt.LeftButton and hasattr(self, '_drag'):
             self.move(event.globalPosition().toPoint() - self._drag)
+
+
+class _SyncStatusBadge(QFrame):
+    """Pill compacta no cabeçalho do Timeshift — mostra o status da
+    sincronização automática e abre o diálogo de configuração ao clicar.
+    Ainda sem backend: reflete só o que foi salvo localmente nesta sessão."""
+
+    clicked = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("SyncStatusBadge")
+        self.setCursor(Qt.PointingHandCursor)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(14, 8, 14, 8)
+        layout.setSpacing(8)
+
+        self._clock_icon = QLabel()
+        self._clock_icon.setFixedSize(14, 14)
+        self._clock_icon.setPixmap(qta.icon("mdi6.clock-outline", color="#8fd4ff").pixmap(14, 14))
+
+        self._dot = QLabel()
+        self._dot.setFixedSize(6, 6)
+
+        self._title_lbl = QLabel(tr("snapshots.sync_badge_title"))
+        self._title_lbl.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
+        self._title_lbl.setStyleSheet("color: #ecf4ff;")
+
+        self._sep_lbl = QLabel("·")
+        self._sep_lbl.setStyleSheet("color: #6b7a8d;")
+
+        self._detail_lbl = QLabel(tr("snapshots.sync_badge_disabled"))
+        self._detail_lbl.setFont(QFont("DejaVu Sans Mono", 9))
+        self._detail_lbl.setStyleSheet("color: #8b92a3;")
+
+        self._chevron = QLabel()
+        self._chevron.setFixedSize(13, 13)
+        self._chevron.setPixmap(qta.icon("mdi6.chevron-right", color="#8b92a3").pixmap(13, 13))
+
+        layout.addWidget(self._clock_icon)
+        layout.addWidget(self._dot)
+        layout.addWidget(self._title_lbl)
+        layout.addWidget(self._sep_lbl)
+        layout.addWidget(self._detail_lbl)
+        layout.addSpacing(2)
+        layout.addWidget(self._chevron)
+
+        self.set_state(enabled=False, next_run=None)
+        self._apply_style()
+
+    def _apply_style(self) -> None:
+        self.setStyleSheet("""
+            QFrame#SyncStatusBadge {
+                background: rgba(255,255,255,5);
+                border: 1px solid rgba(255,255,255,14);
+                border-radius: 16px;
+            }
+            QFrame#SyncStatusBadge:hover {
+                background: rgba(255,255,255,9);
+                border: 1px solid rgba(255,255,255,24);
+            }
+            QLabel { background: transparent; border: none; }
+        """)
+
+    def set_state(self, enabled: bool, next_run: str | None) -> None:
+        dot_color = "#34d399" if enabled else "#6b7a8d"
+        self._dot.setStyleSheet(f"background: {dot_color}; border-radius: 3px;")
+        if enabled and next_run:
+            self._detail_lbl.setText(tr("snapshots.sync_badge_next").format(when=next_run))
+        elif enabled:
+            self._detail_lbl.setText(tr("snapshots.sync_not_scheduled"))
+        else:
+            self._detail_lbl.setText(tr("snapshots.sync_badge_disabled"))
+
+    def retranslate(self) -> None:
+        self._title_lbl.setText(tr("snapshots.sync_badge_title"))
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
+
+class _ChipRow(QHBoxLayout):
+    """Grupo de chips exclusivos (só um ativo por vez) — mesmo padrão
+    visual dos cards de Scope já existentes nesta página."""
+
+    def __init__(self, options: list[tuple[str, str]], active_key: str, on_change) -> None:
+        super().__init__()
+        self.setContentsMargins(0, 0, 0, 0)
+        self.setSpacing(6)
+        self._buttons: dict[str, QPushButton] = {}
+        self._on_change = on_change
+        self.active_key = active_key
+        for key, label in options:
+            btn = QPushButton(label)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setFixedHeight(40)
+            btn.clicked.connect(lambda _checked=False, k=key: self._select(k))
+            self._buttons[key] = btn
+            self.addWidget(btn)
+        self._refresh_styles()
+
+    def _select(self, key: str) -> None:
+        self.active_key = key
+        self._refresh_styles()
+        self._on_change(key)
+
+    def _refresh_styles(self) -> None:
+        for key, btn in self._buttons.items():
+            if key == self.active_key:
+                btn.setStyleSheet("""
+                    QPushButton {
+                        background: rgba(35,166,255,26);
+                        border: 1px solid rgba(35,166,255,130);
+                        border-radius: 8px;
+                        color: #8fd4ff;
+                        font-family: "DejaVu Sans Mono";
+                        font-size: 12px;
+                        font-weight: bold;
+                    }
+                """)
+            else:
+                btn.setStyleSheet("""
+                    QPushButton {
+                        background: rgba(255,255,255,5);
+                        border: 1px solid rgba(255,255,255,14);
+                        border-radius: 8px;
+                        color: #c8d4e0;
+                        font-family: "DejaVu Sans Mono";
+                        font-size: 12px;
+                        font-weight: bold;
+                    }
+                    QPushButton:hover {
+                        background: rgba(255,255,255,9);
+                    }
+                """)
+
+
+class _ScheduledSyncDialog(QDialog):
+    """Configuração de sincronização automática — SOMENTE UI por enquanto.
+    Não escreve nenhuma unit/timer do systemd nem faz nada privilegiado;
+    guarda a escolha em memória (`self.result_config`) pra a página exibir
+    no badge e pra o backend, quando existir, consumir esse mesmo formato."""
+
+    def __init__(self, current_config: dict, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(tr("snapshots.sync_dialog_title"))
+        self.setModal(True)
+        self.setFixedWidth(800)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self.result_config = dict(current_config)
+        self._build_ui()
+        self._apply_styles()
+
+    def _build_ui(self) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        # ── Header ──────────────────────────────────────────────────
+        header = QFrame()
+        header.setObjectName("SyncHeader")
+        header.setFixedHeight(48)
+        h_layout = QHBoxLayout(header)
+        h_layout.setContentsMargins(18, 0, 16, 0)
+
+        icon = QLabel()
+        icon.setFixedSize(28, 28)
+        icon.setAlignment(Qt.AlignCenter)
+        icon.setPixmap(qta.icon("mdi6.clock-outline", color="#8fd4ff").pixmap(18, 18))
+        icon.setStyleSheet("QLabel { background: rgba(35,166,255,40); border-radius: 8px; }")
+
+        lbl = QLabel(tr("snapshots.sync_dialog_title"))
+        lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+        lbl.setStyleSheet("color: #ecf4ff;")
+
+        btn_x = _CloseLabel(self)
+        btn_x.mousePressEvent = lambda e: self.reject()
+
+        h_layout.addWidget(icon)
+        h_layout.addSpacing(10)
+        h_layout.addWidget(lbl)
+        h_layout.addStretch()
+        h_layout.addWidget(btn_x)
+
+        # ── Corpo ───────────────────────────────────────────────────
+        body = QFrame()
+        body.setObjectName("SyncBody")
+        b_layout = QVBoxLayout(body)
+        b_layout.setContentsMargins(36, 32, 36, 32)
+        b_layout.setSpacing(26)
+
+        # Toggle ativar/desativar
+        toggle_row = QHBoxLayout()
+        toggle_row.setContentsMargins(0, 0, 0, 0)
+        toggle_lbl = QLabel(tr("snapshots.sync_dialog_title").upper())
+        toggle_lbl.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+        toggle_lbl.setStyleSheet("color: #8b92a3; letter-spacing: 1px;")
+        toggle_row.addWidget(toggle_lbl)
+        toggle_row.addStretch()
+
+        self.btn_toggle = QPushButton(
+            tr("snapshots.sync_enabled") if self.result_config.get("enabled") else tr("snapshots.sync_disabled")
+        )
+        self.btn_toggle.setCursor(Qt.PointingHandCursor)
+        self.btn_toggle.setFixedSize(120, 36)
+        self.btn_toggle.clicked.connect(self._toggle_enabled)
+        toggle_row.addWidget(self.btn_toggle)
+        b_layout.addLayout(toggle_row)
+
+        # Frequência
+        freq_lbl = QLabel(tr("snapshots.sync_frequency_label"))
+        freq_lbl.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+        freq_lbl.setStyleSheet("color: #8b92a3; letter-spacing: 1px;")
+        b_layout.addWidget(freq_lbl)
+
+        self._freq_row = _ChipRow(
+            [
+                ("daily", tr("snapshots.sync_freq_daily")),
+                ("weekly", tr("snapshots.sync_freq_weekly")),
+                ("custom", tr("snapshots.sync_freq_custom")),
+            ],
+            self.result_config.get("frequency", "daily"),
+            lambda key: self.result_config.__setitem__("frequency", key),
+        )
+        b_layout.addLayout(self._freq_row)
+
+        # Horário
+        time_lbl = QLabel(tr("snapshots.sync_time_label"))
+        time_lbl.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+        time_lbl.setStyleSheet("color: #8b92a3; letter-spacing: 1px; margin-top: 4px;")
+        b_layout.addWidget(time_lbl)
+
+        self.time_edit = QTimeEdit()
+        self.time_edit.setDisplayFormat("HH:mm")
+        saved_time = self.result_config.get("time", "03:00")
+        h, m = (int(x) for x in saved_time.split(":"))
+        self.time_edit.setTime(QTime(h, m))
+        self.time_edit.setFixedHeight(40)
+        self.time_edit.timeChanged.connect(
+            lambda t: self.result_config.__setitem__("time", t.toString("HH:mm"))
+        )
+        b_layout.addWidget(self.time_edit)
+
+        # Escopo
+        scope_lbl = QLabel(tr("snapshots.sync_scope_label"))
+        scope_lbl.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+        scope_lbl.setStyleSheet("color: #8b92a3; letter-spacing: 1px; margin-top: 4px;")
+        b_layout.addWidget(scope_lbl)
+
+        self._scope_row = _ChipRow(
+            [
+                ("root", "ROOT"),
+                ("home", "HOME"),
+                ("both", "ROOT+HOME"),
+            ],
+            self.result_config.get("scope", "both"),
+            lambda key: self.result_config.__setitem__("scope", key),
+        )
+        b_layout.addLayout(self._scope_row)
+
+        # Status (última/próxima execução) — sem backend ainda, mostra
+        # sempre o estado "nunca executado" nesta rodada
+        status_card = QFrame()
+        status_card.setObjectName("SyncStatusCard")
+        status_card.setStyleSheet("""
+            QFrame#SyncStatusCard {
+                background: rgba(255,255,255,4);
+                border: 1px solid rgba(255,255,255,8);
+                border-radius: 10px;
+            }
+            QFrame#SyncStatusCard QLabel {
+                background: transparent;
+                border: none;
+            }
+        """)
+        status_layout = QHBoxLayout(status_card)
+        status_layout.setContentsMargins(22, 20, 22, 20)
+
+        last_block = QVBoxLayout()
+        last_block.setContentsMargins(0, 0, 0, 0)
+        last_block.setSpacing(6)
+        last_caption = QLabel(tr("snapshots.sync_last_run_label"))
+        last_caption.setFont(QFont("DejaVu Sans Mono", 10))
+        last_caption.setStyleSheet("color: #8b92a3;")
+        last_value = QLabel(tr("snapshots.sync_never_run"))
+        last_value.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+        last_value.setStyleSheet("color: #ecf4ff;")
+        last_block.addWidget(last_caption)
+        last_block.addWidget(last_value)
+        status_layout.addLayout(last_block)
+        status_layout.addStretch()
+
+        next_block = QVBoxLayout()
+        next_block.setContentsMargins(0, 0, 0, 0)
+        next_block.setSpacing(6)
+        next_caption = QLabel(tr("snapshots.sync_next_run_label"))
+        next_caption.setFont(QFont("DejaVu Sans Mono", 10))
+        next_caption.setStyleSheet("color: #8b92a3;")
+        next_value = QLabel(tr("snapshots.sync_not_scheduled"))
+        next_value.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+        next_value.setStyleSheet("color: #ecf4ff;")
+        next_block.addWidget(next_caption)
+        next_block.addWidget(next_value)
+        status_layout.addLayout(next_block)
+
+        b_layout.addWidget(status_card)
+
+        note = QLabel(tr("snapshots.sync_backend_note"))
+        note.setWordWrap(True)
+        note.setFont(QFont("DejaVu Sans Mono", 9))
+        note.setStyleSheet("color: #6b7a8d;")
+        b_layout.addWidget(note)
+
+        b_layout.addStretch()
+
+        # Botão salvar
+        btn_save = QPushButton(tr("snapshots.sync_save_button"))
+        btn_save.setCursor(Qt.PointingHandCursor)
+        btn_save.setFixedHeight(44)
+        btn_save.setStyleSheet("""
+            QPushButton {
+                background: #23a6ff;
+                border: none;
+                border-radius: 10px;
+                color: #04203a;
+                font-family: "DejaVu Sans Mono";
+                font-size: 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #4fb8ff;
+            }
+        """)
+        btn_save.clicked.connect(self.accept)
+        b_layout.addWidget(btn_save)
+
+        root.addWidget(header)
+        root.addWidget(body, 1)
+
+    def _toggle_enabled(self) -> None:
+        enabled = not self.result_config.get("enabled", False)
+        self.result_config["enabled"] = enabled
+        self.btn_toggle.setText(tr("snapshots.sync_enabled") if enabled else tr("snapshots.sync_disabled"))
+        self._apply_toggle_style()
+
+    def _apply_toggle_style(self) -> None:
+        self.btn_toggle.setStyleSheet("""
+            QPushButton {
+                background: rgba(52,211,153,26);
+                border: 1px solid rgba(52,211,153,130);
+                border-radius: 8px;
+                color: #9bf0bd;
+                font-family: "DejaVu Sans Mono";
+                font-size: 10px;
+                font-weight: bold;
+            }
+        """ if self.result_config.get("enabled") else """
+            QPushButton {
+                background: rgba(255,255,255,6);
+                border: 1px solid rgba(255,255,255,16);
+                border-radius: 8px;
+                color: #8b92a3;
+                font-family: "DejaVu Sans Mono";
+                font-size: 10px;
+                font-weight: bold;
+            }
+        """)
+
+    def _apply_styles(self) -> None:
+        self.setStyleSheet("""
+            QDialog { background: #14151c; border-radius: 14px; }
+            QFrame#SyncHeader {
+                background: #191a22;
+                border-top-left-radius: 14px;
+                border-top-right-radius: 14px;
+                border-bottom: 1px solid rgba(255,255,255,10);
+            }
+            QFrame#SyncBody { background: transparent; }
+            QLabel { background: transparent; border: none; }
+        """)
+        self._apply_toggle_style()
 
 
 class _DeleteWorker(QThread):
