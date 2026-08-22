@@ -5175,30 +5175,30 @@ class _SyncStatusBadge(QFrame):
         self.setCursor(Qt.PointingHandCursor)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(14, 8, 14, 8)
-        layout.setSpacing(8)
+        layout.setContentsMargins(18, 12, 18, 12)
+        layout.setSpacing(10)
 
         self._clock_icon = QLabel()
-        self._clock_icon.setFixedSize(14, 14)
-        self._clock_icon.setPixmap(qta.icon("mdi6.clock-outline", color="#8fd4ff").pixmap(14, 14))
+        self._clock_icon.setFixedSize(18, 18)
+        self._clock_icon.setPixmap(qta.icon("mdi6.clock-outline", color="#8fd4ff").pixmap(18, 18))
 
         self._dot = QLabel()
-        self._dot.setFixedSize(6, 6)
+        self._dot.setFixedSize(7, 7)
 
         self._title_lbl = QLabel(tr("snapshots.sync_badge_title"))
-        self._title_lbl.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
+        self._title_lbl.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
         self._title_lbl.setStyleSheet("color: #ecf4ff;")
 
         self._sep_lbl = QLabel("·")
         self._sep_lbl.setStyleSheet("color: #6b7a8d;")
 
         self._detail_lbl = QLabel(tr("snapshots.sync_badge_disabled"))
-        self._detail_lbl.setFont(QFont("DejaVu Sans Mono", 9))
+        self._detail_lbl.setFont(QFont("DejaVu Sans Mono", 10))
         self._detail_lbl.setStyleSheet("color: #8b92a3;")
 
         self._chevron = QLabel()
-        self._chevron.setFixedSize(13, 13)
-        self._chevron.setPixmap(qta.icon("mdi6.chevron-right", color="#8b92a3").pixmap(13, 13))
+        self._chevron.setFixedSize(16, 16)
+        self._chevron.setPixmap(qta.icon("mdi6.chevron-right", color="#8b92a3").pixmap(16, 16))
 
         layout.addWidget(self._clock_icon)
         layout.addWidget(self._dot)
@@ -5217,7 +5217,7 @@ class _SyncStatusBadge(QFrame):
             QFrame#SyncStatusBadge {{
                 background: rgba(255,255,255,5);
                 border: 1px solid {border};
-                border-radius: 16px;
+                border-radius: 20px;
             }}
             QFrame#SyncStatusBadge:hover {{
                 background: rgba(255,255,255,9);
