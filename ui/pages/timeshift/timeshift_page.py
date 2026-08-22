@@ -4,7 +4,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QPushButton, QDialog
 
-from ui.pages.backups.snapshots_page import SnapshotsPage, icon_badge, _SyncStatusBadge, _ScheduledSyncDialog
+from ui.pages.timeshift.timeshift_panel import SnapshotsPage, icon_badge, _SyncStatusBadge, _ScheduledSyncDialog
 
 
 class BackupsPage(QWidget):

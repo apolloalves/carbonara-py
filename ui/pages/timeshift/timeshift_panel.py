@@ -11,8 +11,8 @@ import shutil
 import subprocess
 import tempfile
 import qtawesome as qta
-from PySide6.QtCore import Qt, QTimer, Signal, QSize, QThread
-from PySide6.QtGui import QFont
+from PySide6.QtCore import Qt, QTimer, Signal, QSize, QThread, QObject, QEvent, QPoint, QTime
+from PySide6.QtGui import QFont, QColor
 
 from PySide6.QtWidgets import (
     QWidget,
@@ -35,9 +35,12 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPlainTextEdit,
     QCheckBox,
+    QGraphicsDropShadowEffect,
+    QTimeEdit,
 )
 
 from core.operation_manager import OperationManager
+from core.i18n import tr, i18n
 from core.system.storage import (
     StorageDestination,
     format_gb,
@@ -171,14 +174,17 @@ def clear_layout(layout):
             clear_layout(child_layout)
             child_layout.deleteLater()
 
-def icon_badge(icon_name: str, size: int = 34, color: str = "#FFFFFF", bg_rgba: str = "35, 166, 255, 34") -> QLabel:
+def icon_badge(icon_name: str, size: int = 34, color: str = "#FFFFFF", bg_rgba: str = "35, 166, 255, 34", opacity: float = 1.0) -> QLabel:
     label = QLabel()
     label.setAlignment(Qt.AlignCenter)
     label.setFixedSize(size, size)
 
+    icon_color = QColor(color)
+    icon_color.setAlpha(int(max(0.0, min(1.0, opacity)) * 255))
+
     pixmap = qta.icon(
         icon_name,
-        color=color
+        color=icon_color
     ).pixmap(size - 2, size - 2)
 
     label.setPixmap(pixmap)
@@ -241,6 +247,7 @@ class ScopeCard(QFrame):
     def __init__(self, key: str, title: str, subtitle: str, glyph: str, parent=None):
         super().__init__(parent)
         self.key = key
+        self._glyph = glyph
 
         self.setCursor(Qt.PointingHandCursor)
         self.setFocusPolicy(Qt.StrongFocus)
@@ -310,6 +317,11 @@ class ScopeCard(QFrame):
     def _emit_clicked(self):
         self.clicked.emit(self.key)
 
+    def set_text(self, title: str, subtitle: str) -> None:
+        self.btn.setText(f"{self._glyph}  {title}")
+        self.subtitle.setText(subtitle)
+        self.subtitle.setToolTip(subtitle)
+
     def set_active(self, active: bool):
         self.btn.setChecked(active)
         self.setProperty("active", active)
@@ -334,10 +346,34 @@ class ScopeCard(QFrame):
         super().keyPressEvent(event)
 
 
+class _TopTooltipFilter(QObject):
+    """Tooltip estilo toast pros botões RESTORE/SYNC/DELETE — substitui o
+    QToolTip nativo do Qt (que tinha cache de reexibição inconsistente:
+    'aparece quando quer'). Delega a exibição pra página (SnapshotsPage),
+    que tem seu próprio toast QFrame (self._button_toast) — filho real da
+    página, igual ao operation_status_row do eggs_page.py, em vez de uma
+    janela topo-nível própria (Qt.ToolTip) como na primeira tentativa, que
+    o compositor/mutter custom do Apollo não renderizava direito
+    (transparência/cantos arredondados saíam errados)."""
+    def __init__(self, page: QWidget, parent=None):
+        super().__init__(parent)
+        self._page = page
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.ToolTip and obj.toolTip():
+            self._page._show_button_toast(obj, obj.toolTip())
+            return True
+        if event.type() == QEvent.Leave:
+            self._page._hide_button_toast()
+        return super().eventFilter(obj, event)
+
+
+
 class SnapshotCard(QFrame):
-    def __init__(self, entry: SnapshotEntry, sibling: "SnapshotEntry | None" = None, parent=None):
+    def __init__(self, entry: SnapshotEntry, sibling: "SnapshotEntry | None" = None, page: QWidget = None, parent=None):
         super().__init__(parent)
         self.entry = entry
+        self._page = page
 
         self.setObjectName("SnapshotCard")
         self.setStyleSheet(
@@ -410,14 +446,15 @@ class SnapshotCard(QFrame):
         left = QHBoxLayout()
         left.setSpacing(16)
 
-        # Mesma cor do cabeçalho da seção (ROOT azul, HOME âmbar) — dá
-        # continuidade visual do grupo até o ícone de cada card.
-        kind_upper = entry.kind.upper()
-        card_accent = {"ROOT": "#23a6ff", "HOME": "#e0a840"}.get(kind_upper, "#FFFFFF")
-        r = int(card_accent[1:3], 16)
-        g = int(card_accent[3:5], 16)
-        b = int(card_accent[5:7], 16)
-        icon_label = icon_badge(SNAPSHOT_GLYPH, 46, color=card_accent, bg_rgba=f"{r}, {g}, {b}, 34")
+        # Ícone de volta, mas em branco-suave (não branco puro, pra não
+        # ficar forte) em vez das cores por accent (azul/âmbar) usadas
+        # antes — pedido explícito após rejeitar todas as variações de
+        # opacidade sobre a cor de destaque.
+        icon_label = icon_badge(
+            SNAPSHOT_GLYPH, 46,
+            color="#f0f2f5", bg_rgba="255, 255, 255, 14",
+            opacity=0.9,
+        )
 
         text_block = QVBoxLayout()
         text_block.setSpacing(6)
@@ -461,11 +498,11 @@ class SnapshotCard(QFrame):
 
             if elapsed_days is not None:
                 if elapsed_days <= 0:
-                    badge_text = "sincronizado hoje"
+                    badge_text = tr("snapshots.synced_today")
                 elif elapsed_days == 1:
-                    badge_text = "último sync há 1 dia"
+                    badge_text = tr("snapshots.synced_1_day")
                 else:
-                    badge_text = f"último sync há {elapsed_days} dias"
+                    badge_text = tr("snapshots.synced_n_days").format(n=elapsed_days)
 
                 stale = elapsed_days > STALE_AFTER_DAYS
                 badge_color = "#e0a840" if stale else "#5eea95"
@@ -483,7 +520,7 @@ class SnapshotCard(QFrame):
             # impressão de que a informação de sync tinha sumido, quando
             # na verdade só significa "ainda não sincronizado nenhuma
             # vez". Mostra isso explicitamente em vez de ficar mudo.
-            badge = QLabel("nunca sincronizado")
+            badge = QLabel(tr("snapshots.never_synced"))
             badge.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
             badge.setStyleSheet(
                 "color: #ff9966; background: rgba(255,153,102,0.14); "
@@ -504,7 +541,7 @@ class SnapshotCard(QFrame):
         meta_row.addWidget(meta)
 
         if entry.size_str:
-            size_prefix = QLabel("snapshot size")
+            size_prefix = QLabel(tr("snapshots.size_label"))
             size_prefix.setFont(QFont("DejaVu Sans Mono", 9))
             size_prefix.setStyleSheet("color: #6b7a8d;")
             meta_row.addWidget(size_prefix)
@@ -529,7 +566,7 @@ class SnapshotCard(QFrame):
             sync_icon.setPixmap(
                 qta.icon(SYNC_GLYPH, color="#23a6ff").pixmap(14, 14)
             )
-            sync_lbl = QLabel(f"last sync  {entry.synced_at.replace('T', 'T ', 1)}")
+            sync_lbl = QLabel(tr("snapshots.last_sync").format(date=entry.synced_at.replace('T', 'T ', 1)))
             sync_lbl.setFont(QFont("DejaVu Sans Mono", 9))
             sync_lbl.setStyleSheet("color: #23a6ff;")
 
@@ -548,26 +585,31 @@ class SnapshotCard(QFrame):
         self.btn_restore.setIcon(qta.icon(RESTORE_GLYPH, color="#8fd4ff"))
         self.btn_restore.setIconSize(QSize(22, 22))
         self.btn_restore.setObjectName("RestoreButton")
-        self.btn_restore.setToolTip("Restaurar este snapshot")
+        self.btn_restore.setToolTip(tr("snapshots.tooltip_restore"))
         self.btn_restore.setFixedWidth(48)
 
         self.btn_sync = QPushButton()
         self.btn_sync.setIcon(qta.icon(SYNC_GLYPH, color="#9bf0bd"))
         self.btn_sync.setIconSize(QSize(18, 18))
         self.btn_sync.setObjectName("SyncButton")
-        self.btn_sync.setToolTip("Sincronizar este snapshot")
+        self.btn_sync.setToolTip(tr("snapshots.tooltip_sync"))
         self.btn_sync.setFixedWidth(48)
 
         self.btn_delete = QPushButton()
         self.btn_delete.setIcon(qta.icon(DELETE_GLYPH, color="#ff8888"))
         self.btn_delete.setIconSize(QSize(18, 18))
         self.btn_delete.setObjectName("DangerButton")
-        self.btn_delete.setToolTip("Excluir este snapshot")
+        self.btn_delete.setToolTip(tr("snapshots.tooltip_delete"))
         self.btn_delete.setFixedWidth(48)
 
         btn_row.addWidget(self.btn_restore)
         btn_row.addWidget(self.btn_sync)
         btn_row.addWidget(self.btn_delete)
+
+        self._tooltip_filter = _TopTooltipFilter(self._page)
+        self.btn_restore.installEventFilter(self._tooltip_filter)
+        self.btn_sync.installEventFilter(self._tooltip_filter)
+        self.btn_delete.installEventFilter(self._tooltip_filter)
 
         root.addLayout(left, 1)
         root.addLayout(btn_row)
@@ -631,7 +673,7 @@ class SectionCard(QFrame):
         b = int(accent_color[5:7], 16)
         divider = QFrame()
         divider.setFixedHeight(2)
-        divider.setStyleSheet(f"background: rgba({r}, {g}, {b}, 140); border: none;")
+        divider.setStyleSheet(f"background: rgba({r}, {g}, {b}, 50); border: none;")
 
         self.body = QGridLayout()
         self.body.setHorizontalSpacing(14)
@@ -789,7 +831,7 @@ class SnapshotsPage(QWidget):
         destination_block = QVBoxLayout()
         destination_block.setSpacing(8)
 
-        lbl_destination = QLabel("Destination")
+        lbl_destination = self.lbl_destination = QLabel(tr("snapshots.destination_label"))
         lbl_destination.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
         lbl_destination.setStyleSheet("color: #ecf4ff;")
 
@@ -810,7 +852,7 @@ class SnapshotsPage(QWidget):
         scope_block.setSpacing(10)
         scope_block.setContentsMargins(0, -4, 0, 0)
 
-        lbl_scope = QLabel("Scope")
+        lbl_scope = self.lbl_scope = QLabel(tr("snapshots.scope_label"))
         lbl_scope.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
         lbl_scope.setStyleSheet("color: #ecf4ff;")
 
@@ -818,9 +860,9 @@ class SnapshotsPage(QWidget):
         scope_cards_row.setSpacing(10)
 
         scope_defs = [
-            ("root", "ROOT ONLY", "Snapshot only the system root", ROOT_GLYPH),
-            ("home", "HOME ONLY", "Snapshot only /home", HOME_GLYPH),
-            ("both", "ROOT+HOME", "Snapshot both root and home", BOTH_GLYPH),
+            ("root", tr("snapshots.scope_root_title"), tr("snapshots.scope_root_subtitle"), ROOT_GLYPH),
+            ("home", tr("snapshots.scope_home_title"), tr("snapshots.scope_home_subtitle"), HOME_GLYPH),
+            ("both", tr("snapshots.scope_both_title"), tr("snapshots.scope_both_subtitle"), BOTH_GLYPH),
         ]
 
         for key, title, subtitle, glyph in scope_defs:
@@ -861,7 +903,7 @@ class SnapshotsPage(QWidget):
         summary_text = QVBoxLayout()
         summary_text.setSpacing(0)
 
-        self.lbl_destination_info = QLabel("Select a backup destination")
+        self.lbl_destination_info = QLabel(tr("snapshots.select_destination"))
         self.lbl_destination_info.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
         self.lbl_destination_info.setStyleSheet("color: #ecf4ff;")
 
@@ -914,35 +956,65 @@ class SnapshotsPage(QWidget):
         buttons_row = QHBoxLayout()
         buttons_row.setSpacing(12)
 
-        self.btn_refresh = QPushButton("ATUALIZAR ESPAÇO")
+        self.btn_refresh = QPushButton(tr("snapshots.btn_refresh_space"))
         self.btn_refresh.setIcon(qta.icon(REFRESH_GLYPH, color="#FFFFFF"))
         self.btn_refresh.setIconSize(QSize(16, 16))
         self.btn_refresh.setFixedSize(190, 40)
         self.btn_refresh.setVisible(True)  # reabilitado: útil para recalcular espaço após mudanças fora do app
 
-        self.btn_verify = QPushButton("VERIFICAR SYNC")
-        self.btn_verify.setIcon(qta.icon(VERIFY_GLYPH, color="#9bf0bd"))
-        self.btn_verify.setIconSize(QSize(16, 16))
-        self.btn_verify.setFixedSize(180, 40)
-        self.btn_verify.setToolTip(
-            "Verifica de verdade (rsync --dry-run) se o ROOT e o HOME mais "
-            "recentes estão desatualizados em relação ao sistema."
-        )
-
-        self.btn_create = QPushButton("CREATE SNAPSHOT")
+        self.btn_create = QPushButton(tr("snapshots.btn_create_snapshot"))
         self.btn_create.setIcon(qta.icon(CREATE_GLYPH))
         self.btn_create.setIconSize(QSize(16, 16))
         self.btn_create.setFixedSize(160, 40)
         self.btn_create.setObjectName("PrimaryButton")
 
         self.btn_refresh.clicked.connect(self.refresh_destinations)
-        self.btn_verify.clicked.connect(self.verify_all_snapshots)
         self.btn_create.clicked.connect(self.create_snapshot)
 
         buttons_row.addStretch()
         buttons_row.addWidget(self.btn_refresh)
-        buttons_row.addWidget(self.btn_verify)
         buttons_row.addWidget(self.btn_create)
+
+        # ── Verificar Sync — botão flutuante (FAB), canto inferior direito ──
+        # (mesmo padrão do Clonezilla: círculo, ícone, sombra, reposicionado
+        # no resizeEvent). Nome do atributo mantido (self.btn_verify) pra não
+        # quebrar set_busy()/outras referências existentes.
+        self.btn_verify = QPushButton(self)
+        self.btn_verify.setIcon(qta.icon(VERIFY_GLYPH, color="#0a0b0f"))
+        self.btn_verify.setIconSize(QSize(24, 24))
+        self.btn_verify.setFixedSize(56, 56)
+        self.btn_verify.setCursor(Qt.PointingHandCursor)
+        self.btn_verify.setToolTip(tr("snapshots.fab_verify_tooltip"))
+        self.btn_verify.setStyleSheet("""
+            QPushButton {
+                background: #9bf0bd;
+                border: none;
+                border-radius: 28px;
+            }
+            QPushButton:hover {
+                background: rgba(155, 240, 189, 220);
+            }
+            QPushButton:disabled {
+                background: rgba(155, 240, 189, 90);
+            }
+            QPushButton:focus {
+                outline: none;
+            }
+            QToolTip {
+                background: #14151c;
+                color: #e4e7ec;
+                border: 1px solid rgba(155, 240, 189, 140);
+                padding: 4px 8px;
+                border-radius: 6px;
+            }
+        """)
+        verify_shadow = QGraphicsDropShadowEffect(self.btn_verify)
+        verify_shadow.setBlurRadius(24)
+        verify_shadow.setOffset(0, 4)
+        verify_shadow.setColor(QColor(0, 0, 0, 160))
+        self.btn_verify.setGraphicsEffect(verify_shadow)
+        self.btn_verify.clicked.connect(self.verify_all_snapshots)
+        self.btn_verify.raise_()
 
         # coluna direita: label + card bordado alinhados com esquerda
         right_column = QVBoxLayout()
@@ -975,16 +1047,118 @@ class SnapshotsPage(QWidget):
         root.addWidget(sep_line)
         root.addWidget(self.scroll, 1)
 
+        # ── Toast dos tooltips de RESTORE/SYNC/DELETE (canto superior
+        # direito, igual ao operation_status_row do eggs_page.py) ──
+        # É um QFrame filho DESTA página (não uma janela topo-nível como
+        # a primeira tentativa) — o compositor/mutter custom do Apollo não
+        # renderizava certo a transparência/cantos de uma janela Qt.ToolTip
+        # própria, então voltamos pro mesmo padrão que já funciona no Eggs.
+        # Sem spinner (removido por pedido — é só um texto, não uma
+        # operação em andamento).
+        self._button_toast = QFrame(self)
+        self._toast_target: QWidget | None = None
+        self._button_toast.setObjectName("ButtonToast")
+        self._button_toast.setStyleSheet(
+            """
+            QFrame#ButtonToast {
+                background: rgba(15, 18, 28, 235);
+                border: 1px solid rgba(35, 166, 255, 110);
+                border-radius: 12px;
+            }
+            """
+        )
+        toast_layout = QHBoxLayout(self._button_toast)
+        toast_layout.setContentsMargins(18, 12, 18, 12)
+
+        self._toast_label = QLabel("")
+        self._toast_label.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+        self._toast_label.setStyleSheet("color: #ecf4ff; background: transparent;")
+
+        toast_layout.addWidget(self._toast_label)
+        self._button_toast.hide()
+        self._button_toast.adjustSize()
+
+        # Timer próprio de esconder — nada de QToolTip.showText/cache.
+        self._toast_hide_timer = QTimer(self)
+        self._toast_hide_timer.setSingleShot(True)
+        self._toast_hide_timer.setInterval(8000)
+        self._toast_hide_timer.timeout.connect(self._hide_button_toast)
+
         self.refresh_destinations()
         self.set_scope("both")
+        self._position_verify_fab()
+        self.btn_verify.raise_()
+
+        # ── Troca de idioma em tempo real, sem precisar reiniciar o app ──
+        i18n.language_changed.connect(self._retranslate)
+
+    def _retranslate(self) -> None:
+        self.lbl_destination.setText(tr("snapshots.destination_label"))
+        self.lbl_scope.setText(tr("snapshots.scope_label"))
+        scope_texts = {
+            "root": (tr("snapshots.scope_root_title"), tr("snapshots.scope_root_subtitle")),
+            "home": (tr("snapshots.scope_home_title"), tr("snapshots.scope_home_subtitle")),
+            "both": (tr("snapshots.scope_both_title"), tr("snapshots.scope_both_subtitle")),
+        }
+        for key, card in self.scope_cards.items():
+            title, subtitle = scope_texts.get(key, ("", ""))
+            card.set_text(title, subtitle)
+        self.btn_refresh.setText(tr("snapshots.btn_refresh_space"))
+        self.btn_create.setText(tr("snapshots.btn_create_snapshot"))
+        self.btn_verify.setToolTip(tr("snapshots.fab_verify_tooltip"))
+        # Combo de destino e resumo à direita são reconstruídos com o
+        # idioma novo; a lista de snapshots (cards/empty state) também é
+        # recriada do zero, então pega o idioma novo automaticamente.
+        self.refresh_destinations()
+
+    def _reposition_button_toast(self) -> None:
+        """Posicionado logo ABAIXO do botão que disparou o hover (com uma
+        folga de 8px pra não ficar colado/por cima), centralizado
+        horizontalmente em relação a ele — em vez de um ponto fixo da
+        página. Precisa do widget-alvo guardado em `_toast_target` porque
+        é chamado de novo em resizeEvent, sem o evento de hover original."""
+        if self._toast_target is None:
+            return
+        self._button_toast.adjustSize()
+        gap = 20
+        target = self._toast_target
+        target_top_left_global = target.mapToGlobal(QPoint(0, target.height()))
+        center_x_global = target.mapToGlobal(QPoint(target.width() // 2, 0)).x()
+
+        toast_w = self._button_toast.width()
+        x_global = center_x_global - toast_w // 2
+        y_global = target_top_left_global.y() + gap
+
+        local = self.mapFromGlobal(QPoint(x_global, y_global))
+        # Não deixa vazar pra fora da página horizontalmente.
+        x = min(max(4, local.x()), self.width() - toast_w - 4)
+        self._button_toast.move(x, local.y())
+        self._button_toast.raise_()
+
+    def _show_button_toast(self, target: QWidget, text: str) -> None:
+        self._toast_target = target
+        self._toast_label.setText(text)
+        self._button_toast.show()
+        self._reposition_button_toast()
+        self._toast_hide_timer.start()
+
+    def _hide_button_toast(self) -> None:
+        self._toast_hide_timer.stop()
+        self._button_toast.hide()
+        self._toast_target = None
 
     def showEvent(self, event) -> None:
         """A página é criada uma vez só (QStackedWidget) — sem isso, a
         lista de destinos só era montada na primeira vez e nunca mais
         atualizava sozinha, mesmo que outro disco fosse montado depois
-        (ex: via o botão 'Montar discos do sistema' na página Disks)."""
+        (ex: via o botão 'Montar discos do sistema' na página Disks).
+        Também reposiciona o FAB aqui: no __init__ a página ainda não
+        tem o tamanho final dentro do QStackedWidget, então
+        self.width()/height() ali podem estar errados."""
         super().showEvent(event)
         self.refresh_destinations()
+        self._position_verify_fab()
+        self.btn_verify.raise_()
 
     def set_scope(self, scope: str):
         if scope not in {"root", "home", "both"}:
@@ -1000,9 +1174,9 @@ class SnapshotsPage(QWidget):
         return self.cmb_destination.currentData()
 
     def _format_combo_item(self, dest: StorageDestination) -> str:
-        return (
-            f" {dest.label}  •  {format_gb(dest.free_gb)} livre  •  "
-            f"{dest.mountpoint}  •  {dest.fs_type}"
+        return tr("snapshots.combo_item").format(
+            label=dest.label, free=format_gb(dest.free_gb),
+            mountpoint=dest.mountpoint, fs_type=dest.fs_type,
         )
 
     def refresh_destinations(self):
@@ -1022,8 +1196,8 @@ class SnapshotsPage(QWidget):
         self.cmb_destination.blockSignals(False)
 
         if not self.destinations:
-            self.lbl_destination_info.setText("No backup destinations found")
-            self.lbl_destination_meta.setText("Mount a disk under /mnt or /media")
+            self.lbl_destination_info.setText(tr("snapshots.no_destinations_found"))
+            self.lbl_destination_meta.setText(tr("snapshots.mount_a_disk"))
             self.lbl_space_percent.setText("—")
             self.space_fill.setGeometry(0, 0, 0, 5)
             self.btn_create.setEnabled(False)
@@ -1061,7 +1235,7 @@ class SnapshotsPage(QWidget):
     def update_destination_summary(self):
         dest = self.current_destination()
         if dest is None:
-            self.lbl_destination_info.setText("Select a backup destination")
+            self.lbl_destination_info.setText(tr("snapshots.select_destination"))
             self.lbl_destination_meta.setText("—")
             self.lbl_space_percent.setText("—")
             self.space_fill.setGeometry(0, 0, 0, 5)
@@ -1077,14 +1251,27 @@ class SnapshotsPage(QWidget):
 
         self.lbl_destination_info.setText(dest.label)
         self.lbl_destination_meta.setText(
-            f"{format_gb(dest.free_gb)} livre de {format_gb(dest.total_gb)} • "
-            f"{dest.mountpoint} • {dest.fs_type}"
+            tr("snapshots.free_of_total").format(
+                free=format_gb(dest.free_gb), total=format_gb(dest.total_gb),
+                mountpoint=dest.mountpoint, fs_type=dest.fs_type,
+            )
         )
-        self.lbl_space_percent.setText(f"{free_pct}% livre")
+        self.lbl_space_percent.setText(tr("snapshots.free_percent").format(pct=free_pct))
+
+    def _position_verify_fab(self) -> None:
+        margin = 28
+        self.btn_verify.move(
+            self.width() - self.btn_verify.width() - margin,
+            self.height() - self.btn_verify.height() - margin,
+        )
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self.update_destination_summary()
+        if self._button_toast.isVisible():
+            self._reposition_button_toast()
+        self._position_verify_fab()
+        self.btn_verify.raise_()
 
     def current_backup_root(self) -> Path | None:
         dest = self.current_destination()
@@ -1156,13 +1343,13 @@ class SnapshotsPage(QWidget):
             empty_layout.addLayout(icon_row)
             empty_layout.addSpacing(14)
 
-            title = QLabel("No snapshots yet")
+            title = QLabel(tr("snapshots.empty_title"))
             title.setAlignment(Qt.AlignCenter)
             title.setStyleSheet("color: #ecf4ff;")
             title.setFont(QFont("DejaVu Sans Mono", 12, QFont.Bold))
             empty_layout.addWidget(title)
 
-            label = QLabel("Use Create Snapshot above to get started.")
+            label = QLabel(tr("snapshots.empty_subtitle"))
             label.setAlignment(Qt.AlignCenter)
             label.setStyleSheet("color: #9aa6b2;")
             label.setFont(QFont("DejaVu Sans Mono", 9))
@@ -1205,7 +1392,7 @@ class SnapshotsPage(QWidget):
                 accent_color=accent_color,
             )
             for entry in grouped[kind]:
-                card = SnapshotCard(entry, sibling=_sibling_of(entry))
+                card = SnapshotCard(entry, sibling=_sibling_of(entry), page=self)
                 card.btn_restore.clicked.connect(
                     lambda _, e=entry: self.restore_snapshot(e)
                 )
@@ -1238,7 +1425,7 @@ class SnapshotsPage(QWidget):
     def create_snapshot(self):
         dest = self.current_destination()
         if dest is None:
-            QMessageBox.warning(self, "Carbonara", "Select a destination first.")
+            QMessageBox.warning(self, "Carbonara", tr("snapshots.select_destination_first"))
             return
 
         if OperationManager.is_running():
@@ -1246,7 +1433,7 @@ class SnapshotsPage(QWidget):
             QMessageBox.warning(
                 self,
                 "Carbonara",
-                f"Another operation is already running: {current.name if current else 'busy'}",
+                tr("snapshots.op_already_running").format(name=current.name if current else 'busy'),
             )
             return
 
@@ -1257,7 +1444,7 @@ class SnapshotsPage(QWidget):
             QMessageBox.warning(
                 self,
                 "Carbonara",
-                "Another exclusive operation is already running.",
+                tr("snapshots.op_exclusive_running"),
             )
             return
 
@@ -1315,7 +1502,7 @@ class SnapshotsPage(QWidget):
         if rc not in (0, 2, 126) and rc >= 0:
             _show_error(
                 "Carbonara Backup",
-                f"Backup process exited with code {rc}.",
+                tr("snapshots.backup_exit_code").format(rc=rc),
                 parent=self,
             )
 
@@ -1355,7 +1542,7 @@ class SnapshotsPage(QWidget):
     def restore_snapshot(self, entry: SnapshotEntry):
         if OperationManager.is_running():
             QMessageBox.warning(
-                self, "Carbonara", "Another exclusive operation is already running."
+                self, "Carbonara", tr("snapshots.op_exclusive_running")
             )
             return
 
@@ -1670,7 +1857,7 @@ class SnapshotsPage(QWidget):
             QMessageBox.warning(
                 self,
                 "Carbonara",
-                "Another exclusive operation is already running.",
+                tr("snapshots.op_exclusive_running"),
             )
             return
 
@@ -1691,7 +1878,7 @@ class SnapshotsPage(QWidget):
             return
 
         if not OperationManager.start("delete", f"Delete snapshot {entry.path.name}"):
-            QMessageBox.warning(self, "Carbonara", "Another operation is already running.")
+            QMessageBox.warning(self, "Carbonara", tr("snapshots.op_exclusive_running"))
             return
 
         self.set_busy(True)
@@ -1716,7 +1903,7 @@ class SnapshotsPage(QWidget):
         self._delete_progress.close()
         OperationManager.finish()
         self.set_busy(False)
-        _show_error("Delete Snapshot", f"Falha ao remover snapshot:\n\n{msg}", parent=self)
+        _show_error("Delete Snapshot", tr("snapshots.delete_failed_message").format(msg=msg), parent=self)
         self.refresh_list()
 
 
@@ -2097,7 +2284,7 @@ class _RestoreDialog(QDialog):
     def __init__(self, entry: SnapshotEntry, parent=None):
         super().__init__(parent)
         self.entry = entry
-        self.setWindowTitle("Restore Snapshot")
+        self.setWindowTitle(tr("snapshots.restore_dialog_title"))
         self.setModal(True)
         extra_height = 92 if entry.path.parent.name.upper() == "HOME" else 0
         self.setFixedSize(880, 514 + extra_height)
@@ -2124,7 +2311,7 @@ class _RestoreDialog(QDialog):
         icon.setPixmap(qta.icon("mdi6.file-restore-outline", color="#8fd4ff").pixmap(40, 40))
         icon.setStyleSheet("QLabel { background: transparent; }")
 
-        lbl = QLabel("Restore Snapshot")
+        lbl = QLabel(tr("snapshots.restore_dialog_title"))
         lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
         lbl.setStyleSheet("color: #ffffff; background: transparent;")
 
@@ -2169,7 +2356,7 @@ class _RestoreDialog(QDialog):
         snap_meta_row.addWidget(snap_meta)
 
         if self.entry.size_str:
-            snap_size_prefix = QLabel("snapshot size")
+            snap_size_prefix = QLabel(tr("snapshots.size_label"))
             snap_size_prefix.setFont(QFont("DejaVu Sans Mono", 9))
             snap_size_prefix.setStyleSheet("color: #6b7a8d;")
             snap_meta_row.addWidget(snap_size_prefix)
@@ -2192,7 +2379,7 @@ class _RestoreDialog(QDialog):
             snap_sync_icon = QLabel()
             snap_sync_icon.setPixmap(qta.icon(SYNC_GLYPH, color="#23a6ff").pixmap(14, 14))
 
-            snap_sync_lbl = QLabel(f"last sync  {self.entry.synced_at.replace('T', 'T ', 1)}")
+            snap_sync_lbl = QLabel(tr("snapshots.last_sync").format(date=self.entry.synced_at.replace('T', 'T ', 1)))
             snap_sync_lbl.setFont(QFont("DejaVu Sans Mono", 9))
             snap_sync_lbl.setStyleSheet("color: #23a6ff;")
 
@@ -2204,23 +2391,23 @@ class _RestoreDialog(QDialog):
         snap_row.addWidget(snap_icon)
         snap_row.addLayout(snap_text)
         snap_row.addStretch()
-        lbl_choose = QLabel("ESCOLHA O TIPO DE RESTORE")
+        lbl_choose = QLabel(tr("snapshots.choose_restore_type"))
         lbl_choose.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
         lbl_choose.setStyleSheet("color: #c8d4e0; letter-spacing: 1px;")
         btn1 = _RestoreOptionButton(
             glyph="mdi6.harddisk",
-            title="Full System Restore",
-            desc="Gera script bash para restaurar o sistema completo via live ISO.",
+            title=tr("snapshots.restore_full_title"),
+            desc=tr("snapshots.restore_full_desc"),
             color="#ff9966",
             parent=self,
-            badge="requer reboot",
+            badge=tr("snapshots.restore_full_badge"),
         )
         btn1.clicked.connect(self._on_full_restore)
 
         btn2 = _RestoreOptionButton(
             glyph="mdi6.folder-search",
-            title="File Browser",
-            desc="Navega e restaura arquivos/pastas individuais do snapshot sem reboot.",
+            title=tr("snapshots.restore_browser_title"),
+            desc=tr("snapshots.restore_browser_desc"),
             color="#4ade80",
             parent=self,
         )
@@ -2228,8 +2415,8 @@ class _RestoreDialog(QDialog):
 
         btn3 = _RestoreOptionButton(
             glyph="mdi6.content-copy",
-            title="Restore para disco alternativo",
-            desc="Copia o snapshot inteiro para outro disco/partição montado.",
+            title=tr("snapshots.restore_alt_title"),
+            desc=tr("snapshots.restore_alt_desc"),
             color="#23a6ff",
             parent=self,
         )
@@ -2240,8 +2427,8 @@ class _RestoreDialog(QDialog):
         if is_home:
             btn4 = _RestoreOptionButton(
                 glyph="mdi6.home-import-outline",
-                title="Restaurar HOME sem reboot",
-                desc="Restaura a HOME inteira no sistema rodando agora — sem live ISO. Encerra a sessão ao final (logout).",
+                title=tr("snapshots.restore_home_live_title"),
+                desc=tr("snapshots.restore_home_live_desc"),
                 color="#4ade80",
                 parent=self,
             )
@@ -2503,7 +2690,7 @@ def _do_full_restore(entry: SnapshotEntry, parent=None) -> None:
 class _RestoreInstructionsDialog(QDialog):
     def __init__(self, script_path: str, instructions_path: str = "", parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Script de Restore Gerado")
+        self.setWindowTitle(tr("snapshots.instructions_dialog_title"))
         self.setModal(True)
         self.setFixedSize(820, 520)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
@@ -2576,7 +2763,7 @@ PASSO 3 — Confirmação
         icon.setPixmap(qta.icon("mdi6.check-circle", color="#4ade80").pixmap(24, 24))
         icon.setStyleSheet("QLabel { background: rgba(74,222,128,30); border-radius: 10px; }")
 
-        lbl = QLabel("Script de Restore Gerado")
+        lbl = QLabel(tr("snapshots.instructions_dialog_title"))
         lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
         lbl.setStyleSheet("color: #4ade80;")
 
@@ -2592,7 +2779,7 @@ PASSO 3 — Confirmação
         b_layout.setSpacing(8)
 
         # ── Passo 1: ISO disponível no Ventoy ────────────────────────────────
-        lbl1 = QLabel("1.  Boot pelo Ventoy → selecione uma ISO Arch:")
+        lbl1 = QLabel(tr("snapshots.instructions_step1"))
         lbl1.setFont(QFont("DejaVu Sans Mono", 10))
         lbl1.setStyleSheet("color: #c8d4e0;")
         b_layout.addWidget(lbl1)
@@ -2623,7 +2810,7 @@ PASSO 3 — Confirmação
             """)
             b_layout.addWidget(self.cmb_iso)
         else:
-            lbl_no_iso = QLabel("⚠  Nenhuma ISO encontrada em /mnt/VENTOY")
+            lbl_no_iso = QLabel(tr("snapshots.instructions_no_iso"))
             lbl_no_iso.setFont(QFont("DejaVu Sans Mono", 10))
             lbl_no_iso.setStyleSheet("color: #ff9966;")
             b_layout.addWidget(lbl_no_iso)
@@ -2631,7 +2818,7 @@ PASSO 3 — Confirmação
         b_layout.addSpacing(20)
 
         # ── Passo 2: Executar script ──────────────────────────────────────────
-        lbl2 = QLabel("2.  No shell do live ISO, execute:")
+        lbl2 = QLabel(tr("snapshots.instructions_step2"))
         lbl2.setFont(QFont("DejaVu Sans Mono", 10))
         lbl2.setStyleSheet("color: #c8d4e0;")
         b_layout.addWidget(lbl2)
@@ -2648,7 +2835,7 @@ PASSO 3 — Confirmação
 
         b_layout.addSpacing(4)
 
-        lbl3 = QLabel("O script monta os discos, restaura e reinstala o GRUB automaticamente.")
+        lbl3 = QLabel(tr("snapshots.instructions_script_desc"))
         lbl3.setFont(QFont("DejaVu Sans Mono", 9))
         lbl3.setStyleSheet("color: #6b7a8d;")
         lbl3.setWordWrap(True)
@@ -2663,7 +2850,7 @@ PASSO 3 — Confirmação
         warn_icon.setAlignment(Qt.AlignCenter)
         warn_icon.setPixmap(qta.icon("mdi6.alert", color="#ff9966").pixmap(18, 18))
 
-        warn = QLabel("Confirme digitando RESTAURAR quando solicitado.")
+        warn = QLabel(tr("snapshots.instructions_confirm_warning"))
         warn.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
         warn.setStyleSheet("color: #ff9966;")
 
@@ -2682,18 +2869,18 @@ PASSO 3 — Confirmação
 
         b_layout.addSpacing(6)
 
-        lbl_files = QLabel("Arquivos gerados em:")
+        lbl_files = QLabel(tr("snapshots.instructions_files_generated"))
         lbl_files.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
         lbl_files.setStyleSheet("color: #c8d4e0;")
         b_layout.addWidget(lbl_files)
 
-        lbl_script = QLabel(f"  Script:       {script_path}")
+        lbl_script = QLabel(tr("snapshots.instructions_script_label").format(path=script_path))
         lbl_script.setFont(QFont("DejaVu Sans Mono", 9))
         lbl_script.setStyleSheet("color: #9aa6b2;")
         lbl_script.setTextInteractionFlags(Qt.TextSelectableByMouse)
         b_layout.addWidget(lbl_script)
 
-        lbl_instr = QLabel(f"  Instruções:   {self._instructions_path}")
+        lbl_instr = QLabel(tr("snapshots.instructions_notes_label").format(path=self._instructions_path))
         lbl_instr.setFont(QFont("DejaVu Sans Mono", 9))
         lbl_instr.setStyleSheet("color: #9aa6b2;")
         lbl_instr.setTextInteractionFlags(Qt.TextSelectableByMouse)
@@ -2773,7 +2960,7 @@ class _FileBrowserDialog(QDialog):
         super().__init__(parent)
         self.entry = entry
         self.snapshot_root = entry.path
-        self.setWindowTitle("File Browser")
+        self.setWindowTitle(tr("snapshots.filebrowser_title"))
         self.setModal(True)
         self.resize(1100, 700)
         self.setMinimumSize(800, 500)
@@ -2804,7 +2991,7 @@ class _FileBrowserDialog(QDialog):
         ico.setPixmap(qta.icon("mdi6.folder-search", color="#4ade80").pixmap(22, 22))
         ico.setStyleSheet("QLabel { background: rgba(74,222,128,30); border-radius: 8px; }")
 
-        lbl = QLabel("File Browser")
+        lbl = QLabel(tr("snapshots.filebrowser_title"))
         lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
         lbl.setStyleSheet("color: #ecf4ff;")
 
@@ -2882,14 +3069,14 @@ class _FileBrowserDialog(QDialog):
         right_l.setContentsMargins(8, 0, 0, 0)
         right_l.setSpacing(8)
 
-        lbl_sel = QLabel("Selecionados para restore:")
+        lbl_sel = QLabel(tr("snapshots.filebrowser_selected_label"))
         lbl_sel.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
         lbl_sel.setStyleSheet("color: #c8d4e0;")
 
         self.list_selected = QPlainTextEdit()
         self.list_selected.setReadOnly(True)
         self.list_selected.setObjectName("FBSelected")
-        self.list_selected.setPlaceholderText("Nenhum item selecionado.\nSelecione arquivos/pastas na árvore.")
+        self.list_selected.setPlaceholderText(tr("snapshots.filebrowser_selected_placeholder"))
 
         # Conflito
         cf_frame = QFrame()
@@ -2898,17 +3085,17 @@ class _FileBrowserDialog(QDialog):
         cf_l.setContentsMargins(8, 8, 8, 8)
         cf_l.setSpacing(6)
 
-        lbl_cf = QLabel("Se o arquivo já existir no sistema:")
+        lbl_cf = QLabel(tr("snapshots.filebrowser_conflict_label"))
         lbl_cf.setFont(QFont("DejaVu Sans Mono", 9))
         lbl_cf.setStyleSheet("color: #9aa6b2;")
 
-        self.btn_overwrite = QPushButton("Sobrescrever")
+        self.btn_overwrite = QPushButton(tr("snapshots.filebrowser_overwrite"))
         self.btn_overwrite.setObjectName("FBConflictBtn")
         self.btn_overwrite.setCheckable(True)
         self.btn_overwrite.setChecked(True)
         self.btn_overwrite.clicked.connect(lambda: self._set_conflict("overwrite"))
 
-        self.btn_skip = QPushButton("Pular existentes")
+        self.btn_skip = QPushButton(tr("snapshots.filebrowser_skip"))
         self.btn_skip.setObjectName("FBConflictBtn")
         self.btn_skip.setCheckable(True)
         self.btn_skip.clicked.connect(lambda: self._set_conflict("skip"))
@@ -2920,7 +3107,7 @@ class _FileBrowserDialog(QDialog):
         cf_row.addWidget(self.btn_skip)
         cf_l.addLayout(cf_row)
 
-        self.btn_restore = QPushButton("  Restaurar selecionados")
+        self.btn_restore = QPushButton(tr("snapshots.filebrowser_btn_restore"))
         self.btn_restore.setIcon(qta.icon("mdi6.file-restore-outline", color="#08111d"))
         self.btn_restore.setIconSize(QSize(16, 16))
         self.btn_restore.setObjectName("FBBtnRestore")
@@ -3109,7 +3296,7 @@ class _FileBrowserDialog(QDialog):
             )
             if has_children:
                 sentinel = QTreeWidgetItem()
-                sentinel.setText(0, "carregando...")
+                sentinel.setText(0, tr("snapshots.filebrowser_loading"))
                 sentinel.setData(0, Qt.UserRole, None)  # marca sentinel
                 sentinel.setDisabled(True)
                 item.addChild(sentinel)
@@ -3236,13 +3423,13 @@ class _FileBrowserDialog(QDialog):
         self.restore_progress.setRange(0, 1)
         self.restore_progress.setValue(1)
         self.btn_restore.setEnabled(True)
-        self._on_log_line("─── Restore concluído ───")
+        self._on_log_line(tr("snapshots.filebrowser_restore_done"))
 
     def _on_restore_fail(self, msg):
         self.restore_progress.setRange(0, 1)
         self.restore_progress.setValue(0)
         self.btn_restore.setEnabled(True)
-        self._on_log_line(f"ERRO: {msg}")
+        self._on_log_line(tr("snapshots.filebrowser_error").format(msg=msg))
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -3274,7 +3461,7 @@ class _ConfirmRestoreDialog(QDialog):
         ico.setAlignment(Qt.AlignCenter)
         ico.setPixmap(qta.icon("mdi6.file-restore-outline", color="#4ade80").pixmap(16, 16))
         ico.setStyleSheet("QLabel { background: rgba(74,222,128,30); border-radius: 6px; }")
-        lbl = QLabel("Confirmar Restore")
+        lbl = QLabel(tr("snapshots.confirm_restore_title"))
         lbl.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
         lbl.setStyleSheet("color: #ecf4ff;")
         hl.addWidget(ico)
@@ -3288,17 +3475,20 @@ class _ConfirmRestoreDialog(QDialog):
         bl.setContentsMargins(20, 14, 20, 16)
         bl.setSpacing(12)
 
-        ct = "sobrescrevendo existentes" if conflict == "overwrite" else "pulando existentes"
-        msg = QLabel(f"Restaurar {label} para o sistema,\n{ct}?")
+        ct = (
+            tr("snapshots.confirm_restore_overwriting") if conflict == "overwrite"
+            else tr("snapshots.confirm_restore_skipping")
+        )
+        msg = QLabel(tr("snapshots.confirm_restore_message").format(label=label, ct=ct))
         msg.setFont(QFont("DejaVu Sans Mono", 9))
         msg.setStyleSheet("color: #c8d4e0;")
 
         btn_row = QHBoxLayout()
-        btn_cancel = QPushButton("Cancelar")
+        btn_cancel = QPushButton(tr("common.cancel"))
         btn_cancel.setObjectName("CRBtnCancel")
         btn_cancel.setFixedWidth(100)
         btn_cancel.clicked.connect(self.reject)
-        btn_ok = QPushButton("Restaurar")
+        btn_ok = QPushButton(tr("common.restore"))
         btn_ok.setObjectName("CRBtnOk")
         btn_ok.setFixedWidth(100)
         btn_ok.clicked.connect(self.accept)
@@ -3390,7 +3580,7 @@ class _AltRestoreDialog(QDialog):
     def __init__(self, entry: SnapshotEntry, parent=None):
         super().__init__(parent)
         self.entry = entry
-        self.setWindowTitle("Restore para disco alternativo")
+        self.setWindowTitle(tr("snapshots.altrestore_title"))
         self.setModal(True)
         self.setFixedSize(800, 480)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
@@ -3418,7 +3608,7 @@ class _AltRestoreDialog(QDialog):
         ico.setPixmap(qta.icon("mdi6.content-copy", color="#23a6ff").pixmap(24, 24))
         ico.setStyleSheet("QLabel { background: rgba(35,166,255,40); border-radius: 10px; }")
 
-        lbl = QLabel("Restore para disco alternativo")
+        lbl = QLabel(tr("snapshots.altrestore_title"))
         lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
         lbl.setStyleSheet("color: #ecf4ff;")
 
@@ -3466,7 +3656,7 @@ class _AltRestoreDialog(QDialog):
         snap_meta_row.addWidget(snap_meta)
 
         if self.entry.size_str:
-            snap_size_prefix = QLabel("snapshot size")
+            snap_size_prefix = QLabel(tr("snapshots.size_label"))
             snap_size_prefix.setFont(QFont("DejaVu Sans Mono", 9))
             snap_size_prefix.setStyleSheet("color: #6b7a8d;")
             snap_meta_row.addWidget(snap_size_prefix)
@@ -3489,7 +3679,7 @@ class _AltRestoreDialog(QDialog):
             snap_sync_icon = QLabel()
             snap_sync_icon.setPixmap(qta.icon(SYNC_GLYPH, color="#23a6ff").pixmap(14, 14))
 
-            snap_sync_lbl = QLabel(f"last sync  {self.entry.synced_at.replace('T', 'T ', 1)}")
+            snap_sync_lbl = QLabel(tr("snapshots.last_sync").format(date=self.entry.synced_at.replace('T', 'T ', 1)))
             snap_sync_lbl.setFont(QFont("DejaVu Sans Mono", 9))
             snap_sync_lbl.setStyleSheet("color: #23a6ff;")
 
@@ -3503,7 +3693,7 @@ class _AltRestoreDialog(QDialog):
         snap_row.addStretch()
 
         # Destino
-        lbl_dest = QLabel("Selecione o disco de destino:")
+        lbl_dest = QLabel(tr("snapshots.altrestore_select_dest"))
         lbl_dest.setFont(QFont("DejaVu Sans Mono", 10))
         lbl_dest.setStyleSheet("color: #c8d4e0;")
 
@@ -3513,14 +3703,14 @@ class _AltRestoreDialog(QDialog):
         style_combo_popup(self.cmb_dest)
 
         # Opções de cópia
-        lbl_opts = QLabel("Opções:")
+        lbl_opts = QLabel(tr("snapshots.altrestore_options_label"))
         lbl_opts.setFont(QFont("DejaVu Sans Mono", 10))
         lbl_opts.setStyleSheet("color: #c8d4e0;")
 
         opts_row = QHBoxLayout()
         opts_row.setSpacing(10)
 
-        self.chk_delete = QPushButton("Sincronizar (--delete)")
+        self.chk_delete = QPushButton(tr("snapshots.altrestore_opt_delete"))
         self.chk_delete.setCheckable(True)
         self.chk_delete.setChecked(False)
         self.chk_delete.setObjectName("AROptBtn")
@@ -3528,7 +3718,7 @@ class _AltRestoreDialog(QDialog):
         self.chk_delete.setMinimumWidth(200)
         self.chk_delete.setCursor(Qt.PointingHandCursor)
 
-        self.chk_hardlinks = QPushButton("Preservar hard-links (-H)")
+        self.chk_hardlinks = QPushButton(tr("snapshots.altrestore_opt_hardlinks"))
         self.chk_hardlinks.setCheckable(True)
         self.chk_hardlinks.setChecked(True)
         self.chk_hardlinks.setObjectName("AROptBtn")
@@ -3557,7 +3747,7 @@ class _AltRestoreDialog(QDialog):
         warn_icon.setAlignment(Qt.AlignCenter)
         warn_icon.setPixmap(qta.icon("mdi6.alert", color="#ff9966").pixmap(18, 18))
 
-        warn = QLabel("O conteúdo existente no destino pode ser alterado.")
+        warn = QLabel(tr("snapshots.altrestore_warning"))
         warn.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
         warn.setStyleSheet("color: #ff9966;")
 
@@ -3568,12 +3758,12 @@ class _AltRestoreDialog(QDialog):
         # Botões
         btn_row = QHBoxLayout()
         btn_row.setSpacing(10)
-        btn_cancel = QPushButton("Cancelar")
+        btn_cancel = QPushButton(tr("common.cancel"))
         btn_cancel.setObjectName("ARBtnCancel")
         btn_cancel.setFixedSize(120, 40)
         btn_cancel.clicked.connect(self.reject)
 
-        self.btn_start = QPushButton("Iniciar Restore")
+        self.btn_start = QPushButton(tr("snapshots.altrestore_btn_start"))
         self.btn_start.setObjectName("ARBtnStart")
         self.btn_start.setFixedSize(160, 40)
         self.btn_start.setEnabled(False)
@@ -3675,12 +3865,14 @@ class _AltRestoreDialog(QDialog):
             if dest.mountpoint == snap_mount:
                 continue  # exclui o disco onde o snapshot está
             self._destinations.append(dest)
-            label = f"{dest.label}  •  {format_gb(dest.free_gb)} livre  •  {dest.mountpoint}"
+            label = tr("snapshots.altrestore_combo_item").format(
+                label=dest.label, free=format_gb(dest.free_gb), mountpoint=dest.mountpoint,
+            )
             self.cmb_dest.addItem(label, dest)
 
         self.btn_start.setEnabled(bool(self._destinations))
         if not self._destinations:
-            self.lbl_dest_info.setText("Nenhum disco alternativo disponível.")
+            self.lbl_dest_info.setText(tr("snapshots.altrestore_no_disks"))
         else:
             self._on_dest_changed(0)
 
@@ -3688,16 +3880,16 @@ class _AltRestoreDialog(QDialog):
         if index < 0 or index >= len(self._destinations):
             return
         dest = self._destinations[index]
-        base_info = (
-            f"{format_gb(dest.free_gb)} livre de {format_gb(dest.total_gb)} "
-            f"• {dest.fs_type}"
+        base_info = tr("snapshots.altrestore_dest_info").format(
+            free=format_gb(dest.free_gb), total=format_gb(dest.total_gb), fs_type=dest.fs_type,
         )
 
         if self.entry.size_gb > 0 and dest.free_gb < self.entry.size_gb:
             self.lbl_dest_info.setText(
-                f"{base_info}  —  espaço insuficiente "
-                f"(snapshot tem {self.entry.size_str}, faltam "
-                f"{format_gb(self.entry.size_gb - dest.free_gb)})"
+                tr("snapshots.altrestore_insufficient_space").format(
+                    base_info=base_info, size=self.entry.size_str,
+                    missing=format_gb(self.entry.size_gb - dest.free_gb),
+                )
             )
             self.lbl_dest_info.setStyleSheet("color: #ff8888; font-weight: bold;")
             self.btn_start.setEnabled(False)
@@ -4668,7 +4860,7 @@ class _DeleteConfirmDialog(QDialog):
 
     def __init__(self, entry: SnapshotEntry, is_last_root: bool = False, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Confirmar exclusão")
+        self.setWindowTitle(tr("snapshots.delete_confirm_window_title"))
         self.setModal(True)
         self.setFixedSize(520, 300 if is_last_root else 240)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
@@ -4694,7 +4886,7 @@ class _DeleteConfirmDialog(QDialog):
         icon.setPixmap(qta.icon("mdi6.delete", color="#ff6666").pixmap(18, 18))
         icon.setStyleSheet("QLabel { background: rgba(200,60,60,40); border-radius: 8px; }")
 
-        lbl = QLabel("Excluir Snapshot")
+        lbl = QLabel(tr("snapshots.delete_confirm_header"))
         lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
         lbl.setStyleSheet("color: #ecf4ff;")
 
@@ -4716,17 +4908,14 @@ class _DeleteConfirmDialog(QDialog):
         b_layout.setContentsMargins(24, 18, 24, 20)
         b_layout.setSpacing(10)
 
-        warn = QLabel("Esta ação é irreversível. O snapshot será permanentemente removido do disco.")
+        warn = QLabel(tr("snapshots.delete_warning"))
         warn.setWordWrap(True)
         warn.setFont(QFont("DejaVu Sans Mono", 9))
         warn.setStyleSheet("color: #c8d4e0;")
 
         root_warn = None
         if is_last_root:
-            root_warn = QLabel(
-                "Este é o último snapshot ROOT — o carbonara-restore.sh "
-                "também será removido, já que não sobrará nada para restaurar."
-            )
+            root_warn = QLabel(tr("snapshots.delete_last_root_warning"))
             root_warn.setWordWrap(True)
             root_warn.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
             root_warn.setStyleSheet(
@@ -4734,7 +4923,7 @@ class _DeleteConfirmDialog(QDialog):
                 "border-radius: 6px; padding: 8px 10px;"
             )
 
-        pw_note = QLabel("Será solicitada a senha de root para concluir a exclusão.")
+        pw_note = QLabel(tr("snapshots.delete_password_note"))
         pw_note.setWordWrap(True)
         pw_note.setFont(QFont("DejaVu Sans Mono", 8))
         pw_note.setStyleSheet("color: #5f6b7a;")
@@ -4749,12 +4938,12 @@ class _DeleteConfirmDialog(QDialog):
         btn_row = QHBoxLayout()
         btn_row.setSpacing(10)
 
-        btn_cancel = QPushButton("Cancelar")
+        btn_cancel = QPushButton(tr("common.cancel"))
         btn_cancel.setObjectName("DelBtnCancel")
         btn_cancel.setFixedWidth(110)
         btn_cancel.clicked.connect(self.reject)
 
-        btn_confirm = QPushButton("Excluir")
+        btn_confirm = QPushButton(tr("common.delete"))
         btn_confirm.setObjectName("DelBtnConfirm")
         btn_confirm.setFixedWidth(110)
         btn_confirm.clicked.connect(self.accept)
@@ -4841,7 +5030,7 @@ class _DeleteProgressDialog(QDialog):
 
     def __init__(self, snap_name: str, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Removendo snapshot")
+        self.setWindowTitle(tr("snapshots.delete_progress_title"))
         self.setModal(True)
         self.setFixedSize(420, 160)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
@@ -4874,7 +5063,7 @@ class _DeleteProgressDialog(QDialog):
         icon.setPixmap(qta.icon("mdi6.delete", color="#ff6666").pixmap(16, 16))
         icon.setStyleSheet("QLabel { background: rgba(200,60,60,40); border-radius: 7px; }")
 
-        lbl = QLabel("Removendo Snapshot")
+        lbl = QLabel(tr("snapshots.delete_progress_title"))
         lbl.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
         lbl.setStyleSheet("color: #ecf4ff;")
 
@@ -4890,7 +5079,7 @@ class _DeleteProgressDialog(QDialog):
         b_layout.setContentsMargins(24, 16, 24, 20)
         b_layout.setSpacing(10)
 
-        self.lbl_status = QLabel("Aguardando autenticação...")
+        self.lbl_status = QLabel(tr("snapshots.delete_awaiting_auth"))
         self.lbl_status.setFont(QFont("DejaVu Sans Mono", 10))
         self.lbl_status.setStyleSheet("color: #c8d4e0;")
         self.lbl_status.setAlignment(Qt.AlignCenter)
@@ -4973,6 +5162,413 @@ class _DeleteProgressDialog(QDialog):
             self.move(event.globalPosition().toPoint() - self._drag)
 
 
+class _SyncStatusBadge(QFrame):
+    """Pill compacta no cabeçalho do Timeshift — mostra o status da
+    sincronização automática e abre o diálogo de configuração ao clicar.
+    Ainda sem backend: reflete só o que foi salvo localmente nesta sessão."""
+
+    clicked = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("SyncStatusBadge")
+        self.setCursor(Qt.PointingHandCursor)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(14, 8, 14, 8)
+        layout.setSpacing(8)
+
+        self._clock_icon = QLabel()
+        self._clock_icon.setFixedSize(14, 14)
+        self._clock_icon.setPixmap(qta.icon("mdi6.clock-outline", color="#8fd4ff").pixmap(14, 14))
+
+        self._dot = QLabel()
+        self._dot.setFixedSize(6, 6)
+
+        self._title_lbl = QLabel(tr("snapshots.sync_badge_title"))
+        self._title_lbl.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
+        self._title_lbl.setStyleSheet("color: #ecf4ff;")
+
+        self._sep_lbl = QLabel("·")
+        self._sep_lbl.setStyleSheet("color: #6b7a8d;")
+
+        self._detail_lbl = QLabel(tr("snapshots.sync_badge_disabled"))
+        self._detail_lbl.setFont(QFont("DejaVu Sans Mono", 9))
+        self._detail_lbl.setStyleSheet("color: #8b92a3;")
+
+        self._chevron = QLabel()
+        self._chevron.setFixedSize(13, 13)
+        self._chevron.setPixmap(qta.icon("mdi6.chevron-right", color="#8b92a3").pixmap(13, 13))
+
+        layout.addWidget(self._clock_icon)
+        layout.addWidget(self._dot)
+        layout.addWidget(self._title_lbl)
+        layout.addWidget(self._sep_lbl)
+        layout.addWidget(self._detail_lbl)
+        layout.addSpacing(2)
+        layout.addWidget(self._chevron)
+
+        self.set_state(enabled=False, next_run=None)
+
+    def _apply_style(self, enabled: bool = False) -> None:
+        border = "rgba(52,211,153,90)" if enabled else "rgba(255,255,255,14)"
+        border_hover = "rgba(52,211,153,140)" if enabled else "rgba(255,255,255,24)"
+        self.setStyleSheet(f"""
+            QFrame#SyncStatusBadge {{
+                background: rgba(255,255,255,5);
+                border: 1px solid {border};
+                border-radius: 16px;
+            }}
+            QFrame#SyncStatusBadge:hover {{
+                background: rgba(255,255,255,9);
+                border: 1px solid {border_hover};
+            }}
+            QLabel {{ background: transparent; border: none; }}
+        """)
+
+    def set_state(self, enabled: bool, next_run: str | None) -> None:
+        dot_color = "#34d399" if enabled else "#6b7a8d"
+        self._dot.setStyleSheet(f"background: {dot_color}; border-radius: 3px;")
+        if enabled and next_run:
+            self._detail_lbl.setText(tr("snapshots.sync_badge_next").format(when=next_run))
+        elif enabled:
+            self._detail_lbl.setText(tr("snapshots.sync_not_scheduled"))
+        else:
+            self._detail_lbl.setText(tr("snapshots.sync_badge_disabled"))
+        self._apply_style(enabled)
+
+    def retranslate(self) -> None:
+        self._title_lbl.setText(tr("snapshots.sync_badge_title"))
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
+
+class _ChipRow(QHBoxLayout):
+    """Grupo de chips exclusivos (só um ativo por vez) — mesmo padrão
+    visual dos cards de Scope já existentes nesta página."""
+
+    def __init__(self, options: list[tuple[str, str]], active_key: str, on_change) -> None:
+        super().__init__()
+        self.setContentsMargins(0, 0, 0, 0)
+        self.setSpacing(6)
+        self._buttons: dict[str, QPushButton] = {}
+        self._on_change = on_change
+        self.active_key = active_key
+        for key, label in options:
+            btn = QPushButton(label)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setFixedHeight(40)
+            btn.clicked.connect(lambda _checked=False, k=key: self._select(k))
+            self._buttons[key] = btn
+            self.addWidget(btn)
+        self._refresh_styles()
+
+    def _select(self, key: str) -> None:
+        self.active_key = key
+        self._refresh_styles()
+        self._on_change(key)
+
+    def _refresh_styles(self) -> None:
+        for key, btn in self._buttons.items():
+            if key == self.active_key:
+                btn.setStyleSheet("""
+                    QPushButton {
+                        background: rgba(35,166,255,26);
+                        border: 1px solid rgba(35,166,255,130);
+                        border-radius: 8px;
+                        color: #8fd4ff;
+                        font-family: "DejaVu Sans Mono";
+                        font-size: 12px;
+                        font-weight: bold;
+                    }
+                """)
+            else:
+                btn.setStyleSheet("""
+                    QPushButton {
+                        background: rgba(255,255,255,5);
+                        border: 1px solid rgba(255,255,255,14);
+                        border-radius: 8px;
+                        color: #c8d4e0;
+                        font-family: "DejaVu Sans Mono";
+                        font-size: 12px;
+                        font-weight: bold;
+                    }
+                    QPushButton:hover {
+                        background: rgba(255,255,255,9);
+                    }
+                """)
+
+
+class _ScheduledSyncDialog(QDialog):
+    """Configuração de sincronização automática — SOMENTE UI por enquanto.
+    Não escreve nenhuma unit/timer do systemd nem faz nada privilegiado;
+    guarda a escolha em memória (`self.result_config`) pra a página exibir
+    no badge e pra o backend, quando existir, consumir esse mesmo formato."""
+
+    def __init__(self, current_config: dict, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(tr("snapshots.sync_dialog_title"))
+        self.setModal(True)
+        self.setFixedWidth(800)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self.result_config = dict(current_config)
+        self._build_ui()
+        self._apply_styles()
+
+    def _build_ui(self) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        # ── Header ──────────────────────────────────────────────────
+        header = QFrame()
+        header.setObjectName("SyncHeader")
+        header.setFixedHeight(48)
+        h_layout = QHBoxLayout(header)
+        h_layout.setContentsMargins(18, 0, 16, 0)
+
+        icon = QLabel()
+        icon.setFixedSize(28, 28)
+        icon.setAlignment(Qt.AlignCenter)
+        icon.setPixmap(qta.icon("mdi6.clock-outline", color="#8fd4ff").pixmap(18, 18))
+        icon.setStyleSheet("QLabel { background: rgba(35,166,255,40); border-radius: 8px; }")
+
+        lbl = QLabel(tr("snapshots.sync_dialog_title"))
+        lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+        lbl.setStyleSheet("color: #ecf4ff;")
+
+        btn_x = _CloseLabel(self)
+        btn_x.mousePressEvent = lambda e: self.reject()
+
+        h_layout.addWidget(icon)
+        h_layout.addSpacing(10)
+        h_layout.addWidget(lbl)
+        h_layout.addStretch()
+        h_layout.addWidget(btn_x)
+
+        # ── Corpo ───────────────────────────────────────────────────
+        body = QFrame()
+        body.setObjectName("SyncBody")
+        b_layout = QVBoxLayout(body)
+        b_layout.setContentsMargins(36, 32, 36, 32)
+        b_layout.setSpacing(26)
+
+        # Toggle ativar/desativar
+        toggle_row = QHBoxLayout()
+        toggle_row.setContentsMargins(0, 0, 0, 0)
+        toggle_lbl = QLabel(tr("snapshots.sync_dialog_title").upper())
+        toggle_lbl.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+        toggle_lbl.setStyleSheet("color: #8b92a3; letter-spacing: 1px;")
+        toggle_row.addWidget(toggle_lbl)
+        toggle_row.addStretch()
+
+        self.btn_toggle = QPushButton(
+            tr("snapshots.sync_enabled") if self.result_config.get("enabled") else tr("snapshots.sync_disabled")
+        )
+        self.btn_toggle.setCursor(Qt.PointingHandCursor)
+        self.btn_toggle.setFixedSize(120, 36)
+        self.btn_toggle.clicked.connect(self._toggle_enabled)
+        toggle_row.addWidget(self.btn_toggle)
+        b_layout.addLayout(toggle_row)
+
+        # Frequência
+        freq_lbl = QLabel(tr("snapshots.sync_frequency_label"))
+        freq_lbl.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+        freq_lbl.setStyleSheet("color: #8b92a3; letter-spacing: 1px;")
+        b_layout.addWidget(freq_lbl)
+
+        self._freq_row = _ChipRow(
+            [
+                ("daily", tr("snapshots.sync_freq_daily")),
+                ("weekly", tr("snapshots.sync_freq_weekly")),
+                ("custom", tr("snapshots.sync_freq_custom")),
+            ],
+            self.result_config.get("frequency", "daily"),
+            lambda key: self.result_config.__setitem__("frequency", key),
+        )
+        b_layout.addLayout(self._freq_row)
+
+        # Horário
+        time_lbl = QLabel(tr("snapshots.sync_time_label"))
+        time_lbl.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+        time_lbl.setStyleSheet("color: #8b92a3; letter-spacing: 1px; margin-top: 4px;")
+        b_layout.addWidget(time_lbl)
+
+        self.time_edit = QTimeEdit()
+        self.time_edit.setDisplayFormat("HH:mm")
+        saved_time = self.result_config.get("time", "03:00")
+        h, m = (int(x) for x in saved_time.split(":"))
+        self.time_edit.setTime(QTime(h, m))
+        self.time_edit.setFixedHeight(40)
+        self.time_edit.setStyleSheet("""
+            QTimeEdit {
+                background: rgba(255,255,255,5);
+                border: 1px solid rgba(255,255,255,14);
+                border-radius: 8px;
+                color: #ecf4ff;
+                font-family: "DejaVu Sans Mono";
+                font-size: 13px;
+                font-weight: bold;
+                padding: 0 12px;
+            }
+            QTimeEdit::up-button, QTimeEdit::down-button {
+                background: transparent;
+                border: none;
+                width: 18px;
+            }
+            QTimeEdit::up-arrow, QTimeEdit::down-arrow {
+                width: 8px;
+                height: 8px;
+            }
+        """)
+        self.time_edit.timeChanged.connect(
+            lambda t: self.result_config.__setitem__("time", t.toString("HH:mm"))
+        )
+        b_layout.addWidget(self.time_edit)
+
+        # Escopo
+        scope_lbl = QLabel(tr("snapshots.sync_scope_label"))
+        scope_lbl.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+        scope_lbl.setStyleSheet("color: #8b92a3; letter-spacing: 1px; margin-top: 4px;")
+        b_layout.addWidget(scope_lbl)
+
+        self._scope_row = _ChipRow(
+            [
+                ("root", "ROOT"),
+                ("home", "HOME"),
+                ("both", "ROOT+HOME"),
+            ],
+            self.result_config.get("scope", "both"),
+            lambda key: self.result_config.__setitem__("scope", key),
+        )
+        b_layout.addLayout(self._scope_row)
+
+        # Status (última/próxima execução) — sem backend ainda, mostra
+        # sempre o estado "nunca executado" nesta rodada
+        status_card = QFrame()
+        status_card.setObjectName("SyncStatusCard")
+        status_card.setStyleSheet("""
+            QFrame#SyncStatusCard {
+                background: rgba(255,255,255,4);
+                border: 1px solid rgba(255,255,255,8);
+                border-radius: 10px;
+            }
+            QFrame#SyncStatusCard QLabel {
+                background: transparent;
+                border: none;
+            }
+        """)
+        status_layout = QHBoxLayout(status_card)
+        status_layout.setContentsMargins(22, 20, 22, 20)
+
+        last_block = QVBoxLayout()
+        last_block.setContentsMargins(0, 0, 0, 0)
+        last_block.setSpacing(6)
+        last_caption = QLabel(tr("snapshots.sync_last_run_label"))
+        last_caption.setFont(QFont("DejaVu Sans Mono", 10))
+        last_caption.setStyleSheet("color: #8b92a3;")
+        last_value = QLabel(tr("snapshots.sync_never_run"))
+        last_value.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+        last_value.setStyleSheet("color: #ecf4ff;")
+        last_block.addWidget(last_caption)
+        last_block.addWidget(last_value)
+        status_layout.addLayout(last_block)
+        status_layout.addStretch()
+
+        next_block = QVBoxLayout()
+        next_block.setContentsMargins(0, 0, 0, 0)
+        next_block.setSpacing(6)
+        next_caption = QLabel(tr("snapshots.sync_next_run_label"))
+        next_caption.setFont(QFont("DejaVu Sans Mono", 10))
+        next_caption.setStyleSheet("color: #8b92a3;")
+        next_value = QLabel(tr("snapshots.sync_not_scheduled"))
+        next_value.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+        next_value.setStyleSheet("color: #ecf4ff;")
+        next_block.addWidget(next_caption)
+        next_block.addWidget(next_value)
+        status_layout.addLayout(next_block)
+
+        b_layout.addWidget(status_card)
+
+        note = QLabel(tr("snapshots.sync_backend_note"))
+        note.setWordWrap(True)
+        note.setFont(QFont("DejaVu Sans Mono", 9))
+        note.setStyleSheet("color: #6b7a8d;")
+        b_layout.addWidget(note)
+
+        b_layout.addStretch()
+
+        # Botão salvar
+        btn_save = QPushButton(tr("snapshots.sync_save_button"))
+        btn_save.setCursor(Qt.PointingHandCursor)
+        btn_save.setFixedHeight(44)
+        btn_save.setStyleSheet("""
+            QPushButton {
+                background: #23a6ff;
+                border: none;
+                border-radius: 10px;
+                color: #04203a;
+                font-family: "DejaVu Sans Mono";
+                font-size: 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #4fb8ff;
+            }
+        """)
+        btn_save.clicked.connect(self.accept)
+        b_layout.addWidget(btn_save)
+
+        root.addWidget(header)
+        root.addWidget(body, 1)
+
+    def _toggle_enabled(self) -> None:
+        enabled = not self.result_config.get("enabled", False)
+        self.result_config["enabled"] = enabled
+        self.btn_toggle.setText(tr("snapshots.sync_enabled") if enabled else tr("snapshots.sync_disabled"))
+        self._apply_toggle_style()
+
+    def _apply_toggle_style(self) -> None:
+        self.btn_toggle.setStyleSheet("""
+            QPushButton {
+                background: rgba(52,211,153,26);
+                border: 1px solid rgba(52,211,153,130);
+                border-radius: 8px;
+                color: #9bf0bd;
+                font-family: "DejaVu Sans Mono";
+                font-size: 10px;
+                font-weight: bold;
+            }
+        """ if self.result_config.get("enabled") else """
+            QPushButton {
+                background: rgba(255,255,255,6);
+                border: 1px solid rgba(255,255,255,16);
+                border-radius: 8px;
+                color: #8b92a3;
+                font-family: "DejaVu Sans Mono";
+                font-size: 10px;
+                font-weight: bold;
+            }
+        """)
+
+    def _apply_styles(self) -> None:
+        self.setStyleSheet("""
+            QDialog { background: #14151c; border-radius: 14px; }
+            QFrame#SyncHeader {
+                background: #191a22;
+                border-top-left-radius: 14px;
+                border-top-right-radius: 14px;
+                border-bottom: 1px solid rgba(255,255,255,10);
+            }
+            QFrame#SyncBody { background: transparent; }
+            QLabel { background: transparent; border: none; }
+        """)
+        self._apply_toggle_style()
+
+
 class _DeleteWorker(QThread):
     finished_ok = Signal(str)
     failed = Signal(str)
@@ -5027,11 +5623,11 @@ class _DeleteWorker(QThread):
             if result.returncode != 0:
                 err = result.stderr.strip() or f"exit code {result.returncode}"
                 if result.returncode == 126 or "dismissed" in err.lower():
-                    err = "Operação cancelada."
+                    err = tr("snapshots.delete_cancelled")
                 self.failed.emit(err)
                 return
 
-            self.finished_ok.emit(f"Snapshot {self._path.name} removido com sucesso.")
+            self.finished_ok.emit(tr("snapshots.delete_success").format(name=self._path.name))
 
         except Exception as exc:
             self.failed.emit(str(exc))

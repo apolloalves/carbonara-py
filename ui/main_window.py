@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ui.pages.backups.backups_page import BackupsPage
+from ui.pages.timeshift.timeshift_page import BackupsPage
 from ui.pages.eggs.eggs_page import EggsPage
 from ui.pages.disks.disks_page import DisksPage, MountKnownDisksWorker
 from ui.pages.doctor.doctor_arch_page import DoctorArchPage
