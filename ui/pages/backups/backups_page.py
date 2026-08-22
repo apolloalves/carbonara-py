@@ -54,7 +54,7 @@ class BackupsPage(QWidget):
         header_layout.setContentsMargins(0, 14, 0, 0)
         header_layout.setSpacing(14)
 
-        self.header_icon = icon_badge("mdi6.harddisk", 48, color="#23a6ff", bg_rgba="35, 166, 255, 34")
+        self.header_icon = icon_badge("mdi6.history", 48, color="#23a6ff", bg_rgba="35, 166, 255, 34")
 
         title_block = QVBoxLayout()
         title_block.setContentsMargins(0, 0, 0, 0)
