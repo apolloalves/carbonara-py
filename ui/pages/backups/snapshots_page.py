@@ -5401,6 +5401,27 @@ class _ScheduledSyncDialog(QDialog):
         h, m = (int(x) for x in saved_time.split(":"))
         self.time_edit.setTime(QTime(h, m))
         self.time_edit.setFixedHeight(40)
+        self.time_edit.setStyleSheet("""
+            QTimeEdit {
+                background: rgba(255,255,255,5);
+                border: 1px solid rgba(255,255,255,14);
+                border-radius: 8px;
+                color: #ecf4ff;
+                font-family: "DejaVu Sans Mono";
+                font-size: 13px;
+                font-weight: bold;
+                padding: 0 12px;
+            }
+            QTimeEdit::up-button, QTimeEdit::down-button {
+                background: transparent;
+                border: none;
+                width: 18px;
+            }
+            QTimeEdit::up-arrow, QTimeEdit::down-arrow {
+                width: 8px;
+                height: 8px;
+            }
+        """)
         self.time_edit.timeChanged.connect(
             lambda t: self.result_config.__setitem__("time", t.toString("HH:mm"))
         )
