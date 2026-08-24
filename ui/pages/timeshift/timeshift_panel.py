@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QGraphicsDropShadowEffect,
     QTimeEdit,
+    QLineEdit,
 )
 
 from core.operation_manager import OperationManager
@@ -5387,15 +5388,49 @@ class _ScheduledSyncDialog(QDialog):
                 ("custom", tr("snapshots.sync_freq_custom")),
             ],
             self.result_config.get("frequency", "daily"),
-            lambda key: self.result_config.__setitem__("frequency", key),
+            self._on_frequency_changed,
         )
         b_layout.addLayout(self._freq_row)
 
-        # Horário
+        # Dia da semana — só aparece com Semanal
+        self._weekday_container = QWidget()
+        weekday_layout = QVBoxLayout(self._weekday_container)
+        weekday_layout.setContentsMargins(0, 4, 0, 0)
+        weekday_layout.setSpacing(10)
+
+        weekday_lbl = QLabel(tr("snapshots.sync_weekday_label"))
+        weekday_lbl.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+        weekday_lbl.setStyleSheet("color: #8b92a3; letter-spacing: 1px;")
+        weekday_layout.addWidget(weekday_lbl)
+
+        weekday_options = [
+            ("Mon", tr("snapshots.sync_weekday_mon")),
+            ("Tue", tr("snapshots.sync_weekday_tue")),
+            ("Wed", tr("snapshots.sync_weekday_wed")),
+            ("Thu", tr("snapshots.sync_weekday_thu")),
+            ("Fri", tr("snapshots.sync_weekday_fri")),
+            ("Sat", tr("snapshots.sync_weekday_sat")),
+            ("Sun", tr("snapshots.sync_weekday_sun")),
+        ]
+        self._weekday_row = _ChipRow(
+            weekday_options,
+            self.result_config.get("weekday", "Mon"),
+            lambda key: (self.result_config.__setitem__("weekday", key), self._refresh_status_card()),
+        )
+        weekday_layout.addLayout(self._weekday_row)
+        b_layout.addWidget(self._weekday_container)
+
+        # Horário — não se aplica ao modo Personalizada (o horário já
+        # vai embutido na expressão que o usuário digitar)
+        self._time_container = QWidget()
+        time_layout = QVBoxLayout(self._time_container)
+        time_layout.setContentsMargins(0, 0, 0, 0)
+        time_layout.setSpacing(10)
+
         time_lbl = QLabel(tr("snapshots.sync_time_label"))
         time_lbl.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
         time_lbl.setStyleSheet("color: #8b92a3; letter-spacing: 1px; margin-top: 4px;")
-        b_layout.addWidget(time_lbl)
+        time_layout.addWidget(time_lbl)
 
         self.time_edit = QTimeEdit()
         self.time_edit.setDisplayFormat("HH:mm")
@@ -5425,9 +5460,50 @@ class _ScheduledSyncDialog(QDialog):
             }
         """)
         self.time_edit.timeChanged.connect(
-            lambda t: self.result_config.__setitem__("time", t.toString("HH:mm"))
+            lambda t: (self.result_config.__setitem__("time", t.toString("HH:mm")), self._refresh_status_card())
         )
-        b_layout.addWidget(self.time_edit)
+        time_layout.addWidget(self.time_edit)
+        b_layout.addWidget(self._time_container)
+
+        # Expressão personalizada — só aparece com Personalizada
+        self._custom_container = QWidget()
+        custom_layout = QVBoxLayout(self._custom_container)
+        custom_layout.setContentsMargins(0, 4, 0, 0)
+        custom_layout.setSpacing(8)
+
+        custom_lbl = QLabel(tr("snapshots.sync_custom_label"))
+        custom_lbl.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+        custom_lbl.setStyleSheet("color: #8b92a3; letter-spacing: 1px;")
+        custom_layout.addWidget(custom_lbl)
+
+        self.custom_edit = QLineEdit(self.result_config.get("custom_expression", ""))
+        self.custom_edit.setPlaceholderText("*-*-* 03:00:00")
+        self.custom_edit.setFixedHeight(40)
+        self.custom_edit.setStyleSheet("""
+            QLineEdit {
+                background: rgba(255,255,255,5);
+                border: 1px solid rgba(255,255,255,14);
+                border-radius: 8px;
+                color: #ecf4ff;
+                font-family: "DejaVu Sans Mono";
+                font-size: 12px;
+                padding: 0 12px;
+            }
+        """)
+        self.custom_edit.textChanged.connect(
+            lambda text: (self.result_config.__setitem__("custom_expression", text), self._refresh_status_card())
+        )
+        custom_layout.addWidget(self.custom_edit)
+
+        custom_hint = QLabel(tr("snapshots.sync_custom_hint"))
+        custom_hint.setFont(QFont("DejaVu Sans Mono", 8))
+        custom_hint.setStyleSheet("color: #6b7a8d;")
+        custom_hint.setWordWrap(True)
+        custom_layout.addWidget(custom_hint)
+
+        b_layout.addWidget(self._custom_container)
+
+        self._update_frequency_visibility(self.result_config.get("frequency", "daily"))
 
         # Escopo
         scope_lbl = QLabel(tr("snapshots.sync_scope_label"))
@@ -5470,11 +5546,11 @@ class _ScheduledSyncDialog(QDialog):
         last_caption = QLabel(tr("snapshots.sync_last_run_label"))
         last_caption.setFont(QFont("DejaVu Sans Mono", 10))
         last_caption.setStyleSheet("color: #8b92a3;")
-        last_value = QLabel(tr("snapshots.sync_never_run"))
-        last_value.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
-        last_value.setStyleSheet("color: #ecf4ff;")
+        self.last_value = QLabel(tr("snapshots.sync_never_run"))
+        self.last_value.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+        self.last_value.setStyleSheet("color: #ecf4ff;")
         last_block.addWidget(last_caption)
-        last_block.addWidget(last_value)
+        last_block.addWidget(self.last_value)
         status_layout.addLayout(last_block)
         status_layout.addStretch()
 
@@ -5484,14 +5560,15 @@ class _ScheduledSyncDialog(QDialog):
         next_caption = QLabel(tr("snapshots.sync_next_run_label"))
         next_caption.setFont(QFont("DejaVu Sans Mono", 10))
         next_caption.setStyleSheet("color: #8b92a3;")
-        next_value = QLabel(tr("snapshots.sync_not_scheduled"))
-        next_value.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
-        next_value.setStyleSheet("color: #ecf4ff;")
+        self.next_value = QLabel(tr("snapshots.sync_not_scheduled"))
+        self.next_value.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+        self.next_value.setStyleSheet("color: #ecf4ff;")
         next_block.addWidget(next_caption)
-        next_block.addWidget(next_value)
+        next_block.addWidget(self.next_value)
         status_layout.addLayout(next_block)
 
         b_layout.addWidget(status_card)
+        self._refresh_status_card()
 
         note = QLabel(tr("snapshots.sync_backend_note"))
         note.setWordWrap(True)
@@ -5502,10 +5579,10 @@ class _ScheduledSyncDialog(QDialog):
         b_layout.addStretch()
 
         # Botão salvar
-        btn_save = QPushButton(tr("snapshots.sync_save_button"))
-        btn_save.setCursor(Qt.PointingHandCursor)
-        btn_save.setFixedHeight(44)
-        btn_save.setStyleSheet("""
+        self.btn_save = QPushButton(tr("snapshots.sync_save_button"))
+        self.btn_save.setCursor(Qt.PointingHandCursor)
+        self.btn_save.setFixedHeight(44)
+        self.btn_save.setStyleSheet("""
             QPushButton {
                 background: #23a6ff;
                 border: none;
@@ -5518,18 +5595,102 @@ class _ScheduledSyncDialog(QDialog):
             QPushButton:hover {
                 background: #4fb8ff;
             }
+            QPushButton:disabled {
+                background: rgba(35,166,255,80);
+                color: rgba(4,32,58,150);
+            }
         """)
-        btn_save.clicked.connect(self.accept)
-        b_layout.addWidget(btn_save)
+        self.btn_save.clicked.connect(self._on_save)
+        b_layout.addWidget(self.btn_save)
 
         root.addWidget(header)
         root.addWidget(body, 1)
+
+    def _refresh_status_card(self) -> None:
+        from core.snapshots import scheduler
+        from datetime import datetime
+
+        status = scheduler.load_schedule_status()
+        last_run = status.get("last_run")
+        if last_run:
+            try:
+                when = datetime.fromisoformat(last_run).strftime("%d/%m %H:%M")
+            except ValueError:
+                when = last_run
+            result_key = {
+                "success": "snapshots.sync_result_success",
+                "failed": "snapshots.sync_result_failed",
+                "skipped": "snapshots.sync_result_skipped",
+                "nothing_to_sync": "snapshots.sync_result_nothing",
+            }.get(status.get("last_result"), status.get("last_result") or "")
+            result_txt = tr(result_key) if result_key else "?"
+            self.last_value.setText(tr("snapshots.sync_last_run_value").format(when=when, result=result_txt))
+            color = {
+                "success": "#9bf0bd",
+                "failed": "#ff8888",
+                "skipped": "#e0a840",
+                "nothing_to_sync": "#c8d4e0",
+            }.get(status.get("last_result"), "#ecf4ff")
+            self.last_value.setStyleSheet(f"color: {color};")
+        else:
+            self.last_value.setText(tr("snapshots.sync_never_run"))
+            self.last_value.setStyleSheet("color: #ecf4ff;")
+
+        next_run = scheduler.next_run_display(self.result_config) if self.result_config.get("enabled") else None
+        self.next_value.setText(next_run if next_run else tr("snapshots.sync_not_scheduled"))
+
+    def _on_frequency_changed(self, key: str) -> None:
+        self.result_config["frequency"] = key
+        self._update_frequency_visibility(key)
+        self._refresh_status_card()
+
+    def _update_frequency_visibility(self, freq: str) -> None:
+        self._weekday_container.setVisible(freq == "weekly")
+        self._custom_container.setVisible(freq == "custom")
+        self._time_container.setVisible(freq in ("daily", "weekly"))
+
+    def _on_save(self) -> None:
+        if not self.result_config.get("destination_mountpoint"):
+            _show_error("Carbonara", tr("snapshots.sync_no_destination"), parent=self)
+            return
+
+        from core.snapshots import scheduler
+        scheduler.save_schedule_config(self.result_config)
+
+        args_json = json.dumps({"config": self.result_config})
+        cmd = [
+            "pkexec",
+            "/usr/local/bin/carbonara-helper",
+            os.environ.get("DISPLAY", ""),
+            os.environ.get("XAUTHORITY", ""),
+            "scheduler.install",
+            args_json,
+        ]
+
+        self.btn_save.setEnabled(False)
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        except Exception as exc:
+            self.btn_save.setEnabled(True)
+            _show_error("Carbonara", tr("snapshots.sync_install_failed").format(msg=str(exc)), parent=self)
+            return
+        self.btn_save.setEnabled(True)
+
+        if result.returncode == 126:
+            return  # pkexec cancelado na autenticação — deixa o diálogo aberto pra tentar de novo
+        if result.returncode != 0:
+            err = result.stderr.strip() or f"exit code {result.returncode}"
+            _show_error("Carbonara", tr("snapshots.sync_install_failed").format(msg=err), parent=self)
+            return
+
+        self.accept()
 
     def _toggle_enabled(self) -> None:
         enabled = not self.result_config.get("enabled", False)
         self.result_config["enabled"] = enabled
         self.btn_toggle.setText(tr("snapshots.sync_enabled") if enabled else tr("snapshots.sync_disabled"))
         self._apply_toggle_style()
+        self._refresh_status_card()
 
     def _apply_toggle_style(self) -> None:
         self.btn_toggle.setStyleSheet("""

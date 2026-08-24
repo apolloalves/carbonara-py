@@ -244,10 +244,28 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "snapshots.sync_next_run_label": "Próxima execução",
         "snapshots.sync_never_run": "Nunca executado",
         "snapshots.sync_not_scheduled": "Não agendado",
+        "snapshots.sync_weekday_label": "DIA DA SEMANA",
+        "snapshots.sync_custom_label": "EXPRESSÃO PERSONALIZADA (systemd OnCalendar)",
+        "snapshots.sync_custom_hint": "Ex: *-*-* 03:00:00 (todo dia às 3h) · Sun *-*-* 04:00:00 (domingos às 4h)",
+        "snapshots.sync_weekday_mon": "Seg",
+        "snapshots.sync_weekday_tue": "Ter",
+        "snapshots.sync_weekday_wed": "Qua",
+        "snapshots.sync_weekday_thu": "Qui",
+        "snapshots.sync_weekday_fri": "Sex",
+        "snapshots.sync_weekday_sat": "Sáb",
+        "snapshots.sync_weekday_sun": "Dom",
         "snapshots.sync_save_button": "Salvar agendamento",
+        "snapshots.sync_no_destination": "Selecione um destino de backup antes de salvar o agendamento.",
+        "snapshots.sync_install_failed": "Falha ao aplicar o agendamento no sistema:\n\n{msg}",
+        "snapshots.sync_result_success": "sucesso",
+        "snapshots.sync_result_failed": "falhou",
+        "snapshots.sync_result_skipped": "pulado",
+        "snapshots.sync_result_nothing": "nada a sincronizar",
+        "snapshots.sync_last_run_value": "{when} · {result}",
+        "snapshots.sync_toast_success": "Sincronização automática concluída — {kinds}",
+        "snapshots.sync_toast_failed": "Sincronização automática falhou — veja o agendamento pra detalhes",
         "snapshots.sync_backend_note": (
-            "O agendamento ainda não está ativo no sistema — essa tela guarda "
-            "suas preferências pra quando o serviço de fundo for implementado."
+            "As alterações são aplicadas no sistema (systemd) assim que você salva."
         ),
 
         # ── Diálogo Sobre ──
@@ -517,10 +535,28 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "snapshots.sync_next_run_label": "Next run",
         "snapshots.sync_never_run": "Never ran",
         "snapshots.sync_not_scheduled": "Not scheduled",
+        "snapshots.sync_weekday_label": "DAY OF WEEK",
+        "snapshots.sync_custom_label": "CUSTOM EXPRESSION (systemd OnCalendar)",
+        "snapshots.sync_custom_hint": "E.g: *-*-* 03:00:00 (every day at 3am) · Sun *-*-* 04:00:00 (Sundays at 4am)",
+        "snapshots.sync_weekday_mon": "Mon",
+        "snapshots.sync_weekday_tue": "Tue",
+        "snapshots.sync_weekday_wed": "Wed",
+        "snapshots.sync_weekday_thu": "Thu",
+        "snapshots.sync_weekday_fri": "Fri",
+        "snapshots.sync_weekday_sat": "Sat",
+        "snapshots.sync_weekday_sun": "Sun",
         "snapshots.sync_save_button": "Save schedule",
+        "snapshots.sync_no_destination": "Select a backup destination before saving the schedule.",
+        "snapshots.sync_install_failed": "Failed to apply the schedule to the system:\n\n{msg}",
+        "snapshots.sync_result_success": "success",
+        "snapshots.sync_result_failed": "failed",
+        "snapshots.sync_result_skipped": "skipped",
+        "snapshots.sync_result_nothing": "nothing to sync",
+        "snapshots.sync_last_run_value": "{when} · {result}",
+        "snapshots.sync_toast_success": "Automatic sync completed — {kinds}",
+        "snapshots.sync_toast_failed": "Automatic sync failed — check the schedule for details",
         "snapshots.sync_backend_note": (
-            "Scheduling isn't active on the system yet — this screen just "
-            "stores your preferences for when the background service is built."
+            "Changes take effect on the system (systemd) as soon as you save."
         ),
 
         # ── About dialog ──
@@ -823,11 +859,28 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "snapshots.sync_next_run_label": "Próxima ejecución",
         "snapshots.sync_never_run": "Nunca se ejecutó",
         "snapshots.sync_not_scheduled": "No programado",
+        "snapshots.sync_weekday_label": "DÍA DE LA SEMANA",
+        "snapshots.sync_custom_label": "EXPRESIÓN PERSONALIZADA (systemd OnCalendar)",
+        "snapshots.sync_custom_hint": "Ej: *-*-* 03:00:00 (todos los días a las 3h) · Sun *-*-* 04:00:00 (domingos a las 4h)",
+        "snapshots.sync_weekday_mon": "Lun",
+        "snapshots.sync_weekday_tue": "Mar",
+        "snapshots.sync_weekday_wed": "Mié",
+        "snapshots.sync_weekday_thu": "Jue",
+        "snapshots.sync_weekday_fri": "Vie",
+        "snapshots.sync_weekday_sat": "Sáb",
+        "snapshots.sync_weekday_sun": "Dom",
         "snapshots.sync_save_button": "Guardar programación",
+        "snapshots.sync_no_destination": "Seleccione un destino de backup antes de guardar la programación.",
+        "snapshots.sync_install_failed": "Error al aplicar la programación en el sistema:\n\n{msg}",
+        "snapshots.sync_result_success": "éxito",
+        "snapshots.sync_result_failed": "falló",
+        "snapshots.sync_result_skipped": "omitido",
+        "snapshots.sync_result_nothing": "nada que sincronizar",
+        "snapshots.sync_last_run_value": "{when} · {result}",
+        "snapshots.sync_toast_success": "Sincronización automática completada — {kinds}",
+        "snapshots.sync_toast_failed": "La sincronización automática falló — vea la programación para más detalles",
         "snapshots.sync_backend_note": (
-            "La programación todavía no está activa en el sistema — esta "
-            "pantalla solo guarda sus preferencias para cuando se implemente "
-            "el servicio en segundo plano."
+            "Los cambios se aplican en el sistema (systemd) en cuanto guarda."
         ),
 
         # ── Diálogo Acerca de ──
