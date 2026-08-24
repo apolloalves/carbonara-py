@@ -198,8 +198,18 @@ class BackupsPage(QWidget):
                     tr("snapshots.sync_toast_failed"),
                     "mdi6.alert-circle-outline", "#ff8888",
                 )
-            # "skipped"/"nothing_to_sync" não geram toast — não são
-            # eventos que precisem chamar atenção, só o badge já reflete
+            elif result == "nothing_to_sync":
+                # Diferente de "skipped" — aqui o agendamento está ativo
+                # mas não há nenhum snapshot pra sincronizar, então nada
+                # está sendo protegido de verdade. Silêncio aqui seria
+                # enganoso (o badge sozinho mostraria "ativado" com
+                # confiança total).
+                self._show_sync_toast(
+                    tr("snapshots.sync_toast_nothing"),
+                    "mdi6.alert-outline", "#e0a840",
+                )
+            # "skipped" (outra operação em andamento) continua sem toast —
+            # esse sim é passageiro, sem problema real
 
     def _refresh_sync_badge(self) -> None:
         enabled = self._sync_config.get("enabled", False)

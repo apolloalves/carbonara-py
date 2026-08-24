@@ -1438,6 +1438,10 @@ class SnapshotsPage(QWidget):
             )
             return
 
+        confirm_dialog = _CreateSnapshotConfirmDialog(self.current_scope(), parent=self)
+        if confirm_dialog.exec() != QDialog.Accepted:
+            return
+
         if not OperationManager.start(
             "backup",
             f"Snapshot on {dest.label} ({dest.mountpoint})",
@@ -5728,6 +5732,153 @@ class _ScheduledSyncDialog(QDialog):
             QLabel { background: transparent; border: none; }
         """)
         self._apply_toggle_style()
+
+
+class _CreateSnapshotConfirmDialog(QDialog):
+    """Confirmação antes de criar um snapshot novo — mostra o escopo
+    selecionado no momento (ROOT/HOME/ROOT+HOME) pra evitar cliques
+    acidentais no escopo errado. Mesmo chrome dos outros diálogos de
+    confirmação desta página (_DeleteConfirmDialog etc)."""
+
+    _SCOPE_LABEL_KEYS = {
+        "root": "snapshots.scope_root_title",
+        "home": "snapshots.scope_home_title",
+        "both": "snapshots.scope_both_title",
+    }
+    _SCOPE_DESC_KEYS = {
+        "root": "snapshots.create_confirm_desc_root",
+        "home": "snapshots.create_confirm_desc_home",
+        "both": "snapshots.create_confirm_desc_both",
+    }
+
+    def __init__(self, scope: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(tr("snapshots.create_confirm_title"))
+        self.setModal(True)
+        self.setFixedWidth(480)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        header = QFrame()
+        header.setObjectName("CreateSnapHeader")
+        header.setFixedHeight(48)
+        h_layout = QHBoxLayout(header)
+        h_layout.setContentsMargins(18, 0, 16, 0)
+
+        icon = QLabel()
+        icon.setFixedSize(28, 28)
+        icon.setAlignment(Qt.AlignCenter)
+        icon.setPixmap(qta.icon(CREATE_GLYPH, color="#9bf0bd").pixmap(18, 18))
+        icon.setStyleSheet("QLabel { background: rgba(52,211,153,40); border-radius: 8px; }")
+
+        lbl = QLabel(tr("snapshots.create_confirm_title"))
+        lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+        lbl.setStyleSheet("color: #ecf4ff;")
+
+        btn_x = _CloseLabel(self)
+        btn_x.mousePressEvent = lambda e: self.reject()
+
+        h_layout.addWidget(icon)
+        h_layout.addSpacing(10)
+        h_layout.addWidget(lbl)
+        h_layout.addStretch()
+        h_layout.addWidget(btn_x)
+
+        body = QFrame()
+        body.setObjectName("CreateSnapBody")
+        b_layout = QVBoxLayout(body)
+        b_layout.setContentsMargins(24, 20, 24, 20)
+        b_layout.setSpacing(14)
+
+        intro = QLabel(tr("snapshots.create_confirm_body"))
+        intro.setFont(QFont("DejaVu Sans Mono", 10))
+        intro.setStyleSheet("color: #c8d4e0;")
+        b_layout.addWidget(intro)
+
+        scope_badge = QFrame()
+        scope_badge.setObjectName("CreateSnapScopeBadge")
+        scope_badge.setStyleSheet("""
+            QFrame#CreateSnapScopeBadge {
+                background: rgba(52,211,153,14);
+                border: 1px solid rgba(52,211,153,90);
+                border-radius: 10px;
+            }
+            QFrame#CreateSnapScopeBadge QLabel {
+                background: transparent;
+                border: none;
+            }
+        """)
+        scope_layout = QVBoxLayout(scope_badge)
+        scope_layout.setContentsMargins(14, 12, 14, 12)
+        scope_label = QLabel(tr(self._SCOPE_LABEL_KEYS.get(scope, "snapshots.scope_both_title")))
+        scope_label.setFont(QFont("DejaVu Sans Mono", 13, QFont.Bold))
+        scope_label.setStyleSheet("color: #9bf0bd; letter-spacing: 1px;")
+        scope_label.setAlignment(Qt.AlignCenter)
+        scope_layout.addWidget(scope_label)
+        b_layout.addWidget(scope_badge)
+
+        desc = QLabel(tr(self._SCOPE_DESC_KEYS.get(scope, "snapshots.create_confirm_desc_both")))
+        desc.setWordWrap(True)
+        desc.setFont(QFont("DejaVu Sans Mono", 9))
+        desc.setStyleSheet("color: #8b92a3;")
+        b_layout.addWidget(desc)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
+
+        btn_cancel = QPushButton(tr("common.cancel"))
+        btn_cancel.setObjectName("CreateSnapBtnCancel")
+        btn_cancel.setFixedHeight(40)
+        btn_cancel.clicked.connect(self.reject)
+
+        btn_confirm = QPushButton(tr("snapshots.btn_create_snapshot"))
+        btn_confirm.setFixedHeight(40)
+        btn_confirm.setStyleSheet("""
+            QPushButton {
+                background: #34d399;
+                border: none;
+                border-radius: 9px;
+                color: #04291c;
+                font-family: "DejaVu Sans Mono";
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #4fe0ac;
+            }
+        """)
+        btn_confirm.clicked.connect(self.accept)
+
+        btn_row.addWidget(btn_cancel, 1)
+        btn_row.addWidget(btn_confirm, 1)
+        b_layout.addLayout(btn_row)
+
+        self.setStyleSheet("""
+            QDialog { background: #14151c; border-radius: 14px; }
+            QFrame#CreateSnapHeader {
+                background: #191a22;
+                border-top-left-radius: 14px;
+                border-top-right-radius: 14px;
+                border-bottom: 1px solid rgba(255,255,255,10);
+            }
+            QFrame#CreateSnapBody { background: transparent; }
+            QPushButton#CreateSnapBtnCancel {
+                background: rgba(255,255,255,6);
+                border: 1px solid rgba(255,255,255,16);
+                border-radius: 9px;
+                color: #c8d4e0;
+                font-family: "DejaVu Sans Mono";
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QLabel { background: transparent; border: none; }
+        """)
+
+        root.addWidget(header)
+        root.addWidget(body)
 
 
 class _DeleteWorker(QThread):

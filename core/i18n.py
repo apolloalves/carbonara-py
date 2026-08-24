@@ -264,6 +264,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "snapshots.sync_last_run_value": "{when} · {result}",
         "snapshots.sync_toast_success": "Sincronização automática concluída — {kinds}",
         "snapshots.sync_toast_failed": "Sincronização automática falhou — veja o agendamento pra detalhes",
+        "snapshots.sync_toast_nothing": "Sincronização automática ativa, mas não há nenhum snapshot pra sincronizar — crie um snapshot primeiro",
+
+        # ── Confirmar criação de snapshot ──
+        "snapshots.create_confirm_title": "Criar Snapshot",
+        "snapshots.create_confirm_body": "Você está prestes a criar um snapshot com o escopo:",
+        "snapshots.create_confirm_desc_root": "Isso vai gerar um novo snapshot de / no destino selecionado. Pode levar bastante tempo dependendo do tamanho.",
+        "snapshots.create_confirm_desc_home": "Isso vai gerar um novo snapshot de /home no destino selecionado. Pode levar bastante tempo dependendo do tamanho.",
+        "snapshots.create_confirm_desc_both": "Isso vai gerar novos snapshots de / e /home no destino selecionado. Pode levar bastante tempo dependendo do tamanho.",
         "snapshots.sync_backend_note": (
             "As alterações são aplicadas no sistema (systemd) assim que você salva."
         ),
@@ -555,6 +563,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "snapshots.sync_last_run_value": "{when} · {result}",
         "snapshots.sync_toast_success": "Automatic sync completed — {kinds}",
         "snapshots.sync_toast_failed": "Automatic sync failed — check the schedule for details",
+        "snapshots.sync_toast_nothing": "Automatic sync is enabled but there's no snapshot to sync yet — create one first",
+
+        # ── Confirm snapshot creation ──
+        "snapshots.create_confirm_title": "Create Snapshot",
+        "snapshots.create_confirm_body": "You're about to create a snapshot with the scope:",
+        "snapshots.create_confirm_desc_root": "This will generate a new snapshot of / on the selected destination. It can take a while depending on the size.",
+        "snapshots.create_confirm_desc_home": "This will generate a new snapshot of /home on the selected destination. It can take a while depending on the size.",
+        "snapshots.create_confirm_desc_both": "This will generate new snapshots of / and /home on the selected destination. It can take a while depending on the size.",
         "snapshots.sync_backend_note": (
             "Changes take effect on the system (systemd) as soon as you save."
         ),
@@ -879,6 +895,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "snapshots.sync_last_run_value": "{when} · {result}",
         "snapshots.sync_toast_success": "Sincronización automática completada — {kinds}",
         "snapshots.sync_toast_failed": "La sincronización automática falló — vea la programación para más detalles",
+        "snapshots.sync_toast_nothing": "La sincronización automática está activa, pero no hay ningún snapshot para sincronizar — cree uno primero",
+
+        # ── Confirmar creación de snapshot ──
+        "snapshots.create_confirm_title": "Crear Snapshot",
+        "snapshots.create_confirm_body": "Está a punto de crear un snapshot con el alcance:",
+        "snapshots.create_confirm_desc_root": "Esto generará un nuevo snapshot de / en el destino seleccionado. Puede tardar bastante según el tamaño.",
+        "snapshots.create_confirm_desc_home": "Esto generará un nuevo snapshot de /home en el destino seleccionado. Puede tardar bastante según el tamaño.",
+        "snapshots.create_confirm_desc_both": "Esto generará nuevos snapshots de / y /home en el destino seleccionado. Puede tardar bastante según el tamaño.",
         "snapshots.sync_backend_note": (
             "Los cambios se aplican en el sistema (systemd) en cuanto guarda."
         ),
