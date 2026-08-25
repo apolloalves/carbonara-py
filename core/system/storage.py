@@ -162,15 +162,21 @@ def list_backup_destinations() -> List[StorageDestination]:
     return destinations
 
 
-def ensure_backup_root(mountpoint: str) -> Path:
+def ensure_backup_root(mountpoint: str, scope: str = "both") -> Path:
     """
     Cria a árvore CarbonaraSnapshots apenas quando for realmente gravar backup.
     Não use isso na listagem da UI.
+
+    `scope` decide QUAIS subpastas (ROOT/HOME) são criadas — antes criava
+    as duas sempre, deixando uma pasta vazia e órfã pro kind que nem foi
+    selecionado.
     """
     root = Path(get_backup_root(mountpoint))
     root.mkdir(parents=True, exist_ok=True)
-    (root / "ROOT").mkdir(parents=True, exist_ok=True)
-    (root / "HOME").mkdir(parents=True, exist_ok=True)
+    if scope in ("root", "both"):
+        (root / "ROOT").mkdir(parents=True, exist_ok=True)
+    if scope in ("home", "both"):
+        (root / "HOME").mkdir(parents=True, exist_ok=True)
     return root
 
 
