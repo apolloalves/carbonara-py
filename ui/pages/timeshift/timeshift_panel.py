@@ -11,8 +11,8 @@ import shutil
 import subprocess
 import tempfile
 import qtawesome as qta
-from PySide6.QtCore import Qt, QTimer, Signal, QSize, QThread, QObject, QEvent, QPoint, QTime
-from PySide6.QtGui import QFont, QColor
+from PySide6.QtCore import Qt, QTimer, Signal, QSize, QThread, QObject, QEvent, QPoint, QTime, QRect
+from PySide6.QtGui import QFont, QColor, QFontMetrics
 
 from PySide6.QtWidgets import (
     QWidget,
@@ -268,7 +268,7 @@ class ScopeCard(QFrame):
                 border: 1px solid rgba(255, 255, 255, 12);
                 border-radius: 12px;
                 color: #c8d4e0;
-                font: 700 10pt "DejaVu Sans Mono";
+                font: 700 9pt "DejaVu Sans Mono";
                 padding: 0px 12px;
                 min-height: 34px;
             }
@@ -5755,7 +5755,7 @@ class _CreateSnapshotConfirmDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(tr("snapshots.create_confirm_title"))
         self.setModal(True)
-        self.setFixedWidth(480)
+        self.setFixedWidth(535)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
 
         root = QVBoxLayout(self)
@@ -5800,10 +5800,11 @@ class _CreateSnapshotConfirmDialog(QDialog):
 
         scope_badge = QFrame()
         scope_badge.setObjectName("CreateSnapScopeBadge")
+        scope_badge.setFixedHeight(40)
         scope_badge.setStyleSheet("""
             QFrame#CreateSnapScopeBadge {
-                background: rgba(52,211,153,14);
-                border: 1px solid rgba(52,211,153,90);
+                background: rgba(59,130,246,56);
+                border: 1px solid rgba(99,140,255,130);
                 border-radius: 10px;
             }
             QFrame#CreateSnapScopeBadge QLabel {
@@ -5812,18 +5813,30 @@ class _CreateSnapshotConfirmDialog(QDialog):
             }
         """)
         scope_layout = QVBoxLayout(scope_badge)
-        scope_layout.setContentsMargins(14, 12, 14, 12)
+        scope_layout.setContentsMargins(12, 0, 12, 0)
         scope_label = QLabel(tr(self._SCOPE_LABEL_KEYS.get(scope, "snapshots.scope_both_title")))
-        scope_label.setFont(QFont("DejaVu Sans Mono", 13, QFont.Bold))
-        scope_label.setStyleSheet("color: #9bf0bd; letter-spacing: 1px;")
+        scope_label.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
+        scope_label.setStyleSheet("color: #ffffff;")
         scope_label.setAlignment(Qt.AlignCenter)
         scope_layout.addWidget(scope_label)
-        b_layout.addWidget(scope_badge)
+        scope_row = QHBoxLayout()
+        scope_row.setContentsMargins(0, 0, 0, 0)
+        scope_row.addStretch(1)
+        scope_row.addWidget(scope_badge, 4)
+        scope_row.addStretch(1)
+        b_layout.addSpacing(10)
+        b_layout.addLayout(scope_row)
+        b_layout.addSpacing(10)
 
-        desc = QLabel(tr(self._SCOPE_DESC_KEYS.get(scope, "snapshots.create_confirm_desc_both")))
+        desc_text = tr(self._SCOPE_DESC_KEYS.get(scope, "snapshots.create_confirm_desc_both"))
+        desc = QLabel(desc_text)
+        desc_font = QFont("DejaVu Sans Mono", 9)
+        desc.setFont(desc_font)
+        desc.setStyleSheet("color: #8b92a3; line-height: 170%;")
         desc.setWordWrap(True)
-        desc.setFont(QFont("DejaVu Sans Mono", 9))
-        desc.setStyleSheet("color: #8b92a3;")
+        desc_width = 535 - 24 - 24
+        desc_rect = QFontMetrics(desc_font).boundingRect(QRect(0, 0, desc_width, 0), Qt.TextWordWrap, desc_text)
+        desc.setFixedHeight(desc_rect.height() + 26)
         b_layout.addWidget(desc)
 
         btn_row = QHBoxLayout()
@@ -5859,10 +5872,10 @@ class _CreateSnapshotConfirmDialog(QDialog):
         self.setStyleSheet("""
             QDialog { background: #14151c; border-radius: 14px; }
             QFrame#CreateSnapHeader {
-                background: #191a22;
+                background: rgba(52,211,153,20);
                 border-top-left-radius: 14px;
                 border-top-right-radius: 14px;
-                border-bottom: 1px solid rgba(255,255,255,10);
+                border-bottom: 1px solid rgba(52,211,153,60);
             }
             QFrame#CreateSnapBody { background: transparent; }
             QPushButton#CreateSnapBtnCancel {
