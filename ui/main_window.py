@@ -425,20 +425,20 @@ class TopHeader(QFrame):
             }}
         """)
 
-        act_theme = menu.addAction(qta.icon("mdi6.palette-outline", color=MUTED), "Temas")
+        act_theme = menu.addAction(qta.icon("mdi6.palette-outline", color=MUTED), tr("menu.temas"))
         act_lang = menu.addAction(qta.icon("mdi6.web", color=MUTED), tr("menu.idioma"))
         menu.addSeparator()
-        act_logs = menu.addAction(qta.icon("mdi6.file-document-outline", color=MUTED), "Central de logs")
-        act_update = menu.addAction(qta.icon("mdi6.refresh", color=MUTED), "Verificar atualização")
-        act_shortcuts = menu.addAction(qta.icon("mdi6.keyboard-outline", color=MUTED), "Atalhos de teclado")
+        act_logs = menu.addAction(qta.icon("mdi6.file-document-outline", color=MUTED), tr("menu.central_logs"))
+        act_update = menu.addAction(qta.icon("mdi6.refresh", color=MUTED), tr("menu.verificar_atualizacao"))
+        act_shortcuts = menu.addAction(qta.icon("mdi6.keyboard-outline", color=MUTED), tr("menu.atalhos_teclado"))
         menu.addSeparator()
-        act_about = menu.addAction(qta.icon("mdi6.information-outline", color=MUTED), "Sobre")
+        act_about = menu.addAction(qta.icon("mdi6.information-outline", color=MUTED), tr("menu.sobre"))
 
         win = self._window()
 
-        act_theme.triggered.connect(lambda: self._show_soon_dialog("Temas", "Personalização de tema (claro/escuro/cores de destaque) ainda não foi implementada."))
+        act_theme.triggered.connect(lambda: self._show_soon_dialog(tr("menu.temas"), tr("menu.temas_placeholder_msg")))
         act_lang.triggered.connect(lambda: self._show_language_dialog())
-        act_update.triggered.connect(lambda: self._show_soon_dialog("Verificar atualização", "Checagem de atualização do próprio Carbonara (via git) ainda não foi implementada."))
+        act_update.triggered.connect(lambda: self._show_soon_dialog(tr("menu.verificar_atualizacao"), tr("menu.verificar_atualizacao_placeholder_msg")))
         if win is not None:
             act_logs.triggered.connect(win.show_logs)
             act_shortcuts.triggered.connect(win._show_shortcuts_dialog)
@@ -1497,7 +1497,7 @@ class ShortcutsDialog(QDialog):
         card_layout.addWidget(icon_badge)
         card_layout.addSpacing(16)
 
-        title = QLabel("Atalhos de teclado")
+        title = QLabel(tr("menu.atalhos_teclado"))
         title.setFont(QFont(FONT_FAMILY, 15, QFont.Bold))
         title.setStyleSheet(f"color: {TEXT};")
         card_layout.addWidget(title)
