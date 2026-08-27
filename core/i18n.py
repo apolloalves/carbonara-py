@@ -283,6 +283,37 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "As alterações são aplicadas no sistema (systemd) assim que você salva."
         ),
 
+        # ── Restaurar HOME sem reboot ──
+        "snapshots.home_live_title": "Restaurar HOME sem reboot",
+        "snapshots.home_live_warning": (
+            "Isso substitui os arquivos atuais de /home pelos deste "
+            "snapshot, no sistema já rodando (sem live ISO). Ao final, "
+            "a sessão gráfica é encerrada (logout) — feche seu trabalho "
+            "antes de continuar."
+        ),
+        "snapshots.home_live_checkbox": "Entendo que a sessão será encerrada e os arquivos atuais de /home serão substituídos",
+        "snapshots.home_live_confirm": "Restaurar",
+        "snapshots.sync_confirm_title": "Confirmar sincronização",
+        "snapshots.sync_confirm_header": "Sincronizar Snapshot",
+        "snapshots.sync_confirm_warning": "O snapshot será atualizado com o estado atual do sistema. Apenas arquivos modificados serão transferidos.",
+        "snapshots.sync_confirm_button": "Sincronizar",
+        "snapshots.pair_sync_title": "Sincronizar também?",
+        "snapshots.pair_sync_message": "O snapshot {kind} correspondente também pode ser sincronizado agora, mantendo ROOT e HOME em par.",
+        "snapshots.pair_sync_cancel": "Agora não",
+        "snapshots.pair_sync_confirm": "Sincronizar {kind}",
+        "snapshots.verify_select_title": "Escolher snapshots para verificar",
+        "snapshots.verify_select_msg": "Por padrão só o mais recente de cada tipo vem marcado. Marque outros snapshots se quiser verificá-los também:",
+        "snapshots.verify_select_confirm": "Verificar selecionados",
+        "snapshots.verify_results_title_both": "ROOT e HOME estão desatualizados",
+        "snapshots.verify_results_title_multi": "{count} snapshots {kind} estão desatualizados",
+        "snapshots.verify_results_title_single": "{kind} está desatualizado",
+        "snapshots.verify_results_msg": "O rsync --dry-run encontrou mudanças reais no sistema que ainda não estão nos snapshots abaixo. Escolha quais sincronizar:",
+        "snapshots.verify_results_cancel": "Agora não",
+        "snapshots.verify_results_sync": "Sincronizar",
+        "snapshots.verify_results_sync_all": "Sincronizar todos ({count})",
+        "snapshots.verify_results_sync_one": "Sincronizar {kind}",
+        "snapshots.verify_results_sync_n": "Sincronizar {count} selecionados",
+
         # ── Diálogo Sobre ──
         "about.description": "Ferramenta de administração de sistema para Arch Linux —\nsnapshots, backups, ISOs live e diagnósticos.",
         "about.developed_by": "DESENVOLVIDO POR",
@@ -588,6 +619,37 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "snapshots.sync_backend_note": (
             "Changes take effect on the system (systemd) as soon as you save."
         ),
+
+        # ── Restore HOME without reboot ──
+        "snapshots.home_live_title": "Restore HOME without reboot",
+        "snapshots.home_live_warning": (
+            "This replaces the current /home files with this snapshot's, "
+            "on the already-running system (no live ISO). At the end, "
+            "the graphical session ends (logout) — close your work "
+            "before continuing."
+        ),
+        "snapshots.home_live_checkbox": "I understand the session will end and the current /home files will be replaced",
+        "snapshots.home_live_confirm": "Restore",
+        "snapshots.sync_confirm_title": "Confirm sync",
+        "snapshots.sync_confirm_header": "Sync Snapshot",
+        "snapshots.sync_confirm_warning": "The snapshot will be updated with the current system state. Only modified files will be transferred.",
+        "snapshots.sync_confirm_button": "Sync",
+        "snapshots.pair_sync_title": "Sync as well?",
+        "snapshots.pair_sync_message": "The corresponding {kind} snapshot can also be synced now, keeping ROOT and HOME paired.",
+        "snapshots.pair_sync_cancel": "Not now",
+        "snapshots.pair_sync_confirm": "Sync {kind}",
+        "snapshots.verify_select_title": "Choose snapshots to verify",
+        "snapshots.verify_select_msg": "By default only the most recent of each type is checked. Check other snapshots too if you want to verify them as well:",
+        "snapshots.verify_select_confirm": "Verify selected",
+        "snapshots.verify_results_title_both": "ROOT and HOME are outdated",
+        "snapshots.verify_results_title_multi": "{count} {kind} snapshots are outdated",
+        "snapshots.verify_results_title_single": "{kind} is outdated",
+        "snapshots.verify_results_msg": "rsync --dry-run found real changes on the system that aren't in the snapshots below yet. Choose which to sync:",
+        "snapshots.verify_results_cancel": "Not now",
+        "snapshots.verify_results_sync": "Sync",
+        "snapshots.verify_results_sync_all": "Sync all ({count})",
+        "snapshots.verify_results_sync_one": "Sync {kind}",
+        "snapshots.verify_results_sync_n": "Sync {count} selected",
 
         # ── About dialog ──
         "about.description": "System administration tool for Arch Linux —\nsnapshots, backups, live ISOs, and diagnostics.",
@@ -927,6 +989,37 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "snapshots.sync_backend_note": (
             "Los cambios se aplican en el sistema (systemd) en cuanto guarda."
         ),
+
+        # ── Restaurar HOME sin reiniciar ──
+        "snapshots.home_live_title": "Restaurar HOME sin reiniciar",
+        "snapshots.home_live_warning": (
+            "Esto reemplaza los archivos actuales de /home por los de este "
+            "snapshot, en el sistema que ya está ejecutándose (sin ISO live). "
+            "Al finalizar, la sesión gráfica se cierra (logout) — guarde su "
+            "trabajo antes de continuar."
+        ),
+        "snapshots.home_live_checkbox": "Entiendo que la sesión se cerrará y los archivos actuales de /home serán reemplazados",
+        "snapshots.home_live_confirm": "Restaurar",
+        "snapshots.sync_confirm_title": "Confirmar sincronización",
+        "snapshots.sync_confirm_header": "Sincronizar Snapshot",
+        "snapshots.sync_confirm_warning": "El snapshot se actualizará con el estado actual del sistema. Solo se transferirán los archivos modificados.",
+        "snapshots.sync_confirm_button": "Sincronizar",
+        "snapshots.pair_sync_title": "¿Sincronizar también?",
+        "snapshots.pair_sync_message": "El snapshot {kind} correspondiente también se puede sincronizar ahora, manteniendo ROOT y HOME emparejados.",
+        "snapshots.pair_sync_cancel": "Ahora no",
+        "snapshots.pair_sync_confirm": "Sincronizar {kind}",
+        "snapshots.verify_select_title": "Elegir snapshots para verificar",
+        "snapshots.verify_select_msg": "Por defecto solo el más reciente de cada tipo viene marcado. Marque otros snapshots si también quiere verificarlos:",
+        "snapshots.verify_select_confirm": "Verificar seleccionados",
+        "snapshots.verify_results_title_both": "ROOT y HOME están desactualizados",
+        "snapshots.verify_results_title_multi": "{count} snapshots {kind} están desactualizados",
+        "snapshots.verify_results_title_single": "{kind} está desactualizado",
+        "snapshots.verify_results_msg": "rsync --dry-run encontró cambios reales en el sistema que aún no están en los snapshots de abajo. Elija cuáles sincronizar:",
+        "snapshots.verify_results_cancel": "Ahora no",
+        "snapshots.verify_results_sync": "Sincronizar",
+        "snapshots.verify_results_sync_all": "Sincronizar todos ({count})",
+        "snapshots.verify_results_sync_one": "Sincronizar {kind}",
+        "snapshots.verify_results_sync_n": "Sincronizar {count} seleccionados",
 
         # ── Diálogo Acerca de ──
         "about.description": "Herramienta de administración de sistema para Arch Linux —\nsnapshots, copias de seguridad, ISOs live y diagnósticos.",

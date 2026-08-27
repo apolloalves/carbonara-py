@@ -2680,7 +2680,7 @@ def _do_full_restore(entry: SnapshotEntry, parent=None) -> None:
         if result.returncode != 0:
             err = result.stderr.strip() or result.stdout.strip() or f"exit code {result.returncode}"
             if result.returncode == 126 or "dismissed" in err.lower():
-                _show_error("Restore", "Operação cancelada.", parent=parent)
+                _show_error("Restore", tr("snapshots.delete_cancelled"), parent=parent)
             else:
                 _show_error("Restore", f"Erro ao gerar script:\n\n{err}", parent=parent)
             return
@@ -3568,7 +3568,7 @@ class _FileBrowserRestoreWorker(QThread):
             if result.returncode != 0:
                 err = result.stderr.strip() or f"exit code {result.returncode}"
                 if result.returncode == 126 or "dismissed" in err.lower():
-                    err = "Operação cancelada."
+                    err = tr("snapshots.delete_cancelled")
                 self.failed.emit(err)
             else:
                 self.finished_ok.emit()
@@ -3967,7 +3967,7 @@ class _HomeLiveRestoreDialog(QDialog):
     def __init__(self, entry: SnapshotEntry, parent=None):
         super().__init__(parent)
         self.entry = entry
-        self.setWindowTitle("Restaurar HOME sem reboot")
+        self.setWindowTitle(tr("snapshots.home_live_title"))
         self.setModal(True)
         self.setFixedSize(560, 300)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
@@ -3991,7 +3991,7 @@ class _HomeLiveRestoreDialog(QDialog):
         icon.setPixmap(qta.icon("mdi6.home-import-outline", color="#ffcf8f").pixmap(22, 22))
         icon.setStyleSheet("QLabel { background: rgba(224,168,64,40); border-radius: 9px; }")
 
-        lbl = QLabel("Restaurar HOME sem reboot")
+        lbl = QLabel(tr("snapshots.home_live_title"))
         lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
         lbl.setStyleSheet("color: #ecf4ff;")
 
@@ -4010,12 +4010,7 @@ class _HomeLiveRestoreDialog(QDialog):
         b_layout.setContentsMargins(28, 22, 28, 22)
         b_layout.setSpacing(12)
 
-        warn = QLabel(
-            "Isso substitui os arquivos atuais de /home pelos deste "
-            "snapshot, no sistema já rodando (sem live ISO). Ao final, "
-            "a sessão gráfica é encerrada (logout) — feche seu trabalho "
-            "antes de continuar."
-        )
+        warn = QLabel(tr("snapshots.home_live_warning"))
         warn.setWordWrap(True)
         warn.setFont(QFont("DejaVu Sans Mono", 9))
         warn.setStyleSheet("color: #c8d4e0;")
@@ -4027,7 +4022,7 @@ class _HomeLiveRestoreDialog(QDialog):
             "border-radius: 6px; padding: 10px 12px;"
         )
 
-        self.chk_confirm = QCheckBox("Entendo que a sessão será encerrada e os arquivos atuais de /home serão substituídos")
+        self.chk_confirm = QCheckBox(tr("snapshots.home_live_checkbox"))
         self.chk_confirm.setObjectName("HomeRestoreCheck")
         self.chk_confirm.setFont(QFont("DejaVu Sans Mono", 9))
         self.chk_confirm.toggled.connect(self._on_checkbox_toggled)
@@ -4035,12 +4030,12 @@ class _HomeLiveRestoreDialog(QDialog):
         btn_row = QHBoxLayout()
         btn_row.setSpacing(10)
 
-        btn_cancel = QPushButton("Cancelar")
+        btn_cancel = QPushButton(tr("common.cancel"))
         btn_cancel.setObjectName("HomeRestoreBtnCancel")
         btn_cancel.setFixedSize(110, 40)
         btn_cancel.clicked.connect(self.reject)
 
-        self.btn_confirm = QPushButton("Restaurar")
+        self.btn_confirm = QPushButton(tr("snapshots.home_live_confirm"))
         self.btn_confirm.setObjectName("HomeRestoreBtnConfirm")
         self.btn_confirm.setFixedSize(130, 40)
         self.btn_confirm.setEnabled(False)
@@ -4158,7 +4153,7 @@ class _SyncConfirmDialog(QDialog):
 
     def __init__(self, entry: SnapshotEntry, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Confirmar sincronização")
+        self.setWindowTitle(tr("snapshots.sync_confirm_title"))
         self.setModal(True)
         self.setFixedSize(540, 240)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
@@ -4182,7 +4177,7 @@ class _SyncConfirmDialog(QDialog):
         icon.setPixmap(qta.icon("mdi6.sync", color="#9bf0bd").pixmap(22, 22))
         icon.setStyleSheet("QLabel { background: rgba(74,222,128,40); border-radius: 9px; }")
 
-        lbl = QLabel("Sincronizar Snapshot")
+        lbl = QLabel(tr("snapshots.sync_confirm_header"))
         lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
         lbl.setStyleSheet("color: #ecf4ff;")
 
@@ -4201,7 +4196,7 @@ class _SyncConfirmDialog(QDialog):
         b_layout.setContentsMargins(28, 22, 28, 22)
         b_layout.setSpacing(12)
 
-        warn = QLabel("O snapshot será atualizado com o estado atual do sistema. Apenas arquivos modificados serão transferidos.")
+        warn = QLabel(tr("snapshots.sync_confirm_warning"))
         warn.setWordWrap(True)
         warn.setFont(QFont("DejaVu Sans Mono", 9))
         warn.setStyleSheet("color: #c8d4e0;")
@@ -4216,12 +4211,12 @@ class _SyncConfirmDialog(QDialog):
         btn_row = QHBoxLayout()
         btn_row.setSpacing(10)
 
-        btn_cancel = QPushButton("Cancelar")
+        btn_cancel = QPushButton(tr("common.cancel"))
         btn_cancel.setObjectName("SyncBtnCancel")
         btn_cancel.setFixedSize(110, 40)
         btn_cancel.clicked.connect(self.reject)
 
-        btn_confirm = QPushButton("Sincronizar")
+        btn_confirm = QPushButton(tr("snapshots.sync_confirm_button"))
         btn_confirm.setObjectName("SyncBtnConfirm")
         btn_confirm.setFixedSize(130, 40)
         btn_confirm.clicked.connect(self.accept)
@@ -4312,11 +4307,11 @@ class _OfferPairSyncDialog(QDialog):
         sibling_kind: str,
         sibling_name: str,
         parent=None,
-        title: str = "Sincronizar também?",
+        title: str | None = None,
         message: str | None = None,
     ):
         super().__init__(parent)
-        self.setWindowTitle(title)
+        self.setWindowTitle(title or tr("snapshots.pair_sync_title"))
         self.setModal(True)
         self.setFixedSize(540, 240)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
@@ -4327,7 +4322,7 @@ class _OfferPairSyncDialog(QDialog):
         self,
         sibling_kind: str,
         sibling_name: str,
-        title: str = "Sincronizar também?",
+        title: str | None = None,
         message: str | None = None,
     ) -> None:
         root = QVBoxLayout(self)
@@ -4346,7 +4341,7 @@ class _OfferPairSyncDialog(QDialog):
         icon.setPixmap(qta.icon("mdi6.sync", color="#9bf0bd").pixmap(22, 22))
         icon.setStyleSheet("QLabel { background: rgba(74,222,128,40); border-radius: 9px; }")
 
-        lbl = QLabel(title)
+        lbl = QLabel(title or tr("snapshots.pair_sync_title"))
         lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
         lbl.setStyleSheet("color: #ecf4ff;")
 
@@ -4366,10 +4361,7 @@ class _OfferPairSyncDialog(QDialog):
         b_layout.setSpacing(12)
 
         msg = QLabel(
-            message or (
-                f"O snapshot {sibling_kind} correspondente também pode ser "
-                f"sincronizado agora, mantendo ROOT e HOME em par."
-            )
+            message or tr("snapshots.pair_sync_message").format(kind=sibling_kind)
         )
         msg.setWordWrap(True)
         msg.setFont(QFont("DejaVu Sans Mono", 9))
@@ -4385,12 +4377,12 @@ class _OfferPairSyncDialog(QDialog):
         btn_row = QHBoxLayout()
         btn_row.setSpacing(10)
 
-        btn_cancel = QPushButton("Agora não")
+        btn_cancel = QPushButton(tr("snapshots.pair_sync_cancel"))
         btn_cancel.setObjectName("SyncBtnCancel")
         btn_cancel.setFixedSize(130, 40)
         btn_cancel.clicked.connect(self.reject)
 
-        btn_confirm = QPushButton(f"Sincronizar {sibling_kind}")
+        btn_confirm = QPushButton(tr("snapshots.pair_sync_confirm").format(kind=sibling_kind))
         btn_confirm.setObjectName("SyncBtnConfirm")
         btn_confirm.setFixedSize(170, 40)
         btn_confirm.clicked.connect(self.accept)
@@ -4476,7 +4468,7 @@ class _VerifySelectDialog(QDialog):
         super().__init__(parent)
         self.entries = entries
         self.checkboxes: dict[str, QCheckBox] = {}
-        self.setWindowTitle("Escolher snapshots para verificar")
+        self.setWindowTitle(tr("snapshots.verify_select_title"))
         self.setModal(True)
         row_h = 30
         self.setFixedSize(560, 240 + row_h * max(0, len(entries) - 1))
@@ -4504,7 +4496,7 @@ class _VerifySelectDialog(QDialog):
         icon.setPixmap(qta.icon(VERIFY_GLYPH, color="#9bf0e0").pixmap(22, 22))
         icon.setStyleSheet("QLabel { background: rgba(35,166,255,40); border-radius: 9px; }")
 
-        lbl = QLabel("Escolher snapshots para verificar")
+        lbl = QLabel(tr("snapshots.verify_select_title"))
         lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
         lbl.setStyleSheet("color: #ecf4ff;")
 
@@ -4523,10 +4515,7 @@ class _VerifySelectDialog(QDialog):
         b_layout.setContentsMargins(28, 20, 28, 20)
         b_layout.setSpacing(10)
 
-        msg = QLabel(
-            "Por padrão só o mais recente de cada tipo vem marcado. "
-            "Marque outros snapshots se quiser verificá-los também:"
-        )
+        msg = QLabel(tr("snapshots.verify_select_msg"))
         msg.setWordWrap(True)
         msg.setFont(QFont("DejaVu Sans Mono", 9))
         msg.setStyleSheet("color: #c8d4e0;")
@@ -4561,12 +4550,12 @@ class _VerifySelectDialog(QDialog):
         btn_row = QHBoxLayout()
         btn_row.setSpacing(10)
 
-        btn_cancel = QPushButton("Cancelar")
+        btn_cancel = QPushButton(tr("common.cancel"))
         btn_cancel.setObjectName("SyncBtnCancel")
         btn_cancel.setFixedSize(130, 40)
         btn_cancel.clicked.connect(self.reject)
 
-        btn_confirm = QPushButton("Verificar selecionados")
+        btn_confirm = QPushButton(tr("snapshots.verify_select_confirm"))
         btn_confirm.setObjectName("SyncBtnConfirm")
         btn_confirm.setFixedSize(200, 40)
         btn_confirm.clicked.connect(self.accept)
@@ -4657,7 +4646,7 @@ class _VerifyResultsDialog(QDialog):
         super().__init__(parent)
         self.stale = stale
         self.checkboxes: dict[str, QCheckBox] = {}
-        self.setWindowTitle("Snapshots desatualizados")
+        self.setWindowTitle(tr("snapshots.verify_results_title_single"))
         self.setModal(True)
         self.setFixedSize(540, 260 + 34 * max(0, len(stale) - 1))
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
@@ -4686,11 +4675,13 @@ class _VerifyResultsDialog(QDialog):
 
         kinds_involved = {kind for kind, _ in self.stale}
         if len(self.stale) > 1 and len(kinds_involved) > 1:
-            title_text = "ROOT e HOME estão desatualizados"
+            title_text = tr("snapshots.verify_results_title_both")
         elif len(self.stale) > 1:
-            title_text = f"{len(self.stale)} snapshots {next(iter(kinds_involved))} estão desatualizados"
+            title_text = tr("snapshots.verify_results_title_multi").format(
+                count=len(self.stale), kind=next(iter(kinds_involved))
+            )
         else:
-            title_text = f"{self.stale[0][0]} está desatualizado"
+            title_text = tr("snapshots.verify_results_title_single").format(kind=self.stale[0][0])
         lbl = QLabel(title_text)
         lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
         lbl.setStyleSheet("color: #ecf4ff;")
@@ -4710,10 +4701,7 @@ class _VerifyResultsDialog(QDialog):
         b_layout.setContentsMargins(28, 22, 28, 22)
         b_layout.setSpacing(12)
 
-        msg = QLabel(
-            "O rsync --dry-run encontrou mudanças reais no sistema que "
-            "ainda não estão nos snapshots abaixo. Escolha quais sincronizar:"
-        )
+        msg = QLabel(tr("snapshots.verify_results_msg"))
         msg.setWordWrap(True)
         msg.setFont(QFont("DejaVu Sans Mono", 9))
         msg.setStyleSheet("color: #c8d4e0;")
@@ -4749,7 +4737,7 @@ class _VerifyResultsDialog(QDialog):
         btn_row = QHBoxLayout()
         btn_row.setSpacing(10)
 
-        btn_cancel = QPushButton("Agora não")
+        btn_cancel = QPushButton(tr("snapshots.verify_results_cancel"))
         btn_cancel.setObjectName("SyncBtnCancel")
         btn_cancel.setFixedSize(130, 40)
         btn_cancel.clicked.connect(self.reject)
@@ -4773,17 +4761,17 @@ class _VerifyResultsDialog(QDialog):
     def _update_confirm_label(self) -> None:
         selected = self.selected_kinds()
         if len(selected) == 0:
-            self.btn_confirm.setText("Sincronizar")
+            self.btn_confirm.setText(tr("snapshots.verify_results_sync"))
             self.btn_confirm.setEnabled(False)
         elif len(selected) == len(self.stale) and len(self.stale) > 1:
-            self.btn_confirm.setText(f"Sincronizar todos ({len(selected)})")
+            self.btn_confirm.setText(tr("snapshots.verify_results_sync_all").format(count=len(selected)))
             self.btn_confirm.setEnabled(True)
         elif len(selected) == 1:
             kind = selected[0].split("|", 1)[0]
-            self.btn_confirm.setText(f"Sincronizar {kind}")
+            self.btn_confirm.setText(tr("snapshots.verify_results_sync_one").format(kind=kind))
             self.btn_confirm.setEnabled(True)
         else:
-            self.btn_confirm.setText(f"Sincronizar {len(selected)} selecionados")
+            self.btn_confirm.setText(tr("snapshots.verify_results_sync_n").format(count=len(selected)))
             self.btn_confirm.setEnabled(True)
 
     def _apply_styles(self) -> None:
@@ -5824,9 +5812,9 @@ class _CreateSnapshotConfirmDialog(QDialog):
         scope_row.addStretch(1)
         scope_row.addWidget(scope_badge, 4)
         scope_row.addStretch(1)
-        b_layout.addSpacing(10)
+        b_layout.addSpacing(2)
         b_layout.addLayout(scope_row)
-        b_layout.addSpacing(10)
+        b_layout.addSpacing(2)
 
         desc_text = tr(self._SCOPE_DESC_KEYS.get(scope, "snapshots.create_confirm_desc_both"))
         desc = QLabel(desc_text)
