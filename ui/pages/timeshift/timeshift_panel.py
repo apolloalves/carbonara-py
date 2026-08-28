@@ -60,6 +60,17 @@ DELETE_GLYPH    = "mdi6.delete"
 
 REFRESH_GLYPH   = "mdi6.refresh"
 CREATE_GLYPH    = "mdi6.folder-multiple"
+
+
+def _checkbox_check_icon_path() -> str:
+    """Gera (uma vez só, em cache) um PNG com o ícone de "visto" pra usar
+    dentro do indicador do checkbox marcado — QSS puro não desenha ícone
+    ali, só cor/borda, então precisa de um arquivo de imagem de verdade
+    referenciado via `image: url(...)`."""
+    cache_path = Path(tempfile.gettempdir()) / "carbonara_checkbox_check.png"
+    if not cache_path.exists():
+        qta.icon("mdi6.check-bold", color="#08111d").pixmap(16, 16).save(str(cache_path))
+    return str(cache_path).replace("\\", "/")
 VERIFY_GLYPH    = "mdi6.magnify-scan"
 
 SNAPSHOT_GLYPH  = "mdi6.archive"
@@ -4493,8 +4504,8 @@ class _VerifySelectDialog(QDialog):
         icon = QLabel()
         icon.setFixedSize(36, 36)
         icon.setAlignment(Qt.AlignCenter)
-        icon.setPixmap(qta.icon(VERIFY_GLYPH, color="#9bf0e0").pixmap(22, 22))
-        icon.setStyleSheet("QLabel { background: rgba(35,166,255,40); border-radius: 9px; }")
+        icon.setPixmap(qta.icon(VERIFY_GLYPH, color="#9bf0bd").pixmap(22, 22))
+        icon.setStyleSheet("QLabel { background: rgba(155,240,189,40); border-radius: 9px; }")
 
         lbl = QLabel(tr("snapshots.verify_select_title"))
         lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
@@ -4515,10 +4526,14 @@ class _VerifySelectDialog(QDialog):
         b_layout.setContentsMargins(28, 20, 28, 20)
         b_layout.setSpacing(10)
 
-        msg = QLabel(tr("snapshots.verify_select_msg"))
+        msg_text = tr("snapshots.verify_select_msg")
+        msg = QLabel(msg_text)
         msg.setWordWrap(True)
-        msg.setFont(QFont("DejaVu Sans Mono", 9))
-        msg.setStyleSheet("color: #c8d4e0;")
+        msg_font = QFont("DejaVu Sans Mono", 9)
+        msg.setFont(msg_font)
+        msg.setStyleSheet("color: #c8d4e0; line-height: 150%;")
+        msg_rect = QFontMetrics(msg_font).boundingRect(QRect(0, 0, 560 - 28 - 28, 0), Qt.TextWordWrap, msg_text)
+        msg.setFixedHeight(msg_rect.height() + 14)
         b_layout.addWidget(msg)
         b_layout.addSpacing(4)
 
@@ -4575,8 +4590,8 @@ class _VerifySelectDialog(QDialog):
                 border-radius: 14px;
             }
             QFrame#SelHeader {
-                background: rgba(35, 166, 255, 35);
-                border-bottom: 1px solid rgba(35, 166, 255, 25);
+                background: rgba(155, 240, 189, 35);
+                border-bottom: 1px solid rgba(155, 240, 189, 25);
                 border-top-left-radius: 14px;
                 border-top-right-radius: 14px;
             }
@@ -4596,8 +4611,9 @@ class _VerifySelectDialog(QDialog):
                 background: rgba(255,255,255,6);
             }
             QCheckBox#SyncCheckbox::indicator:checked {
-                background: rgba(35, 166, 255, 200);
-                border: 1px solid rgba(35, 166, 255, 220);
+                background: rgba(180, 250, 210, 220);
+                border: 1px solid rgba(180, 250, 210, 255);
+                image: url(__CHECK_ICON__);
             }
             QPushButton#SyncBtnCancel {
                 background: rgba(255,255,255,6);
@@ -4612,8 +4628,8 @@ class _VerifySelectDialog(QDialog):
                 border-color: rgba(35, 166, 255, 180);
             }
             QPushButton#SyncBtnConfirm {
-                background: rgba(35, 166, 255, 180);
-                border: 1px solid rgba(35, 166, 255, 220);
+                background: rgba(155, 240, 189, 180);
+                border: 1px solid rgba(155, 240, 189, 220);
                 border-radius: 10px;
                 color: #08111d;
                 font-family: "DejaVu Sans Mono";
@@ -4621,10 +4637,10 @@ class _VerifySelectDialog(QDialog):
                 font-weight: 700;
             }
             QPushButton#SyncBtnConfirm:hover {
-                background: rgba(94, 200, 255, 220);
-                border-color: rgba(94, 200, 255, 255);
+                background: rgba(180, 250, 210, 220);
+                border-color: rgba(180, 250, 210, 255);
             }
-        """)
+        """.replace("__CHECK_ICON__", _checkbox_check_icon_path()))
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -4804,6 +4820,7 @@ class _VerifyResultsDialog(QDialog):
             QCheckBox#SyncCheckbox::indicator:checked {
                 background: rgba(74, 222, 128, 200);
                 border: 1px solid rgba(74, 222, 128, 220);
+                image: url(__CHECK_ICON__);
             }
             QPushButton#SyncBtnCancel {
                 background: rgba(255,255,255,6);
@@ -4835,7 +4852,7 @@ class _VerifyResultsDialog(QDialog):
                 border: 1px solid rgba(255,255,255,18);
                 color: #5f6b7a;
             }
-        """)
+        """.replace("__CHECK_ICON__", _checkbox_check_icon_path()))
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
