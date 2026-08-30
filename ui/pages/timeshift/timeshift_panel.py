@@ -5227,7 +5227,7 @@ class _SyncStatusBadge(QFrame):
             QFrame#SyncStatusBadge {{
                 background: rgba(255,255,255,5);
                 border: 1px solid {border};
-                border-radius: 20px;
+                border-radius: 13px;
             }}
             QFrame#SyncStatusBadge:hover {{
                 background: rgba(255,255,255,9);
@@ -5587,7 +5587,34 @@ class _ScheduledSyncDialog(QDialog):
 
         b_layout.addStretch()
 
-        # Botão salvar
+        # Botões
+        btn_final_row = QHBoxLayout()
+        btn_final_row.setSpacing(10)
+
+        self.btn_cancel_schedule = QPushButton(tr("snapshots.sync_cancel_button"))
+        self.btn_cancel_schedule.setCursor(Qt.PointingHandCursor)
+        self.btn_cancel_schedule.setFixedHeight(44)
+        self.btn_cancel_schedule.setStyleSheet("""
+            QPushButton {
+                background: rgba(255,255,255,6);
+                border: 1px solid rgba(255,255,255,18);
+                border-radius: 10px;
+                color: #ecf4ff;
+                font-family: "DejaVu Sans Mono";
+                font-size: 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: rgba(255,120,120,40);
+                border-color: rgba(255,120,120,140);
+            }
+            QPushButton:disabled {
+                color: #5f6b7a;
+            }
+        """)
+        self.btn_cancel_schedule.clicked.connect(self._on_cancel_schedule)
+        self.btn_cancel_schedule.setEnabled(self.result_config.get("enabled", False))
+
         self.btn_save = QPushButton(tr("snapshots.sync_save_button"))
         self.btn_save.setCursor(Qt.PointingHandCursor)
         self.btn_save.setFixedHeight(44)
@@ -5610,7 +5637,10 @@ class _ScheduledSyncDialog(QDialog):
             }
         """)
         self.btn_save.clicked.connect(self._on_save)
-        b_layout.addWidget(self.btn_save)
+
+        btn_final_row.addWidget(self.btn_cancel_schedule, 1)
+        btn_final_row.addWidget(self.btn_save, 1)
+        b_layout.addLayout(btn_final_row)
 
         root.addWidget(header)
         root.addWidget(body, 1)
@@ -5694,12 +5724,50 @@ class _ScheduledSyncDialog(QDialog):
 
         self.accept()
 
+    def _on_cancel_schedule(self) -> None:
+        from core.snapshots import scheduler
+        self.result_config["enabled"] = False
+        scheduler.save_schedule_config(self.result_config)
+
+        args_json = json.dumps({"config": self.result_config})
+        cmd = [
+            "pkexec",
+            "/usr/local/bin/carbonara-helper",
+            os.environ.get("DISPLAY", ""),
+            os.environ.get("XAUTHORITY", ""),
+            "scheduler.install",
+            args_json,
+        ]
+
+        self.btn_cancel_schedule.setEnabled(False)
+        self.btn_save.setEnabled(False)
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        except Exception as exc:
+            self.btn_cancel_schedule.setEnabled(True)
+            self.btn_save.setEnabled(True)
+            _show_error("Carbonara", tr("snapshots.sync_install_failed").format(msg=str(exc)), parent=self)
+            return
+        self.btn_save.setEnabled(True)
+
+        if result.returncode == 126:
+            self.btn_cancel_schedule.setEnabled(True)
+            return  # pkexec cancelado na autenticação — deixa o diálogo aberto pra tentar de novo
+        if result.returncode != 0:
+            self.btn_cancel_schedule.setEnabled(True)
+            err = result.stderr.strip() or f"exit code {result.returncode}"
+            _show_error("Carbonara", tr("snapshots.sync_install_failed").format(msg=err), parent=self)
+            return
+
+        self.accept()
+
     def _toggle_enabled(self) -> None:
         enabled = not self.result_config.get("enabled", False)
         self.result_config["enabled"] = enabled
         self.btn_toggle.setText(tr("snapshots.sync_enabled") if enabled else tr("snapshots.sync_disabled"))
         self._apply_toggle_style()
         self._refresh_status_card()
+        self.btn_cancel_schedule.setEnabled(enabled)
 
     def _apply_toggle_style(self) -> None:
         self.btn_toggle.setStyleSheet("""
