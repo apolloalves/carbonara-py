@@ -53,6 +53,7 @@ class Finding:
     category: str
     count: int = 0
     fixable: bool = False
+    extra: str = ""  # dado auxiliar não resumido (ex: lista de caminhos) — pra achados que só precisam mostrar detalhe, não corrigir sozinhos
 
 
 @dataclass(frozen=True)
@@ -121,7 +122,7 @@ def check_pacnew_pacsave() -> Finding:
                         "ok", "diagnostico")
     return Finding("pacnew", "Pacnew / pacsave",
                     f"{n} arquivo(s) pendente(s) de merge", "warning", "diagnostico",
-                    count=n, fixable=False)
+                    count=n, fixable=False, extra="\n".join(sorted(lines)))
 
 
 def check_orphan_packages() -> Finding:
@@ -165,6 +166,21 @@ def check_missing_log_dirs() -> Finding:
                     "warning", "diagnostico", count=len(missing), fixable=True)
 
 
+def check_empty_libraries() -> Finding:
+    """Bibliotecas .so de tamanho zero em /usr/lib — origem: FixArch.sh.
+    Costuma acontecer quando uma atualização é interrompida no meio
+    (queda de energia, kill do pacman). Só detecta e resolve os pacotes
+    donos aqui (leitura); reinstalar é privilegiado, fica no helper."""
+    out = _run(["find", "/usr/lib", "-type", "f", "-size", "0", "-name", "*.so*"])
+    empty_libs = [l for l in out.splitlines() if l.strip()]
+    if not empty_libs:
+        return Finding("empty_libs", "Bibliotecas vazias", "Nenhuma .so de tamanho zero em /usr/lib",
+                        "ok", "diagnostico")
+    return Finding("empty_libs", "Bibliotecas .so vazias",
+                    f"{len(empty_libs)} arquivo(s) — geralmente sinal de update interrompido",
+                    "critical", "diagnostico", count=len(empty_libs), fixable=True)
+
+
 def check_critical_timers() -> Finding:
     broken = []
     for timer in CRITICAL_TIMERS:
@@ -202,7 +218,7 @@ def check_volumes_integrity() -> Finding:
                         "ok", "diagnostico")
     return Finding("volumes", "Integridade dos volumes",
                     f"Possível problema em: {', '.join(problems)}",
-                    "critical", "diagnostico", count=len(problems))
+                    "critical", "diagnostico", count=len(problems), fixable=True)
 
 
 def check_aur_watchlist() -> list[Finding]:
@@ -294,6 +310,7 @@ def run_full_checkup() -> DoctorReport:
         check_orphan_packages(),
         check_orphan_kernels(),
         check_missing_log_dirs(),
+        check_empty_libraries(),
         check_critical_timers(),
         check_volumes_integrity(),
         *check_aur_watchlist(),

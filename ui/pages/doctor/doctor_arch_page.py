@@ -43,6 +43,7 @@ FRIENDLY_DETAIL = {
     "orphans": "Pacotes que nada mais usa, ocupando espaço à toa.",
     "orphan_kernels": "Kernel instalado que você não está usando no momento.",
     "log_dirs": "Pastas que alguns programas esperam encontrar e não existem.",
+    "empty_libs": "Um update foi interrompido no meio e deixou biblioteca(s) corrompida(s).",
     "critical_timers": "Uma automação que evita quebras parou de rodar.",
     "volumes": "Um disco pode ter erro de sistema de arquivos.",
     "smart": "Um disco está reportando problema de saúde física.",
@@ -55,6 +56,8 @@ FRIENDLY_DETAIL = {
 FINDING_ACTION_MAP = {
     "orphans": ("doctor.cleanup", {"categories": ["orphans"]}),
     "log_dirs": ("doctor.fix_log_dirs", {}),
+    "volumes": ("doctor.fsck_repair", {}),
+    "empty_libs": ("doctor.fix_empty_libs", {}),
 }
 
 CARD_STYLE = """
@@ -131,7 +134,7 @@ class FindingRow(QFrame):
     LEVEL_ICON = {"critical": "mdi6.alert-octagon-outline", "warning": "mdi6.file-multiple-outline", "ok": "mdi6.check-circle-outline"}
     LEVEL_BG = {"critical": "#1a0e0e", "warning": "#17140a", "ok": "#0d0e13"}
 
-    def __init__(self, finding: Finding, is_last: bool = False, on_action=None, parent=None):
+    def __init__(self, finding: Finding, is_last: bool = False, on_action=None, on_view=None, parent=None):
         super().__init__(parent)
         color = LEVEL_COLOR[finding.level]
         bg = self.LEVEL_BG[finding.level]
@@ -179,6 +182,26 @@ class FindingRow(QFrame):
             """)
             if on_action:
                 btn.clicked.connect(lambda: on_action(finding.id, btn))
+            layout.addWidget(btn)
+        elif finding.extra and finding.level != "ok":
+            # Achados que só têm dado auxiliar pra mostrar (ex: lista de
+            # arquivos pacnew/pacsave) — botão neutro, não colorido como
+            # "Revisar", porque não corrige nada sozinho, só exibe.
+            btn = QPushButton("Ver arquivos")
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: transparent;
+                    border: 1px solid rgba(255,255,255,40);
+                    color: {MUTED};
+                    border-radius: 7px;
+                    padding: 6px 14px;
+                    font-family: "{FONT_FAMILY}";
+                    font-size: 11px;
+                }}
+                QPushButton:hover {{ background: rgba(255,255,255,14); color: {TEXT}; }}
+            """)
+            if on_view:
+                btn.clicked.connect(lambda: on_view(finding))
             layout.addWidget(btn)
 
 
@@ -273,6 +296,127 @@ class _CloseLabel(QLabel):
             "QLabel { color: #9aa6b2; font-size: 13px; border-radius: 6px; }"
             "QLabel:hover { background: rgba(200,60,60,60); color: #ff8888; }"
         )
+
+
+class FindingDetailDialog(QDialog):
+    """Diálogo só de leitura pra achados que não têm correção automática
+    (ex: pacnew/pacsave) — mostra a lista de arquivos e orienta o
+    próximo passo manual, sem tentar mexer em nada sozinho."""
+
+    def __init__(self, finding: Finding, guidance: str = "", parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(finding.title)
+        self.setModal(True)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setFixedWidth(600)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        header = QFrame()
+        header.setObjectName("ResHeader")
+        header.setFixedHeight(46)
+        h_layout = QHBoxLayout(header)
+        h_layout.setContentsMargins(16, 0, 14, 0)
+
+        icon = QLabel()
+        icon.setFixedSize(26, 26)
+        icon.setAlignment(Qt.AlignCenter)
+        icon.setPixmap(qta.icon("mdi6.file-multiple-outline", color=ACCENT_AMBER).pixmap(16, 16))
+        icon.setStyleSheet("QLabel { background: rgba(251,191,36,40); border-radius: 7px; }")
+
+        lbl = QLabel(finding.title)
+        lbl.setFont(QFont(FONT_FAMILY, 10, QFont.Bold))
+        lbl.setStyleSheet("color: #ecf4ff;")
+
+        btn_x = _CloseLabel(self)
+        btn_x.mousePressEvent = lambda e: self.accept()
+
+        h_layout.addWidget(icon)
+        h_layout.addSpacing(8)
+        h_layout.addWidget(lbl)
+        h_layout.addStretch()
+        h_layout.addWidget(btn_x)
+
+        body = QFrame()
+        body.setObjectName("ResBody")
+        b_layout = QVBoxLayout(body)
+        b_layout.setContentsMargins(20, 16, 20, 18)
+        b_layout.setSpacing(12)
+
+        if guidance:
+            guidance_lbl = QLabel(guidance)
+            guidance_lbl.setFont(QFont(FONT_FAMILY, 9))
+            guidance_lbl.setStyleSheet(f"color: {MUTED};")
+            guidance_lbl.setWordWrap(True)
+            b_layout.addWidget(guidance_lbl)
+
+        files_lbl = QLabel(finding.extra or "(nenhum arquivo)")
+        files_lbl.setFont(QFont(FONT_FAMILY, 9))
+        files_lbl.setStyleSheet(f"color: {TEXT}; background: #0d0e13; border-radius: 8px; padding: 10px;")
+        files_lbl.setWordWrap(True)
+        files_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        b_layout.addWidget(files_lbl)
+
+        btn_ok = QPushButton("OK")
+        btn_ok.setObjectName("ResBtnOk")
+        btn_ok.setFixedWidth(90)
+        btn_ok.clicked.connect(self.accept)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_row.addWidget(btn_ok)
+        b_layout.addLayout(btn_row)
+
+        root.addWidget(header)
+        root.addWidget(body)
+
+        self.setStyleSheet(f"""
+            QFrame#ResHeader {{
+                background: rgba(251,191,36, 35);
+                border-bottom: 1px solid rgba(251,191,36, 100);
+                border-top-left-radius: 12px;
+                border-top-right-radius: 12px;
+            }}
+            QFrame#ResBody {{
+                background: #080c14;
+                border-bottom-left-radius: 12px;
+                border-bottom-right-radius: 12px;
+            }}
+            QPushButton#ResBtnOk {{
+                background: rgba(10, 15, 25, 230);
+                border: 1px solid rgba(251,191,36, 120);
+                border-radius: 8px; color: #ecf4ff;
+                font-family: "{FONT_FAMILY}";
+                font-size: 11px; padding: 5px 0;
+            }}
+            QPushButton#ResBtnOk:hover {{
+                background: rgba(251,191,36, 40);
+                border-color: rgba(251,191,36, 200);
+            }}
+        """)
+        self.adjustSize()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.LeftButton and hasattr(self, "_drag"):
+            self.move(event.globalPosition().toPoint() - self._drag)
+
+
+# Orientação de próximo passo manual por achado — só pra achados sem
+# correção automática (view-only), explicando o comando certo a rodar.
+FINDING_GUIDANCE = {
+    "pacnew": (
+        "Isso não é corrigido automaticamente — mesclar configs é uma decisão "
+        "sua. No terminal, rode:\n\n  sudo pacdiff\n\ne revise arquivo por "
+        "arquivo (aceitar a versão nova, manter a sua, ou descartar)."
+    ),
+}
 
 
 class ActionResultDialog(QDialog):
@@ -657,6 +801,10 @@ class DoctorArchPage(QWidget):
         action, args = mapping
         self._dispatch_action(action, args, btn)
 
+    def _show_finding_detail(self, finding: Finding) -> None:
+        dialog = FindingDetailDialog(finding, guidance=FINDING_GUIDANCE.get(finding.id, ""), parent=self.window())
+        dialog.exec()
+
     def _run_cleanup_all(self, btn: QPushButton) -> None:
         from core.system.cleanup import CATEGORIES
         self._dispatch_action("doctor.cleanup", {"categories": CATEGORIES}, btn)
@@ -716,7 +864,10 @@ class DoctorArchPage(QWidget):
         else:
             for i, finding in enumerate(actionable):
                 self.findings_container.addWidget(
-                    FindingRow(finding, is_last=(i == len(actionable) - 1), on_action=self._run_finding_action)
+                    FindingRow(
+                        finding, is_last=(i == len(actionable) - 1),
+                        on_action=self._run_finding_action, on_view=self._show_finding_detail,
+                    )
                 )
 
         # Ações rápidas (4 cards)

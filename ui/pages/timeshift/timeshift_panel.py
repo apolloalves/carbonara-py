@@ -5531,6 +5531,57 @@ class _ScheduledSyncDialog(QDialog):
         )
         b_layout.addLayout(self._scope_row)
 
+        # Destinos — antes o agendamento só via UM destino (o que estava
+        # selecionado na tela principal no momento em que o diálogo abria).
+        # Agora é uma lista: cada disco marcado aqui entra na sincronização
+        # automática, independente de qual está selecionado na tela.
+        dest_lbl = QLabel(tr("snapshots.sync_destinations_label"))
+        dest_lbl.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+        dest_lbl.setStyleSheet("color: #8b92a3; letter-spacing: 1px; margin-top: 4px;")
+        b_layout.addWidget(dest_lbl)
+
+        selected_mountpoints = set(self.result_config.get("destination_mountpoints", []))
+        self._destination_checks: dict[str, QCheckBox] = {}
+        self._destination_rows: dict[str, QFrame] = {}
+        available_destinations = list_backup_destinations()
+
+        dest_container = QVBoxLayout()
+        dest_container.setSpacing(8)
+
+        if not available_destinations:
+            none_lbl = QLabel(tr("snapshots.sync_no_destinations_found"))
+            none_lbl.setFont(QFont("DejaVu Sans Mono", 9))
+            none_lbl.setStyleSheet("color: #6b7a8d;")
+            dest_container.addWidget(none_lbl)
+        else:
+            for dest in available_destinations:
+                row = QFrame()
+                row.setObjectName("DestRow")
+                row_layout = QHBoxLayout(row)
+                row_layout.setContentsMargins(14, 10, 14, 10)
+                row_layout.setSpacing(12)
+
+                cb = QCheckBox()
+                cb.setObjectName("SyncCheckbox")
+                cb.setFixedSize(18, 18)
+                cb.setCursor(Qt.PointingHandCursor)
+                cb.setChecked(dest.mountpoint in selected_mountpoints)
+
+                label_lbl = QLabel(f"{dest.label}  ·  {dest.mountpoint}  ·  {format_gb(dest.free_gb)} livre")
+                label_lbl.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+                label_lbl.setStyleSheet("color: #ecf4ff;")
+
+                row_layout.addWidget(cb)
+                row_layout.addWidget(label_lbl, 1)
+
+                cb.toggled.connect(self._on_destination_toggle)
+                self._destination_checks[dest.mountpoint] = cb
+                self._destination_rows[dest.mountpoint] = row
+                self._update_dest_row_style(row, cb.isChecked())
+                dest_container.addWidget(row)
+
+        b_layout.addLayout(dest_container)
+
         # Status (última/próxima execução) — sem backend ainda, mostra
         # sempre o estado "nunca executado" nesta rodada
         status_card = QFrame()
@@ -5678,6 +5729,34 @@ class _ScheduledSyncDialog(QDialog):
         next_run = scheduler.next_run_display(self.result_config) if self.result_config.get("enabled") else None
         self.next_value.setText(next_run if next_run else tr("snapshots.sync_not_scheduled"))
 
+    def _update_dest_row_style(self, row: QFrame, checked: bool) -> None:
+        if checked:
+            row.setStyleSheet("""
+                QFrame#DestRow {
+                    background: rgba(59,130,246,56);
+                    border: 1px solid rgba(99,140,255,130);
+                    border-radius: 10px;
+                }
+                QFrame#DestRow QLabel { background: transparent; border: none; }
+            """)
+        else:
+            row.setStyleSheet("""
+                QFrame#DestRow {
+                    background: rgba(255,255,255,4);
+                    border: 1px solid rgba(255,255,255,14);
+                    border-radius: 10px;
+                }
+                QFrame#DestRow QLabel { background: transparent; border: none; color: #c8d4e0; }
+            """)
+
+    def _on_destination_toggle(self) -> None:
+        for mountpoint, cb in self._destination_checks.items():
+            self._update_dest_row_style(self._destination_rows[mountpoint], cb.isChecked())
+        self.result_config["destination_mountpoints"] = [
+            mp for mp, cb in self._destination_checks.items() if cb.isChecked()
+        ]
+        self._refresh_status_card()
+
     def _on_frequency_changed(self, key: str) -> None:
         self.result_config["frequency"] = key
         self._update_frequency_visibility(key)
@@ -5689,7 +5768,7 @@ class _ScheduledSyncDialog(QDialog):
         self._time_container.setVisible(freq in ("daily", "weekly"))
 
     def _on_save(self) -> None:
-        if not self.result_config.get("destination_mountpoint"):
+        if not self.result_config.get("destination_mountpoints"):
             _show_error("Carbonara", tr("snapshots.sync_no_destination"), parent=self)
             return
 
@@ -5803,7 +5882,23 @@ class _ScheduledSyncDialog(QDialog):
             }
             QFrame#SyncBody { background: transparent; }
             QLabel { background: transparent; border: none; }
-        """)
+            QCheckBox#SyncCheckbox {
+                background: transparent;
+                spacing: 0px;
+            }
+            QCheckBox#SyncCheckbox::indicator {
+                width: 18px;
+                height: 18px;
+                border-radius: 5px;
+                background: rgba(255,255,255,8);
+                border: 1px solid rgba(255,255,255,30);
+            }
+            QCheckBox#SyncCheckbox::indicator:checked {
+                background: rgba(59,130,246,220);
+                border: 1px solid rgba(99,140,255,255);
+                image: url(__CHECK_ICON__);
+            }
+        """.replace("__CHECK_ICON__", _checkbox_check_icon_path()))
         self._apply_toggle_style()
 
 

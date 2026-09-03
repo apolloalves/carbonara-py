@@ -217,12 +217,14 @@ class BackupsPage(QWidget):
         self.sync_badge.set_state(enabled=enabled, next_run=next_run)
 
     def _open_sync_dialog(self) -> None:
-        # Injeta o destino atualmente selecionado na tela — o sync
-        # agendado precisa saber ONDE sincronizar, já que roda sem
-        # ninguém pra escolher isso na hora
-        dest = self.snapshots_page.current_destination()
-        if dest is not None:
-            self._sync_config["destination_mountpoint"] = dest.mountpoint
+        # Só sugere o destino atual da tela como ponto de partida se AINDA
+        # não existe nenhum destino configurado — depois da primeira vez,
+        # a lista salva manda (o agendamento pode cobrir vários discos,
+        # não só o que está selecionado no combo agora)
+        if not self._sync_config.get("destination_mountpoints"):
+            dest = self.snapshots_page.current_destination()
+            if dest is not None:
+                self._sync_config["destination_mountpoints"] = [dest.mountpoint]
 
         dialog = _ScheduledSyncDialog(self._sync_config, parent=self)
         if dialog.exec() == QDialog.Accepted:
