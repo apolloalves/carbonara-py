@@ -12,6 +12,8 @@ from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
 
+from core.i18n import tr
+
 # ── Caminhos e devices fixos (a .iso precisa ir direto para o pendrive Ventoy) ──
 
 EGGS_DIRECTORY = Path("/home/eggs")
@@ -508,7 +510,7 @@ class ShellWorker(QThread):
             self._proc.wait()
 
             if self._cancelled:
-                self.failed.emit("Operação cancelada.")
+                self.failed.emit(tr("eggs_core.op_cancelled"))
                 return
 
             if self._proc.returncode != 0:
@@ -529,7 +531,7 @@ def _run_step(dialog, cmd: list[str]) -> bool:
         for line in result.stdout.splitlines():
             dialog.append_log(line)
     if result.returncode != 0:
-        dialog.append_log(f"ERRO: {result.stderr.strip()}")
+        dialog.append_log(tr("eggs_core.log_error_prefix").format(msg=result.stderr.strip()))
         return False
     return True
 
@@ -543,11 +545,11 @@ def _cleanup_iso(dialog) -> None:
             removed = list(directory.glob("*.iso"))
             for f in removed:
                 f.unlink(missing_ok=True)
-                dialog.append_log(f"Removido: {f}")
+                dialog.append_log(tr("eggs_core.log_removed").format(file=f))
             if removed:
-                dialog.append_log(f"--- {len(removed)} arquivo(s) removido(s) de {directory} ---")
+                dialog.append_log(tr("eggs_core.log_removed_count").format(count=len(removed), directory=directory))
         except Exception as exc:  # noqa: BLE001
-            dialog.append_log(f"AVISO: não foi possível limpar {directory}: {exc}")
+            dialog.append_log(tr("eggs_core.log_cleanup_warning").format(directory=directory, exc=exc))
 
 
 def _start_move_and_backup(dialog, iso_files: list[Path], destination: Path | None, on_done) -> None:
@@ -576,7 +578,7 @@ def _start_move_and_backup(dialog, iso_files: list[Path], destination: Path | No
     if src.is_symlink():
         real_src = Path(os.path.realpath(src))
         if not real_src.exists():
-            dialog.append_log(f"ERRO: link '{src}' aponta para '{real_src}', que não existe.")
+            dialog.append_log(tr("eggs_core.log_broken_symlink").format(src=src, real_src=real_src))
             _cleanup_iso(dialog)
             on_done(False)
             return
@@ -585,9 +587,9 @@ def _start_move_and_backup(dialog, iso_files: list[Path], destination: Path | No
     renamed_name = f"ARCHLINUX_{date_str}.iso"
     dest = dest_dir / renamed_name
 
-    dialog.set_status(f"Movendo para {dest_dir}...")
+    dialog.set_status(tr("eggs_core.status_moving_to").format(dest_dir=dest_dir))
     dialog.set_current_file(str(src))
-    dialog.append_log(f"Movendo: {src} -> {dest}")
+    dialog.append_log(tr("eggs_core.log_moving").format(src=src, dest=dest))
 
     mv_worker = ShellWorker(["mv", str(src), str(dest)], title="Movendo...", parent=dialog)
     dialog.register_worker(mv_worker)
@@ -602,10 +604,10 @@ def _start_move_and_backup(dialog, iso_files: list[Path], destination: Path | No
         if original != src and original.is_symlink():
             original.unlink(missing_ok=True)
 
-        dialog.append_log(f"--- ISO criada com sucesso: {dest.name} ---")
-        dialog.set_status(f"Fazendo backup em {MDSATA_EGGS}...")
+        dialog.append_log(tr("eggs_core.log_iso_created").format(name=dest.name))
+        dialog.set_status(tr("eggs_core.status_backing_up").format(path=MDSATA_EGGS))
         dialog.set_current_file(str(dest))
-        dialog.append_log(f"Iniciando cópia de segurança para {MDSATA_EGGS}...")
+        dialog.append_log(tr("eggs_core.log_backup_start").format(path=MDSATA_EGGS))
         MDSATA_EGGS.mkdir(parents=True, exist_ok=True)
 
         rsync_worker = ShellWorker(
@@ -619,11 +621,11 @@ def _start_move_and_backup(dialog, iso_files: list[Path], destination: Path | No
         rsync_worker.progress_changed.connect(dialog.set_progress_percent)
 
         def on_rsync_ok() -> None:
-            dialog.append_log(f"--- arquivo '{dest.name}' pronto no Ventoy e no MDSATA ---")
+            dialog.append_log(tr("eggs_core.log_ready_both").format(name=dest.name))
             on_done(True)
 
         def on_rsync_fail(msg: str) -> None:
-            dialog.append_log(f"AVISO: backup no MDSATA falhou ({msg}), mas ISO já está no Ventoy.")
+            dialog.append_log(tr("eggs_core.log_backup_failed_ventoy_ok").format(msg=msg))
             # ISO no Ventoy já está ok — não remove
             on_done(False)
 
@@ -632,7 +634,7 @@ def _start_move_and_backup(dialog, iso_files: list[Path], destination: Path | No
         rsync_worker.start()
 
     def on_mv_fail(msg: str) -> None:
-        dialog.append_log(f"ERRO ao mover para {dest_dir}: {msg}")
+        dialog.append_log(tr("eggs_core.log_move_error").format(dest_dir=dest_dir, msg=msg))
         _cleanup_iso(dialog)
         on_done(False)
 
@@ -703,31 +705,19 @@ def check_space(dialog, destination: Path | None = None) -> Path | None:
     # MDSATA é o backup fixo (não escolhido pelo usuário) — sem espaço
     # ali não tem "alternativa" que faça sentido sugerir, é só falha.
     if mdsata_free < estimated_gb:
-        dialog.append_log("AVISO: Espaço insuficiente nos destinos:")
-        dialog.append_log(
-            f"  ✗ MDSATA ({MDSATA}): {mdsata_free:.1f} GB livres "
-            f"— necessário ~{estimated_gb:.1f} GB"
-        )
-        dialog.append_log(
-            f"\nEstimativa de tamanho da ISO: ~{estimated_gb:.1f} GB "
-            f"(comprimido, baseado no uso atual de /)"
-        )
-        _fail_space_check(dialog, "Espaço insuficiente no MDSATA — verifique o backup.")
+        dialog.append_log(tr("eggs_core.log_space_insufficient_header"))
+        dialog.append_log(tr("eggs_core.log_space_mdsata_detail").format(path=MDSATA, free=mdsata_free, needed=estimated_gb))
+        dialog.append_log(tr("eggs_core.log_space_estimate").format(gb=estimated_gb))
+        _fail_space_check(dialog, tr("eggs_core.status_space_mdsata_fail"))
         return None
 
     dest_free = _free_gb(dest) if _is_mountpoint(dest) else 0.0
     if dest_free >= estimated_gb:
-        dialog.append_log(
-            f"INFO: Espaço verificado: ISO estimada ~{estimated_gb:.1f} GB | "
-            f"{dest} {dest_free:.1f} GB livres | MDSATA {mdsata_free:.1f} GB livres"
-        )
+        dialog.append_log(tr("eggs_core.log_space_ok").format(gb=estimated_gb, dest=dest, dest_free=dest_free, mdsata_free=mdsata_free))
         return dest
 
     # Destino escolhido sem espaço — procura alternativas antes de desistir.
-    dialog.append_log(
-        f"AVISO: {dest} tem apenas {dest_free:.1f} GB livres "
-        f"— necessário ~{estimated_gb:.1f} GB."
-    )
+    dialog.append_log(tr("eggs_core.log_space_dest_insufficient").format(dest=dest, free=dest_free, needed=estimated_gb))
 
     from core.system.disks import list_relevant_disks, parse_size_to_gb
 
@@ -744,19 +734,19 @@ def check_space(dialog, destination: Path | None = None) -> Path | None:
             })
 
     if not candidates:
-        dialog.append_log("Nenhum disco alternativo com espaço suficiente encontrado.")
-        _fail_space_check(dialog, "Espaço insuficiente — verifique os destinos.")
+        dialog.append_log(tr("eggs_core.log_no_alt_disk"))
+        _fail_space_check(dialog, tr("eggs_core.status_space_fail"))
         return None
 
-    dialog.append_log(f"Sugerindo {len(candidates)} disco(s) alternativo(s) com espaço suficiente...")
+    dialog.append_log(tr("eggs_core.log_suggesting_alt").format(count=len(candidates)))
     chosen = dialog.prompt_alternative_destination(candidates, estimated_gb)
 
     if not chosen:
-        dialog.append_log("Nenhum destino alternativo escolhido — operação cancelada.")
-        _fail_space_check(dialog, "Cancelado pelo usuário.")
+        dialog.append_log(tr("eggs_core.log_no_alt_chosen"))
+        _fail_space_check(dialog, tr("eggs_core.status_user_cancelled"))
         return None
 
-    dialog.append_log(f"Novo destino escolhido: {chosen}")
+    dialog.append_log(tr("eggs_core.log_new_dest_chosen").format(chosen=chosen))
     return check_space(dialog, Path(chosen))
 
 
@@ -776,14 +766,14 @@ def create_eggs(dialog, parent=None, destination: str | None = None, update_chec
 
     dialog.set_running(True)
     dialog.progress.setRange(0, 0)
-    dialog.set_status("Verificando dispositivos...")
+    dialog.set_status(tr("eggs_core.status_checking_devices"))
     dialog.set_current_file("—")
-    dialog.append_log("=== CREATE PENGUIN'S EGGS ===")
-    dialog.append_log(f"Destino escolhido: {dest_dir}")
+    dialog.append_log(tr("eggs_core.log_header_create"))
+    dialog.append_log(tr("eggs_core.log_dest_chosen").format(dest_dir=dest_dir))
     if update_check_version:
-        dialog.append_log(f"Penguin's Eggs atualizado para v{update_check_version} antes desta build.")
+        dialog.append_log(tr("eggs_core.log_updated_before_build").format(version=update_check_version))
     else:
-        dialog.append_log("Penguin's Eggs já estava na versão mais recente — build sem atualização prévia.")
+        dialog.append_log(tr("eggs_core.log_already_latest"))
 
     try:
         # Só tenta montar o device fixo do Ventoy se o destino escolhido
@@ -794,13 +784,13 @@ def create_eggs(dialog, parent=None, destination: str | None = None, update_chec
             ensure_mounted(VENTOY_DEVICE, VENTOY)
         ensure_mounted(MDSATA_DEVICE, MDSATA)
     except Exception as exc:  # noqa: BLE001
-        dialog.append_log(f"ERRO: {exc}")
-        _finish(dialog, False, "", "Falha ao montar dispositivos.")
+        dialog.append_log(tr("eggs_core.log_error_prefix").format(msg=exc))
+        _finish(dialog, False, "", tr("eggs_core.status_mount_fail"))
         return
 
     if not dest_dir.exists() or not dest_dir.is_dir():
-        dialog.append_log(f"ERRO: destino '{dest_dir}' não existe ou não está montado.")
-        _finish(dialog, False, "", "Destino inválido.")
+        dialog.append_log(tr("eggs_core.log_invalid_dest").format(dest_dir=dest_dir))
+        _finish(dialog, False, "", tr("eggs_core.status_invalid_dest"))
         return
 
     # Checa PRIMEIRO se já existe uma ISO pronta de uma tentativa anterior
@@ -810,9 +800,7 @@ def create_eggs(dialog, parent=None, destination: str | None = None, update_chec
     # uma ISO de 30+ GB já pronta sem tentar salvá-la primeiro.
     iso_files = _find_produced_iso()
     if iso_files:
-        dialog.append_log(
-            f"ISO já existente encontrada em {iso_files[0].parent} — aproveitando em vez de gerar outra."
-        )
+        dialog.append_log(tr("eggs_core.log_existing_iso_found").format(parent=iso_files[0].parent))
         resolved_dest = check_space(dialog, dest_dir)
         if resolved_dest is None:
             return
@@ -820,12 +808,12 @@ def create_eggs(dialog, parent=None, destination: str | None = None, update_chec
         dialog.progress.setRange(0, 100)
 
         def _on_move_done(ok: bool) -> None:
-            _finish(dialog, ok, "Concluído com sucesso.", "Falha na operação.")
+            _finish(dialog, ok, tr("eggs_core.status_done_ok"), tr("eggs_core.status_op_failed"))
 
         _start_move_and_backup(dialog, iso_files, dest_dir, _on_move_done)
         return
 
-    dialog.append_log(f"Limpando: {EGGS_DIRECTORY}")
+    dialog.append_log(tr("eggs_core.log_cleaning").format(dir=EGGS_DIRECTORY))
     _safe_remove_eggs_dir()
 
     resolved_dest = check_space(dialog, dest_dir)
@@ -834,9 +822,9 @@ def create_eggs(dialog, parent=None, destination: str | None = None, update_chec
     dest_dir = resolved_dest
 
     # Nenhuma iso encontrada — gera uma nova via `eggs produce`
-    dialog.set_status("Gerando nova ISO (eggs produce)...")
+    dialog.set_status(tr("eggs_core.status_generating_iso"))
     dialog.append_log("")
-    dialog.append_log("INICIANDO: Nenhuma .iso encontrada — gerando nova ISO via eggs produce...")
+    dialog.append_log(tr("eggs_core.log_starting_generate"))
     dialog.append_log("")
 
     worker = ShellWorker(
@@ -862,16 +850,16 @@ def create_eggs(dialog, parent=None, destination: str | None = None, update_chec
     worker.progress_changed.connect(dialog.set_progress_percent)
 
     def on_ok() -> None:
-        dialog.append_log("--- ISO gerada com sucesso ---")
+        dialog.append_log(tr("eggs_core.log_iso_generated"))
         dialog.progress.setRange(0, 100)
         new_isos = _find_produced_iso()
         if new_isos:
             def _on_move_done(ok: bool) -> None:
-                _finish(dialog, ok, "Concluído com sucesso.", "Falha na operação.")
+                _finish(dialog, ok, tr("eggs_core.status_done_ok"), tr("eggs_core.status_op_failed"))
 
             _start_move_and_backup(dialog, new_isos, dest_dir, _on_move_done)
         else:
-            _finish(dialog, True, "ISO gerada, mas não encontrada para mover.", "")
+            _finish(dialog, True, tr("eggs_core.status_iso_generated_not_found"), "")
 
     def on_fail(msg: str) -> None:
         if getattr(dialog, '_cancelled', False) or getattr(worker, '_cancelled', False):
@@ -881,8 +869,8 @@ def create_eggs(dialog, parent=None, destination: str | None = None, update_chec
             dialog.set_running(False)
             dialog.btn_close.setEnabled(True)
             return
-        dialog.append_log(f"ERRO: {msg}")
-        _finish(dialog, False, "", "Falha ao gerar ISO.")
+        dialog.append_log(tr("eggs_core.log_error_prefix").format(msg=msg))
+        _finish(dialog, False, "", tr("eggs_core.status_generate_fail"))
 
     worker.finished_ok.connect(on_ok)
     worker.failed.connect(on_fail)
@@ -897,17 +885,17 @@ def check_eggs(dialog, parent=None, destination: str | None = None) -> None:
 
     dialog.set_running(True)
     dialog.progress.setRange(0, 0)
-    dialog.set_status("Verificando dispositivos...")
+    dialog.set_status(tr("eggs_core.status_checking_devices"))
     dialog.set_current_file("—")
-    dialog.append_log("=== CHECK PENGUIN'S EGGS ===")
+    dialog.append_log(tr("eggs_core.log_header_check"))
 
     try:
         if dest_dir == VENTOY:
             ensure_mounted(VENTOY_DEVICE, VENTOY)
         ensure_mounted(MDSATA_DEVICE, MDSATA)
     except Exception as exc:  # noqa: BLE001
-        dialog.append_log(f"ERRO: {exc}")
-        _finish(dialog, False, "", "Falha ao montar dispositivos.")
+        dialog.append_log(tr("eggs_core.log_error_prefix").format(msg=exc))
+        _finish(dialog, False, "", tr("eggs_core.status_mount_fail"))
         return
 
     dialog.progress.setRange(0, 100)
@@ -915,22 +903,22 @@ def check_eggs(dialog, parent=None, destination: str | None = None) -> None:
 
     if iso_files:
         found_dir = iso_files[0].parent
-        dialog.append_log(f"{len(iso_files)} arquivo(s) .iso encontrado(s) em {found_dir}")
+        dialog.append_log(tr("eggs_core.log_iso_found_count").format(count=len(iso_files), dir=found_dir))
         resolved_dest = check_space(dialog, dest_dir)
         if resolved_dest is None:
             return
         dest_dir = resolved_dest
 
         def _on_move_done(ok: bool) -> None:
-            _finish(dialog, ok, "Concluído com sucesso.", "Falha na operação.")
+            _finish(dialog, ok, tr("eggs_core.status_done_ok"), tr("eggs_core.status_op_failed"))
 
         _start_move_and_backup(dialog, iso_files, dest_dir, _on_move_done)
         return
 
-    dialog.append_log(f"Nenhum .iso encontrado em {EGGS_DIRECTORY / 'mnt'}, {EGGS_DIRECTORY} ou {FILEPATH}")
-    dialog.append_log(f"Limpando: {EGGS_DIRECTORY}")
+    dialog.append_log(tr("eggs_core.log_no_iso_found").format(a=EGGS_DIRECTORY / "mnt", b=EGGS_DIRECTORY, c=FILEPATH))
+    dialog.append_log(tr("eggs_core.log_cleaning").format(dir=EGGS_DIRECTORY))
     _safe_remove_eggs_dir()
-    _finish(dialog, True, "Diretório limpo — nada para fazer.", "")
+    _finish(dialog, True, tr("eggs_core.status_dir_cleaned_nothing"), "")
 
 
 _PACMAN_LOCK = Path("/var/lib/pacman/db.lck")
@@ -958,20 +946,14 @@ def _clear_stale_pacman_lock(dialog) -> None:
     )
 
     if real_process_running:
-        dialog.append_log(
-            "AVISO: /var/lib/pacman/db.lck existe e há um processo "
-            "pacman/paru/yay rodando de verdade — não mexendo nele."
-        )
+        dialog.append_log(tr("eggs_core.log_lock_real_process"))
         return
 
     try:
         _PACMAN_LOCK.unlink()
-        dialog.append_log(
-            "Lock órfão do pacman removido (/var/lib/pacman/db.lck) — "
-            "nenhum processo pacman/paru/yay estava rodando de verdade."
-        )
+        dialog.append_log(tr("eggs_core.log_lock_removed"))
     except OSError as exc:
-        dialog.append_log(f"AVISO: falha ao remover lock do pacman: {exc}")
+        dialog.append_log(tr("eggs_core.log_lock_remove_fail").format(exc=exc))
 
 
 def _ensure_pacman_contrib(dialog) -> None:
@@ -988,15 +970,15 @@ def _ensure_pacman_contrib(dialog) -> None:
     if already_installed:
         return
 
-    dialog.append_log("pacman-contrib não encontrado — instalando (necessário pra checar atualizações do penguins-eggs)...")
+    dialog.append_log(tr("eggs_core.log_installing_pacman_contrib"))
     result = subprocess.run(
         ["pacman", "-Sy", "--noconfirm", "--needed", "pacman-contrib"],
         capture_output=True, text=True,
     )
     if result.returncode == 0:
-        dialog.append_log("pacman-contrib instalado.")
+        dialog.append_log(tr("eggs_core.log_pacman_contrib_installed"))
     else:
-        dialog.append_log(f"Não foi possível instalar pacman-contrib (checagem de update via checkupdates ficará indisponível): {result.stderr.strip()}")
+        dialog.append_log(tr("eggs_core.log_pacman_contrib_fail").format(err=result.stderr.strip()))
 
 
 def install_eggs(dialog, parent=None) -> None:
@@ -1005,9 +987,9 @@ def install_eggs(dialog, parent=None) -> None:
 
     dialog.set_running(True)
     dialog.progress.setRange(0, 0)
-    dialog.set_status("Verificando instalação...")
+    dialog.set_status(tr("eggs_core.status_checking_install"))
     dialog.set_current_file("—")
-    dialog.append_log("=== INSTALL PENGUIN'S EGGS ===")
+    dialog.append_log(tr("eggs_core.log_header_install"))
 
     _clear_stale_pacman_lock(dialog)
     _ensure_pacman_contrib(dialog)
@@ -1020,9 +1002,9 @@ def install_eggs(dialog, parent=None) -> None:
     steps: list[list[str]] = []
 
     if not eggs_installed:
-        dialog.append_log("penguins-eggs não encontrado — será instalado.")
+        dialog.append_log(tr("eggs_core.log_eggs_not_found"))
     else:
-        dialog.append_log("penguins-eggs já instalado — verificando atualização...")
+        dialog.append_log(tr("eggs_core.log_eggs_already_checking"))
 
     # No Arch, penguins-eggs está disponível diretamente via chaotic-aur
     # (pacman -Ss penguins-eggs confirma o pacote). Isso é mais confiável
@@ -1038,7 +1020,7 @@ def install_eggs(dialog, parent=None) -> None:
     ).returncode == 0
 
     if pkg_in_repo:
-        dialog.append_log("penguins-eggs disponível via repo (chaotic-aur) — usando pacman.")
+        dialog.append_log(tr("eggs_core.log_eggs_via_repo"))
         steps.append(["pacman", "-Sy", "--noconfirm", "--needed", "penguins-eggs"])
 
         # Checagem real ANTES de decidir o texto central — sem isso, o
@@ -1047,24 +1029,21 @@ def install_eggs(dialog, parent=None) -> None:
         # (só sincroniza os bancos, não instala nada ainda) e -Qu lista
         # o pacote só se existir versão nova nos repos sincronizados.
         if eggs_installed:
-            dialog.set_status("Sincronizando bancos de pacotes...")
+            dialog.set_status(tr("eggs_core.status_syncing_dbs"))
             subprocess.run(["pacman", "-Sy"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             qu = subprocess.run(
                 ["pacman", "-Qu", "penguins-eggs"],
                 capture_output=True, text=True,
             )
             update_available = bool(qu.stdout.strip())
-            dialog.set_title("Instalando..." if update_available else "Verificando atualizações...")
+            dialog.set_title(tr("eggs_core.title_installing") if update_available else tr("eggs_core.title_checking_updates"))
             if not update_available:
-                dialog.append_log("pacman confirma: nenhuma atualização disponível pro penguins-eggs.")
+                dialog.append_log(tr("eggs_core.log_pacman_no_update"))
         else:
-            dialog.set_title("Instalando...")
+            dialog.set_title(tr("eggs_core.title_installing"))
     else:
-        dialog.set_title("Instalando...")
-        dialog.append_log(
-            "penguins-eggs não encontrado em nenhum repo configurado — "
-            "recorrendo ao fresh-eggs.sh (fallback)."
-        )
+        dialog.set_title(tr("eggs_core.title_installing"))
+        dialog.append_log(tr("eggs_core.log_fallback_fresh_eggs"))
         steps.append([
             "bash", "-c",
             "rm -rf /tmp/get-eggs && "
@@ -1088,9 +1067,9 @@ def install_eggs(dialog, parent=None) -> None:
     # update internamente); senão o módulo nunca seria atualizado depois
     # da primeira instalação.
     if not calamares_installed:
-        dialog.append_log("módulo Calamares não encontrado — será instalado.")
+        dialog.append_log(tr("eggs_core.log_calamares_not_found"))
     else:
-        dialog.append_log("módulo Calamares já instalado — verificando atualização...")
+        dialog.append_log(tr("eggs_core.log_calamares_already_checking"))
 
     # Bug conhecido de empacotamento do penguins-eggs no Arch: o pacote
     # grava a config como "settings.yml", mas o comando "eggs calamares
@@ -1104,12 +1083,9 @@ def install_eggs(dialog, parent=None) -> None:
     if _settings_yml.exists() and not _settings_yaml.exists():
         try:
             shutil.copy2(_settings_yml, _settings_yaml)
-            dialog.append_log(
-                "auto-cura: settings.yml copiado para settings.yaml "
-                "(bug conhecido de empacotamento do penguins-eggs no Arch)."
-            )
+            dialog.append_log(tr("eggs_core.log_settings_autofix"))
         except OSError as exc:
-            dialog.append_log(f"aviso: falha ao auto-corrigir settings.yaml ({exc}).")
+            dialog.append_log(tr("eggs_core.log_settings_autofix_fail").format(exc=exc))
 
     steps.append(["eggs", "calamares", "--install"])
 
@@ -1123,12 +1099,12 @@ def install_eggs(dialog, parent=None) -> None:
     def run_next(index: int = 0) -> None:
         if index >= len(steps):
             if eggs_installed and nothing_to_update["flag"]:
-                dialog.append_log("--- verificação concluída ---")
-                _finish(dialog, True, "Nenhuma atualização disponível.", "")
+                dialog.append_log(tr("eggs_core.log_verification_done"))
+                _finish(dialog, True, tr("eggs_core.status_no_update"), "")
             else:
-                action = "Atualização" if eggs_installed else "Instalação"
-                dialog.append_log(f"--- {action.lower()} concluída ---")
-                _finish(dialog, True, f"{action} concluída com sucesso.", "")
+                action = tr("eggs_core.word_update") if eggs_installed else tr("eggs_core.word_install")
+                dialog.append_log(tr("eggs_core.log_action_done").format(action=action.lower()))
+                _finish(dialog, True, tr("eggs_core.status_action_done_ok").format(action=action), "")
             return
 
         cmd = steps[index]
@@ -1170,8 +1146,8 @@ def install_eggs(dialog, parent=None) -> None:
                 dialog.set_running(False)
                 dialog.btn_close.setEnabled(True)
                 return
-            dialog.append_log(f"ERRO: {msg}")
-            _finish(dialog, False, "", "Falha na instalação.")
+            dialog.append_log(tr("eggs_core.log_error_prefix").format(msg=msg))
+            _finish(dialog, False, "", tr("eggs_core.status_install_fail"))
 
         worker.finished_ok.connect(on_ok)
         worker.failed.connect(on_fail)

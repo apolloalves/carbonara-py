@@ -1134,7 +1134,6 @@ class EggsPage(QWidget):
             desc=install_desc,
             color="#ff9966",
             parent=self,
-            badge=tr("eggs.badge_requires_root"),
             action_label=install_action,
             compact=self._compact_cards,
         )
@@ -1147,7 +1146,6 @@ class EggsPage(QWidget):
             desc=tr("eggs.create_desc"),
             color="#9bf0bd",
             parent=self,
-            badge=tr("eggs.badge_requires_root"),
             compact=self._compact_cards,
         )
         self.btn_create.clicked.connect(self._on_create)
@@ -1158,7 +1156,6 @@ class EggsPage(QWidget):
             desc=tr("eggs.check_desc"),
             color="#23a6ff",
             parent=self,
-            badge=tr("eggs.badge_requires_root"),
             compact=self._compact_cards,
         )
         self.btn_check.clicked.connect(self._on_check)
@@ -1705,11 +1702,21 @@ class EggsPage(QWidget):
             return
 
         self._set_cards_enabled(False)
-        self._show_toast(tr("eggs.executing_prefix").format(title=dialog_title))
+        # Atraso de propósito: o diálogo de progresso é uma janela de um
+        # PROCESSO SEPARADO (o helper root desenha a própria interface) —
+        # na maioria dos casos ela já está visível bem antes desse tempo,
+        # tornando o toast flutuante redundante logo de cara. Só mostra
+        # se a operação ainda estiver rodando quando o timer disparar
+        # (evita um toast fantasma pra operações que terminam rápido).
+        QTimer.singleShot(2500, lambda: self._show_toast_if_still_running(tr("eggs.executing_prefix").format(title=dialog_title)))
         self._spinner_index = 0
         self._spinner_timer.start()
         self._force_kill_timer.start()
         self._poll_timer.start()
+
+    def _show_toast_if_still_running(self, text: str) -> None:
+        if self._proc is not None and self._proc.poll() is None:
+            self._show_toast(text)
 
     def _poll_process(self) -> None:
         if self._proc is None:
