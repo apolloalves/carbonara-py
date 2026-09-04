@@ -177,27 +177,59 @@ def get_dashboard_stats() -> dict:
 
 
 def check_eggs_update() -> str | None:
-    """Verifica se existe atualização disponível pro penguins-eggs via AUR
-    (usando paru). Faz uma chamada de rede — por isso NÃO deve ser chamada
-    no auto-refresh periódico da tela, só na abertura da página ou depois
-    de uma instalação/atualização. Retorna a versão nova disponível, ou
-    None se já está atualizado (ou se não foi possível checar)."""
+    """Verifica se existe atualização disponível pro penguins-eggs.
+
+    Checa DOIS caminhos possíveis, porque o pacote já migrou de lugar
+    antes e pode migrar de novo:
+      1. Repositório normal (ex: chaotic-aur configurado como repo) —
+         via `checkupdates` (pacman-contrib), que consulta um cache
+         local da base de dados sem precisar de root nem alterar nada.
+      2. AUR de verdade (pacote "estrangeiro") — via `paru -Qua`, como
+         antes.
+    O bug real encontrado: quando o pacote passou a vir do repo (não
+    mais do AUR), só o checkpoint 1 acima existia, então a tela sempre
+    dizia "sem atualização" mesmo quando tinha — `paru -Qua` nunca
+    lista pacotes que não são mais "estrangeiros".
+
+    Faz chamada de rede — por isso NÃO deve ser chamada no auto-refresh
+    periódico da tela, só na abertura da página ou depois de uma
+    instalação/atualização. Retorna a versão nova disponível, ou None
+    se já está atualizado (ou se não foi possível checar por nenhum
+    dos dois caminhos)."""
+    # 1. Repositório normal (pacman-contrib)
+    try:
+        result = subprocess.run(
+            ["checkupdates"],
+            capture_output=True, text=True, timeout=20,
+        )
+        # checkupdates devolve 2 quando não há NENHUMA atualização (não é
+        # erro) — só trata como falha de verdade se não achar nem stdout
+        if result.returncode in (0, 2):
+            for line in result.stdout.splitlines():
+                # Formato: "penguins-eggs 15.3.2-1 -> 15.4.0-1"
+                if line.startswith("penguins-eggs "):
+                    parts = line.split("->")
+                    if len(parts) == 2:
+                        return parts[1].strip()
+    except Exception:
+        pass
+
+    # 2. AUR de verdade (pacote estrangeiro)
     try:
         result = subprocess.run(
             ["paru", "-Qua"],
             capture_output=True, text=True, timeout=15,
         )
-        if result.returncode != 0:
-            return None
-        for line in result.stdout.splitlines():
-            # Formato típico: "penguins-eggs 15.3.2-1 -> 15.4.0-1"
-            if line.startswith("penguins-eggs "):
-                parts = line.split("->")
-                if len(parts) == 2:
-                    return parts[1].strip()
-        return None
+        if result.returncode == 0:
+            for line in result.stdout.splitlines():
+                if line.startswith("penguins-eggs "):
+                    parts = line.split("->")
+                    if len(parts) == 2:
+                        return parts[1].strip()
     except Exception:
-        return None
+        pass
+
+    return None
 
 
 def _safe_remove_eggs_dir() -> None:
@@ -942,6 +974,31 @@ def _clear_stale_pacman_lock(dialog) -> None:
         dialog.append_log(f"AVISO: falha ao remover lock do pacman: {exc}")
 
 
+def _ensure_pacman_contrib(dialog) -> None:
+    """Garante que o pacman-contrib está instalado — é dele que vem o
+    checkupdates, usado por check_eggs_update() pra achar atualização
+    quando o penguins-eggs vem de repositório normal (não AUR). Sem
+    isso instalado, check_eggs_update() volta silenciosamente a só
+    checar via paru -Qua, reproduzindo o bug do falso negativo de
+    'sem atualização' quando na verdade tem."""
+    already_installed = subprocess.run(
+        ["pacman", "-Q", "pacman-contrib"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    ).returncode == 0
+    if already_installed:
+        return
+
+    dialog.append_log("pacman-contrib não encontrado — instalando (necessário pra checar atualizações do penguins-eggs)...")
+    result = subprocess.run(
+        ["pacman", "-Sy", "--noconfirm", "--needed", "pacman-contrib"],
+        capture_output=True, text=True,
+    )
+    if result.returncode == 0:
+        dialog.append_log("pacman-contrib instalado.")
+    else:
+        dialog.append_log(f"Não foi possível instalar pacman-contrib (checagem de update via checkupdates ficará indisponível): {result.stderr.strip()}")
+
+
 def install_eggs(dialog, parent=None) -> None:
     """Instala o penguins-eggs e o módulo Calamares, se necessário."""
     require_root()
@@ -953,6 +1010,7 @@ def install_eggs(dialog, parent=None) -> None:
     dialog.append_log("=== INSTALL PENGUIN'S EGGS ===")
 
     _clear_stale_pacman_lock(dialog)
+    _ensure_pacman_contrib(dialog)
 
     eggs_installed = subprocess.run(
         ["pacman", "-Q", "penguins-eggs"],

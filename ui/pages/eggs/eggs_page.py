@@ -893,6 +893,13 @@ class EggsPage(QWidget):
         self._poll_timer.setInterval(300)
         self._poll_timer.timeout.connect(self._poll_process)
 
+        # Guarda a versão nova encontrada pela última checagem de update
+        # bem-sucedida. Inicializado aqui (não só quando a checagem termina)
+        # pra nunca faltar — sem isso, clicar em Instalar/Atualizar ANTES da
+        # checagem rodar (ou se ela falhar) derrubava a tela com
+        # AttributeError.
+        self._last_update_version: str | None = None
+
         # Auto-refresh das stats do topo (Última ISO, Ventoy, Instalado) —
         # só roda enquanto a tela está de fato visível (liga no showEvent,
         # desliga no hideEvent), pra não ficar varrendo o Ventoy e chamando
