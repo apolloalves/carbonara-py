@@ -447,7 +447,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "eggs.install_desc_not_installed": "Instala o penguins-eggs e o módulo Calamares, se necessário.",
         "eggs.install_action_install": "Instalar",
         "eggs.install_title_installed": "Atualizar Penguin's Eggs",
-        "eggs.install_checked_suffix": ' — <span style="color:#60a5fa;">verificado às {time}</span>',
+        "eggs.install_checked_suffix": '<br><span style="color:#60a5fa;">verificado às {time}</span>',
         "eggs.install_version_unknown": "versão instalada",
         "eggs.install_desc_update_available": "Atual: {current} — nova versão v{update} disponível no AUR.{suffix}",
         "eggs.install_action_update": "Atualizar",
@@ -861,7 +861,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "eggs.install_desc_not_installed": "Installs penguins-eggs and the Calamares module, if needed.",
         "eggs.install_action_install": "Install",
         "eggs.install_title_installed": "Update Penguin's Eggs",
-        "eggs.install_checked_suffix": ' — <span style="color:#60a5fa;">checked at {time}</span>',
+        "eggs.install_checked_suffix": '<br><span style="color:#60a5fa;">checked at {time}</span>',
         "eggs.install_version_unknown": "installed version",
         "eggs.install_desc_update_available": "Current: {current} — new version v{update} available on the AUR.{suffix}",
         "eggs.install_action_update": "Update",
@@ -1308,7 +1308,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "eggs.install_desc_not_installed": "Instala penguins-eggs y el módulo Calamares, si es necesario.",
         "eggs.install_action_install": "Instalar",
         "eggs.install_title_installed": "Actualizar Penguin's Eggs",
-        "eggs.install_checked_suffix": ' — <span style="color:#60a5fa;">verificado a las {time}</span>',
+        "eggs.install_checked_suffix": '<br><span style="color:#60a5fa;">verificado a las {time}</span>',
         "eggs.install_version_unknown": "versión instalada",
         "eggs.install_desc_update_available": (
             "Actual: {current} — nueva versión v{update} disponible en el AUR.{suffix}"

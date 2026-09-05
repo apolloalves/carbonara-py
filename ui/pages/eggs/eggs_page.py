@@ -484,7 +484,7 @@ class _VentoyCard(QFrame):
         self.icon_lbl.setStyleSheet(_badge_style("#9bf0bd", radius=14))
 
         text_col = QVBoxLayout()
-        text_col.setSpacing(2)
+        text_col.setSpacing(5)
 
         title_lbl = QLabel("VENTOY")
         title_lbl.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
@@ -545,7 +545,7 @@ class _VentoyCard(QFrame):
         self.iso_icon_lbl.setPixmap(qta.icon("mdi6.disc", color="#9bf0bd").pixmap(20, 20))
 
         iso_text_col = QVBoxLayout()
-        iso_text_col.setSpacing(5)
+        iso_text_col.setSpacing(6)
 
         self.iso_name_lbl = QLabel(tr("eggs.no_iso_yet"))
         self.iso_name_lbl.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
@@ -554,6 +554,7 @@ class _VentoyCard(QFrame):
         self.iso_meta_lbl = QLabel("")
         self.iso_meta_lbl.setFont(QFont("DejaVu Sans Mono", 8))
         self.iso_meta_lbl.setStyleSheet("color: #5eea95; background: transparent; border: none;")
+        self.iso_meta_lbl.setVisible(False)
 
         iso_text_col.addWidget(self.iso_name_lbl)
         iso_text_col.addWidget(self.iso_meta_lbl)
@@ -569,12 +570,18 @@ class _VentoyCard(QFrame):
         if not name:
             self.iso_name_lbl.setText(tr("eggs.no_iso_this_disk"))
             self.iso_meta_lbl.setText("")
+            # Some de vez (não só texto vazio) — um QLabel vazio ainda
+            # reserva a altura da linha dele no layout, o que empurrava o
+            # ícone pra baixo do centro da única linha visível.
+            self.iso_meta_lbl.setVisible(False)
             return
         self.iso_name_lbl.setText(name)
         if date_str and size_gb is not None:
             self.iso_meta_lbl.setText(f"{date_str}  •  {size_gb:.2f} GB")
+            self.iso_meta_lbl.setVisible(True)
         else:
             self.iso_meta_lbl.setText("")
+            self.iso_meta_lbl.setVisible(False)
 
     def set_stats(
         self,
@@ -780,7 +787,7 @@ class _EggsOptionButton(QFrame):
         )
 
         text = QVBoxLayout()
-        text.setSpacing(2 if compact else 1)
+        text.setSpacing(4 if compact else 5)
         text.setContentsMargins(0, 0, 0, 0)
         text.setAlignment(Qt.AlignVCenter)
 
@@ -806,7 +813,7 @@ class _EggsOptionButton(QFrame):
             )
 
 
-        self.desc_lbl = QLabel(desc)
+        self.desc_lbl = QLabel(self._wrap_desc_html(desc))
         self.desc_lbl.setFont(QFont("DejaVu Sans Mono", 9 if compact else 10))
         self.desc_lbl.setWordWrap(True)
         self.desc_lbl.setStyleSheet("color: #6b7a8d; background: transparent; border: none;")
@@ -869,8 +876,17 @@ class _EggsOptionButton(QFrame):
     def set_title(self, title: str) -> None:
         self.title_lbl.setText(title)
 
+    @staticmethod
+    def _wrap_desc_html(desc: str) -> str:
+        """Garante respiro entre linhas mesmo quando desc tem HTML embutido
+        (ex: o <span> colorido de "checked at ..."). QLabel vira rich text
+        assim que detecta uma tag — a partir daí o `line-height` do
+        setStyleSheet() (CSS do widget) é ignorado pelo motor de rich text
+        interno; só funciona posto DENTRO do próprio HTML."""
+        return f'<div style="line-height:22px;">{desc}</div>'
+
     def set_desc(self, desc: str) -> None:
-        self.desc_lbl.setText(desc)
+        self.desc_lbl.setText(self._wrap_desc_html(desc))
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -1134,7 +1150,6 @@ class EggsPage(QWidget):
             desc=install_desc,
             color="#ff9966",
             parent=self,
-            action_label=install_action,
             compact=self._compact_cards,
         )
         self.btn_install.clicked.connect(self._on_install)
