@@ -346,10 +346,10 @@ class TopHeader(QFrame):
         menu_row.addStretch(1)
 
         if back_button:
-            self.btn_back = QPushButton(" Início")
+            self.btn_back = QPushButton(f" {tr('menu.inicio_button')}")
             self.btn_back.setIcon(qta.icon("mdi6.home-outline", color="#ffffff"))
             self.btn_back.setIconSize(QSize(18, 18))
-            self.btn_back.setFont(QFont(FONT_FAMILY, 10))
+            self.btn_back.setFont(QFont(FONT_FAMILY, 12))
             self.btn_back.setCursor(Qt.PointingHandCursor)
             self.btn_back.setFixedHeight(40)
             self.btn_back.setStyleSheet("""

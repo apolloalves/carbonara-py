@@ -1729,8 +1729,8 @@ class SnapshotsPage(QWidget):
                 return
 
         verify_label_op = ", ".join(f"{e.kind.upper()} {e.path.name}" for e in selected)
-        if not OperationManager.start("verify", f"Verificando {verify_label_op}"):
-            QMessageBox.warning(self, "Carbonara", "Another operation is already running.")
+        if not OperationManager.start("verify", tr("snapshots.verifying_op_label").format(label=verify_label_op)):
+            QMessageBox.warning(self, "Carbonara", tr("snapshots.op_already_running_generic"))
             return
 
         self.set_busy(True)

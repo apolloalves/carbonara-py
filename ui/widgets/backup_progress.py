@@ -8,6 +8,8 @@ from PySide6.QtWidgets import (
     QLabel, QProgressBar, QPlainTextEdit, QPushButton, QFrame,
 )
 
+from core.i18n import tr
+
 
 class BackupProgressDialog(QDialog):
     def __init__(self, title: str = "Carbonara Backup", preparing_text: str | None = None, icon_glyph: str = "mdi6.harddisk", parent=None):
@@ -435,7 +437,7 @@ class BackupProgressDialog(QDialog):
             self._cancel_countdown = 0
             self.btn_cancel.setText("Cancelar")
             # Contagem zerou sem segundo clique → continua backup
-            self.set_status("Cancelamento ignorado. Backup continua...")
+            self.set_status(tr("backup.cancel_ignored"))
         else:
             self.btn_cancel.setText(f"Cancelar ({self._cancel_countdown}s) — clique p/ confirmar")
 
@@ -449,7 +451,7 @@ class BackupProgressDialog(QDialog):
         self._is_cancelling = True
         self.btn_cancel.setEnabled(True)
         self.btn_cancel.setText("Cancelando...")
-        self.set_status("Interrompendo backup...")
+        self.set_status(tr("backup.interrupting"))
         self.set_current_file("—")
 
         # Aplica a cor "viva" (mesma do :hover) direto, sem depender do
@@ -528,7 +530,7 @@ class BackupProgressDialog(QDialog):
         em 'Cancelando...' pra sempre."""
         if not hasattr(self, "_cleanup_thread") or not self._cleanup_thread.isRunning():
             return
-        self.append_log("— Limpeza demorou mais que o esperado, encerrando mesmo assim. —")
+        self.append_log(tr("backup.cleanup_timeout_footer"))
         self._on_cleanup_done()
 
     def _cancel_anim_tick(self) -> None:
@@ -552,8 +554,8 @@ class BackupProgressDialog(QDialog):
         if hasattr(self, "_cancel_safety_timer"):
             self._cancel_safety_timer.stop()
 
-        self.append_log("— Backup cancelado. Snapshot incompleto removido. —")
-        self.set_status("Cancelado pelo usuário.")
+        self.append_log(tr("backup.cancelled_footer"))
+        self.set_status(tr("backup.cancelled_status"))
         self.lbl_status.setStyleSheet("color: #ffb86b; font-weight: bold;")
         self.set_current_file("—")
 
@@ -621,7 +623,7 @@ class BackupProgressDialog(QDialog):
 
     def _on_header_close(self) -> None:
         if any(w.isRunning() for w in self._workers):
-            self.set_status("Backup em execução. Use Cancelar para interromper.")
+            self.set_status(tr("backup.running_status"))
             return
         self.accept()
 
@@ -689,9 +691,9 @@ class BackupProgressDialog(QDialog):
                 color = "#ffb86b"
             elif text.startswith("$"):
                 color = "#8fd4ff"
-            elif text.startswith("Copiando:"):
+            elif text.startswith(f'{tr("backup.copying_prefix")}:'):
                 color = "#c8d4e0"       # branco suave — legível mas não dominante
-            elif text.startswith("Tempo decorrido:"):
+            elif text.startswith(tr("backup.elapsed_time").split(":")[0] + ":"):
                 color = "#6b7a8d"
             elif not text.strip():
                 color = "#000000"
@@ -741,12 +743,12 @@ class BackupProgressDialog(QDialog):
         self.append_log("")
         if self._had_failure:
             self.lbl_status.setStyleSheet("color: #ff8888; font-weight: bold;")
-            self.append_log(f"ERRO: {status}")
-            self.append_log(f"Tempo decorrido: {elapsed}")
+            self.append_log(tr("backup.log_error_prefix").format(msg=status))
+            self.append_log(tr("backup.elapsed_time").format(elapsed=elapsed))
         else:
             self.lbl_status.setStyleSheet("color: #9bf0bd; font-weight: bold;")
             self.append_log(f"✓ {status}")
-            self.append_log(f"Tempo decorrido: {elapsed}")
+            self.append_log(tr("backup.elapsed_time").format(elapsed=elapsed))
 
         # Garante que as últimas linhas apareçam na hora, sem esperar o
         # próximo tick do timer de 300ms (a operação já terminou).
@@ -755,7 +757,7 @@ class BackupProgressDialog(QDialog):
     def closeEvent(self, event) -> None:
         if any(w.isRunning() for w in self._workers):
             event.ignore()
-            self.set_status("Backup em execução. Use Cancelar para interromper.")
+            self.set_status(tr("backup.running_status"))
             return
         super().closeEvent(event)
 
@@ -766,7 +768,7 @@ class BackupProgressDialog(QDialog):
         # diálogo sem avisar nada, deixando o worker órfão. Replica aqui a
         # mesma trava do closeEvent.
         if any(w.isRunning() for w in self._workers):
-            self.set_status("Backup em execução. Use Cancelar para interromper.")
+            self.set_status(tr("backup.running_status"))
             return
         super().reject()
 
@@ -1023,7 +1025,7 @@ class PairCheckProgressDialog(QDialog):
 
     def __init__(self, sibling_label: str = "", parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Verificando snapshot irmão")
+        self.setWindowTitle(tr("backup.pair_check_title"))
         self.setModal(True)
         self.setFixedSize(420, 160)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
@@ -1056,7 +1058,7 @@ class PairCheckProgressDialog(QDialog):
             "QLabel { background: rgba(74,222,128,40); border-radius: 7px; }"
         )
 
-        lbl = QLabel("Verificando Snapshot Irmão")
+        lbl = QLabel(tr("backup.pair_check_header"))
         lbl.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
         lbl.setStyleSheet("color: #ecf4ff;")
 
@@ -1071,7 +1073,7 @@ class PairCheckProgressDialog(QDialog):
         b_layout.setContentsMargins(24, 16, 24, 20)
         b_layout.setSpacing(10)
 
-        self.lbl_status = QLabel("Verificando alterações pendentes")
+        self.lbl_status = QLabel(tr("backup.pair_check_status"))
         self.lbl_status.setFont(QFont("DejaVu Sans Mono", 10))
         self.lbl_status.setStyleSheet("color: #c8d4e0;")
         self.lbl_status.setAlignment(Qt.AlignCenter)
