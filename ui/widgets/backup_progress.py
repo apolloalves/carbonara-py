@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import qtawesome as qta
+from pathlib import Path
+
 from PySide6.QtCore import Qt, QTimer, QSize
 from PySide6.QtGui import QFont, QMouseEvent
 from PySide6.QtWidgets import (
@@ -9,6 +11,35 @@ from PySide6.QtWidgets import (
 )
 
 from core.i18n import tr
+
+
+_SLOT_LOCK_FILES: list = []  # mantém os file handles vivos (flock morre se o fd fecha)
+
+
+def _next_dialog_offset() -> tuple[int, int]:
+    """Coordena o deslocamento entre janelas de progresso de PROCESSOS
+    diferentes — cada uma roda no seu próprio processo root (pkexec),
+    sem saber uma da outra. Sem isso, duas janelas abertas em sequência
+    rápida (ex: sincronizar ROOT+HOME) sempre centralizam no mesmo
+    pixel exato, parecendo que só uma abriu.
+
+    Simples: primeira janela desloca pra direita, segunda desloca pra
+    esquerda (só no eixo X). Usa 2 slots (arquivos de lock não-bloqueante)
+    pra decidir quem é a primeira/segunda pela ordem real de abertura —
+    cada slot libera sozinho quando o processo termina."""
+    import fcntl
+    step = 90
+    offsets = {0: step, 1: -step}
+    for slot in (0, 1):
+        lock_path = Path(f"/tmp/carbonara-dialog-slot{slot}.lock")
+        try:
+            f = open(lock_path, "w")
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            _SLOT_LOCK_FILES.append(f)  # segura o fd pro processo inteiro
+            return offsets[slot], 0
+        except (OSError, IOError):
+            continue
+    return 0, 0
 
 
 class BackupProgressDialog(QDialog):
@@ -68,15 +99,31 @@ class BackupProgressDialog(QDialog):
         self.log_view.setPalette(palette)
 
     def showEvent(self, event):
-        """Centraliza na tela primária ao exibir — evita aparecer no monitor errado."""
+        """Centraliza na tela primária ao exibir — evita aparecer no monitor errado.
+        Desloca um pouco a cada nova janela (ver _next_dialog_offset) — sem
+        isso, duas sincronizações em sequência (ex: ROOT+HOME) abrem
+        exatamente empilhadas, parecendo que só uma abriu."""
         super().showEvent(event)
+        if getattr(self, "_positioned_once", False):
+            return
+        self._positioned_once = True
+        # O Mutter (e outros WMs) re-centralizam janelas modais sozinhos
+        # assim que elas são mapeadas na tela, DEPOIS do primeiro
+        # showEvent — então um move() síncrono aqui é sobrescrito pelo WM
+        # e o deslocamento nunca aparece. Adiar com singleShot(0,...)
+        # deixa o WM terminar o próprio posicionamento automático primeiro,
+        # e o nosso move() roda por último, vencendo a corrida.
+        QTimer.singleShot(0, self._apply_position_offset)
+
+    def _apply_position_offset(self) -> None:
         from PySide6.QtGui import QGuiApplication
         screen = QGuiApplication.primaryScreen()
         if screen:
             geo = screen.availableGeometry()
+            off_x, off_y = _next_dialog_offset()
             self.move(
-                geo.x() + (geo.width() - self.width()) // 2,
-                geo.y() + (geo.height() - self.height()) // 2,
+                geo.x() + (geo.width() - self.width()) // 2 + off_x,
+                geo.y() + (geo.height() - self.height()) // 2 + off_y,
             )
 
     # ------------------------------------------------------------------ UI --

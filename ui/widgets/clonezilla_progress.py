@@ -9,6 +9,8 @@ from PySide6.QtWidgets import (
     QTreeWidget, QTreeWidgetItem, QHeaderView,
 )
 
+from core.i18n import tr
+
 
 class ClonezillaProgressDialog(QDialog):
     """Diálogo de progresso dedicado à compressão de backups Clonezilla —
@@ -132,7 +134,7 @@ class ClonezillaProgressDialog(QDialog):
         self._btn_header_minimize = QPushButton("–")
         self._btn_header_minimize.setObjectName("HeaderMinimize")
         self._btn_header_minimize.setFixedSize(32, 32)
-        self._btn_header_minimize.setToolTip("Minimizar")
+        self._btn_header_minimize.setToolTip(tr("common.tooltip_minimize"))
         self._btn_header_minimize.clicked.connect(self.showMinimized)
         header_layout.addWidget(self._btn_header_minimize)
         header_layout.addSpacing(4)
@@ -142,7 +144,7 @@ class ClonezillaProgressDialog(QDialog):
         self._btn_header_maximize.setIconSize(QSize(15, 15))
         self._btn_header_maximize.setObjectName("HeaderMaximize")
         self._btn_header_maximize.setFixedSize(32, 32)
-        self._btn_header_maximize.setToolTip("Maximizar")
+        self._btn_header_maximize.setToolTip(tr("common.tooltip_maximize"))
         self._btn_header_maximize.clicked.connect(self._toggle_maximize)
         header_layout.addWidget(self._btn_header_maximize)
         header_layout.addSpacing(4)
@@ -189,7 +191,7 @@ class ClonezillaProgressDialog(QDialog):
         self.info_icon.setObjectName("InfoIcon")
         status_layout.addWidget(self.info_icon)
 
-        self.lbl_status = QLabel("Aguardando início...")
+        self.lbl_status = QLabel(tr("common.waiting_start"))
         self.lbl_status.setObjectName("ProgressStatus")
         status_layout.addWidget(self.lbl_status)
         status_layout.addStretch(1)
@@ -204,7 +206,7 @@ class ClonezillaProgressDialog(QDialog):
 
         elapsed_col = QVBoxLayout()
         elapsed_col.setSpacing(1)
-        elapsed_caption = QLabel("Tempo decorrido")
+        elapsed_caption = QLabel(tr("common.elapsed_time_label"))
         elapsed_caption.setObjectName("TimeCaption")
         elapsed_value_row = QHBoxLayout()
         elapsed_value_row.setSpacing(6)
@@ -226,7 +228,7 @@ class ClonezillaProgressDialog(QDialog):
 
         eta_col = QVBoxLayout()
         eta_col.setSpacing(1)
-        eta_caption = QLabel("Tempo estimado restante")
+        eta_caption = QLabel(tr("common.remaining_time_label"))
         eta_caption.setObjectName("TimeCaption")
         eta_value_row = QHBoxLayout()
         eta_value_row.setSpacing(6)
@@ -248,7 +250,7 @@ class ClonezillaProgressDialog(QDialog):
 
         # ── Progresso geral ──────────────────────────────────────────────
         overall_row = QHBoxLayout()
-        lbl_overall = QLabel("Progresso geral")
+        lbl_overall = QLabel(tr("common.overall_progress_label"))
         lbl_overall.setObjectName("SectionLabel")
         self.lbl_pct_big = QLabel("0%")
         self.lbl_pct_big.setObjectName("PctBig")
@@ -300,7 +302,7 @@ class ClonezillaProgressDialog(QDialog):
         cb_layout = QVBoxLayout(current_box)
         cb_layout.setContentsMargins(16, 12, 16, 12)
         cb_layout.setSpacing(6)
-        lbl_current_heading = QLabel("Operação atual")
+        lbl_current_heading = QLabel(tr("common.current_operation_label"))
         lbl_current_heading.setObjectName("SectionLabel")
         cb_layout.addWidget(lbl_current_heading)
         self.lbl_current = _ElideLabel("Arquivo atual: —")
@@ -314,7 +316,7 @@ class ClonezillaProgressDialog(QDialog):
         tb_layout = QVBoxLayout(tree_box)
         tb_layout.setContentsMargins(16, 12, 16, 8)
         tb_layout.setSpacing(6)
-        lbl_tree_heading = QLabel("Transferindo:")
+        lbl_tree_heading = QLabel(tr("common.transferring_label"))
         lbl_tree_heading.setObjectName("SectionLabel")
         tb_layout.addWidget(lbl_tree_heading)
 
@@ -481,7 +483,7 @@ class ClonezillaProgressDialog(QDialog):
             self._do_cancel()
             return
         self._cancel_countdown = 5
-        self.btn_cancel.setText(f"Cancelar ({self._cancel_countdown}s)")
+        self.btn_cancel.setText(tr("common.cancel_button_countdown").format(s=self._cancel_countdown))
         self._cancel_timer.start()
 
     def _countdown_tick(self) -> None:
@@ -489,16 +491,16 @@ class ClonezillaProgressDialog(QDialog):
         if self._cancel_countdown <= 0:
             self._cancel_timer.stop()
             self._cancel_countdown = 0
-            self.btn_cancel.setText("Cancelar")
-            self.set_status("Cancelamento ignorado. Operação continua...")
+            self.btn_cancel.setText(tr("common.cancel_button"))
+            self.set_status(tr("common.cancel_ignored_op"))
         else:
-            self.btn_cancel.setText(f"Cancelar ({self._cancel_countdown}s) — clique p/ confirmar")
+            self.btn_cancel.setText(tr("common.cancel_button_confirm").format(s=self._cancel_countdown))
 
     def _do_cancel(self) -> None:
         self._is_cancelling = True
         self.btn_cancel.setEnabled(True)
-        self.btn_cancel.setText("Cancelando...")
-        self.set_status("Interrompendo compressão...")
+        self.btn_cancel.setText(tr("common.cancelling"))
+        self.set_status(tr("clonezilla.interrupting_compression"))
         self.set_current_file("—")
         self.btn_cancel.setStyleSheet("""
             QPushButton {
@@ -526,8 +528,8 @@ class ClonezillaProgressDialog(QDialog):
         self._cancel_safety_timer.start()
 
     def _on_cancel_done(self) -> None:
-        self.append_log("— Compressão cancelada. —")
-        self.set_status("Cancelado.")
+        self.append_log(tr("clonezilla.cancelled_footer"))
+        self.set_status(tr("common.cancelled_short"))
         self.set_running(False)
         self.btn_cancel.hide()
         self.btn_close.setEnabled(True)
@@ -555,11 +557,11 @@ class ClonezillaProgressDialog(QDialog):
         if self.isMaximized():
             self.showNormal()
             self._btn_header_maximize.setIcon(qta.icon("mdi6.window-maximize", color="#9aa6b2"))
-            self._btn_header_maximize.setToolTip("Maximizar")
+            self._btn_header_maximize.setToolTip(tr("common.tooltip_maximize"))
         else:
             self.showMaximized()
             self._btn_header_maximize.setIcon(qta.icon("mdi6.window-restore", color="#9aa6b2"))
-            self._btn_header_maximize.setToolTip("Restaurar")
+            self._btn_header_maximize.setToolTip(tr("common.tooltip_restore"))
 
     def mouseDoubleClickEvent(self, event) -> None:
         if self.header.underMouse():

@@ -8,12 +8,14 @@ from PySide6.QtWidgets import (
     QLabel, QProgressBar, QPlainTextEdit, QPushButton, QFrame, QWidget,
 )
 
+from core.i18n import tr
+
 
 class EggsProgressDialog(QDialog):
-    def __init__(self, title: str = "Penguin's Eggs", preparing_text: str = "Iniciando...", icon_glyph: str = "mdi6.egg-outline", parent=None):
+    def __init__(self, title: str = "Penguin's Eggs", preparing_text: str | None = None, icon_glyph: str = "mdi6.egg-outline", parent=None):
         super().__init__(parent)
         self.setWindowTitle(title)
-        self._preparing_text = preparing_text
+        self._preparing_text = preparing_text if preparing_text is not None else tr("common.starting")
         self._icon_glyph = icon_glyph
         self.setModal(True)
         self.setMinimumSize(1000, 700)
@@ -139,7 +141,7 @@ class EggsProgressDialog(QDialog):
         self._btn_header_maximize.setIconSize(QSize(15, 15))
         self._btn_header_maximize.setObjectName("HeaderMaximize")
         self._btn_header_maximize.setFixedSize(32, 32)
-        self._btn_header_maximize.setToolTip("Maximizar")
+        self._btn_header_maximize.setToolTip(tr("common.tooltip_maximize"))
         self._btn_header_maximize.clicked.connect(self._toggle_maximize)
         header_layout.addWidget(self._btn_header_maximize)
         header_layout.addSpacing(4)
@@ -180,7 +182,7 @@ class EggsProgressDialog(QDialog):
         body_layout.addSpacing(10)
 
         # Linha de status (ex: "Copiando ROOT... 62%")
-        self.lbl_status = QLabel("Aguardando início...")
+        self.lbl_status = QLabel(tr("common.waiting_start"))
         self.lbl_status.setAlignment(Qt.AlignCenter)
         self.lbl_status.setObjectName("ProgressStatus")
         body_layout.addWidget(self.lbl_status)
@@ -428,7 +430,7 @@ class EggsProgressDialog(QDialog):
             return
 
         self._cancel_countdown = 5
-        self.btn_cancel.setText(f"Cancelar ({self._cancel_countdown}s)")
+        self.btn_cancel.setText(tr("common.cancel_button_countdown").format(s=self._cancel_countdown))
         self._cancel_timer.start()
 
     def _countdown_tick(self) -> None:
@@ -436,17 +438,17 @@ class EggsProgressDialog(QDialog):
         if self._cancel_countdown <= 0:
             self._cancel_timer.stop()
             self._cancel_countdown = 0
-            self.btn_cancel.setText("Cancelar")
+            self.btn_cancel.setText(tr("common.cancel_button"))
             # Contagem zerou sem segundo clique → continua backup
-            self.set_status("Cancelamento ignorado. Backup continua...")
+            self.set_status(tr("backup.cancel_ignored"))
         else:
-            self.btn_cancel.setText(f"Cancelar ({self._cancel_countdown}s) — clique p/ confirmar")
+            self.btn_cancel.setText(tr("common.cancel_button_confirm").format(s=self._cancel_countdown))
 
     def _do_cancel(self) -> None:
         """Mata o processo eggs produce via PID e limpa /home/eggs com segurança."""
         self.btn_cancel.setEnabled(False)
-        self.btn_cancel.setText("Cancelando...")
-        self.set_status("Cancelando operação...")
+        self.btn_cancel.setText(tr("common.cancelling"))
+        self.set_status(tr("eggs.cancelling_op"))
         self.set_current_file("—")
         self._had_failure = True
 
@@ -474,10 +476,10 @@ class EggsProgressDialog(QDialog):
         self._cleanup_thread.start()
 
     def _on_eggs_cleanup_done(self) -> None:
-        self.lbl_status.setText("Operação cancelada pelo usuário.")
+        self.lbl_status.setText(tr("eggs.cancelled_by_user"))
         self.lbl_status.setStyleSheet("color: #ffb86b; font-weight: bold;")
         self.append_log("")
-        self.append_log("--- Operação cancelada. Diretório /home/eggs removido. ---")
+        self.append_log(tr("eggs.cancelled_footer"))
         self._timer_active = False
         self._elapsed_timer.stop()
         self.btn_cancel.setEnabled(False)
@@ -488,11 +490,11 @@ class EggsProgressDialog(QDialog):
     def _cancel_anim_tick(self) -> None:
         self._cancel_dots = (self._cancel_dots + 1) % 4
         dots = "." * self._cancel_dots
-        self.btn_cancel.setText(f"Cancelando{dots}")
+        self.btn_cancel.setText(f"{tr('common.cancelling').rstrip('.')}{dots}")
 
     def _on_cleanup_done(self) -> None:
         self._cancel_anim.stop()
-        self.append_log("— Backup cancelado. Snapshot incompleto removido. —")
+        self.append_log(tr("backup.cancelled_footer"))
         # Fecha com código 2 → snapshots_page identifica cancelamento intencional
         self.done(2)
 
@@ -534,7 +536,7 @@ class EggsProgressDialog(QDialog):
 
     def _on_header_close(self) -> None:
         if any(w.isRunning() for w in self._workers):
-            self.set_status("Backup em execução. Use Cancelar para interromper.")
+            self.set_status(tr("backup.running_status"))
             return
         self.accept()
 
@@ -551,11 +553,11 @@ class EggsProgressDialog(QDialog):
         if self.isMaximized():
             self.showNormal()
             self._btn_header_maximize.setIcon(qta.icon("mdi6.window-maximize", color="#9aa6b2"))
-            self._btn_header_maximize.setToolTip("Maximizar")
+            self._btn_header_maximize.setToolTip(tr("common.tooltip_maximize"))
         else:
             self.showMaximized()
             self._btn_header_maximize.setIcon(qta.icon("mdi6.window-restore", color="#9aa6b2"))
-            self._btn_header_maximize.setToolTip("Restaurar")
+            self._btn_header_maximize.setToolTip(tr("common.tooltip_restore"))
 
     def mouseDoubleClickEvent(self, event) -> None:
         """Duplo clique no header também alterna maximizar, como em janelas normais."""
@@ -788,15 +790,15 @@ class EggsProgressDialog(QDialog):
             # Só exibe ERRO se não foi cancelamento intencional (status já foi setado no cancel)
             if "cancelada" not in status.lower():
                 self.lbl_status.setStyleSheet("color: #ff8888; font-weight: bold;")
-                self.append_log(f"ERRO: {status}")
-                self.append_log(f"Tempo decorrido: {elapsed}")
+                self.append_log(tr("backup.log_error_prefix").format(msg=status))
+                self.append_log(tr("backup.elapsed_time").format(elapsed=elapsed))
         else:
             if "nenhuma atualização disponível" in status.lower():
                 self.lbl_status.setStyleSheet("color: #ffb86b; font-weight: bold;")
             else:
                 self.lbl_status.setStyleSheet("color: #9bf0bd; font-weight: bold;")
             self.append_log(f"✓ {status}")
-            self.append_log(f"Tempo decorrido: {elapsed}")
+            self.append_log(tr("backup.elapsed_time").format(elapsed=elapsed))
 
         # Garante que as últimas linhas apareçam na hora, sem esperar o
         # próximo tick do timer de 300ms (a operação já terminou).
@@ -805,7 +807,7 @@ class EggsProgressDialog(QDialog):
     def closeEvent(self, event) -> None:
         if self._is_running or any(w.isRunning() for w in self._workers):
             event.ignore()
-            self.set_status("Backup em execução. Use Cancelar para interromper.")
+            self.set_status(tr("backup.running_status"))
             return
         super().closeEvent(event)
 
@@ -819,7 +821,7 @@ class EggsProgressDialog(QDialog):
         # escolha de disco alternativo ainda não existe worker nenhum, só
         # o QEventLoop local — sem isso o ESC escapava bem nessa janela.
         if self._is_running or any(w.isRunning() for w in self._workers):
-            self.set_status("Backup em execução. Use Cancelar para interromper.")
+            self.set_status(tr("backup.running_status"))
             return
         super().reject()
 
@@ -831,7 +833,7 @@ class _SuccessDialog(QDialog):
 
     def __init__(self, message: str, elapsed_text: str = "", parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Concluído")
+        self.setWindowTitle(tr("eggs.done_title"))
         self.setModal(True)
         self.setFixedSize(440, 220)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
@@ -857,7 +859,7 @@ class _SuccessDialog(QDialog):
             "QLabel { background: rgba(74,222,128,40); border-radius: 9px; }"
         )
 
-        lbl_title = QLabel("Concluído com sucesso")
+        lbl_title = QLabel(tr("eggs.done_success_label"))
         lbl_title.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
         lbl_title.setStyleSheet("color: #ffffff; background: transparent;")
 
