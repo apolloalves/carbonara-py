@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -17,10 +18,35 @@ _CLONEZILLA_MARKER_FILE = "clonezilla-img"
 # qualquer coisa útil) — não contam como "já comprimido".
 _MIN_VALID_ARCHIVE_BYTES = 4096
 
+_ENGLISH_MONTHS = [
+    "JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE",
+    "JULY", "AUGUST", "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER",
+]
+
 
 def require_root() -> None:
     if os.geteuid() != 0:
         raise PermissionError("Este módulo precisa ser executado como root.")
+
+
+def _month_folder_name(dt: datetime) -> str:
+    return _ENGLISH_MONTHS[dt.month - 1]
+
+
+def _migrate_stray_item(item: Path, year_dir: Path) -> Path:
+    """Move um item (pasta crua ou .tar.zst) que está solto direto em
+    <ano>/ pra dentro da subpasta de mês correspondente (criando-a se
+    preciso), baseado na data de modificação do item. Retorna o novo
+    caminho em caso de sucesso, ou o próprio `item` se já existir algo
+    com esse nome lá (não sobrescreve). Levanta OSError se não tiver
+    permissão — quem chama decide o que fazer nesse caso."""
+    month_dir = year_dir / _month_folder_name(datetime.fromtimestamp(item.stat().st_mtime))
+    month_dir.mkdir(parents=True, exist_ok=True)
+    target = month_dir / item.name
+    if target.exists():
+        return item
+    shutil.move(str(item), str(target))
+    return target
 
 
 @dataclass
@@ -58,10 +84,60 @@ def _dir_size_bytes(path: Path) -> int | None:
     return total
 
 
+def _scan_items(items: list[Path], container_dir: Path, entries: dict[str, ClonezillaEntry]) -> None:
+    """Processa uma lista de itens (pastas cruas e/ou .tar.zst) já
+    filtrados, agrupando pelo mesmo nome base dentro de `entries`.
+    `container_dir` é usado como chave/`month_dir` do registro — pode
+    ser tanto uma pasta de mês normal quanto, no caso de itens soltos,
+    a própria pasta do ano."""
+    for item in items:
+        if item.is_dir() and (item / _CLONEZILLA_MARKER_FILE).exists():
+            key = f"{container_dir}/{item.name}"
+            entry = entries.get(key) or ClonezillaEntry(
+                name=item.name, month_dir=container_dir,
+                raw_path=None, archive_path=None,
+                raw_size_bytes=None, archive_size_bytes=None,
+                modified_at=datetime.fromtimestamp(item.stat().st_mtime),
+            )
+            entry.raw_path = item
+            entry.raw_size_bytes = _dir_size_bytes(item)
+            entries[key] = entry
+
+        elif item.is_file() and item.name.endswith(".tar.zst"):
+            try:
+                size = item.stat().st_size
+            except OSError:
+                continue
+            if size < _MIN_VALID_ARCHIVE_BYTES:
+                # Sobra de uma compressão cancelada/falhada — ignora,
+                # pra pasta original continuar aparecendo em Pendentes.
+                continue
+
+            name = item.name[: -len(".tar.zst")]
+            key = f"{container_dir}/{name}"
+            entry = entries.get(key) or ClonezillaEntry(
+                name=name, month_dir=container_dir,
+                raw_path=None, archive_path=None,
+                raw_size_bytes=None, archive_size_bytes=None,
+                modified_at=datetime.fromtimestamp(item.stat().st_mtime),
+            )
+            entry.archive_path = item
+            entry.archive_size_bytes = size
+            entries[key] = entry
+
+
 def scan_clonezilla_backups(root: Path = CLONEZILLA_ROOT) -> list[ClonezillaEntry]:
     """Varre <root>/<ano>/<mês>/ procurando pastas cruas do Clonezilla
     (marcadas pela presença de 'clonezilla-img' dentro) e/ou arquivos
-    .tar.zst já comprimidos, agrupando pelo mesmo nome base."""
+    .tar.zst já comprimidos, agrupando pelo mesmo nome base.
+
+    Também reconhece pastas/arquivos que ficaram soltos direto em
+    <root>/<ano>/ (fora de qualquer subpasta de mês) — útil quando um
+    backup novo do Clonezilla ainda não foi organizado. Nesse caso o
+    item aparece normalmente na lista (com `month_dir` apontando pra
+    pasta do ano); a organização física pra dentro da pasta do mês
+    correto acontece de fato na hora de comprimir (`compress_backup`),
+    que já roda como root."""
     entries: dict[str, ClonezillaEntry] = {}
 
     if not root.is_dir():
@@ -70,44 +146,23 @@ def scan_clonezilla_backups(root: Path = CLONEZILLA_ROOT) -> list[ClonezillaEntr
     for year_dir in sorted(root.iterdir(), reverse=True):
         if not year_dir.is_dir():
             continue
+
+        stray_items: list[Path] = []
+        for item in year_dir.iterdir():
+            is_raw = item.is_dir() and (item / _CLONEZILLA_MARKER_FILE).exists()
+            is_archive = item.is_file() and item.name.endswith(".tar.zst")
+            if is_raw or is_archive:
+                stray_items.append(item)
+        _scan_items(stray_items, year_dir, entries)
+
         for month_dir in sorted(year_dir.iterdir(), reverse=True):
             if not month_dir.is_dir():
                 continue
-
-            for item in month_dir.iterdir():
-                if item.is_dir() and (item / _CLONEZILLA_MARKER_FILE).exists():
-                    key = f"{month_dir}/{item.name}"
-                    entry = entries.get(key) or ClonezillaEntry(
-                        name=item.name, month_dir=month_dir,
-                        raw_path=None, archive_path=None,
-                        raw_size_bytes=None, archive_size_bytes=None,
-                        modified_at=datetime.fromtimestamp(item.stat().st_mtime),
-                    )
-                    entry.raw_path = item
-                    entry.raw_size_bytes = _dir_size_bytes(item)
-                    entries[key] = entry
-
-                elif item.is_file() and item.name.endswith(".tar.zst"):
-                    try:
-                        size = item.stat().st_size
-                    except OSError:
-                        continue
-                    if size < _MIN_VALID_ARCHIVE_BYTES:
-                        # Sobra de uma compressão cancelada/falhada — ignora,
-                        # pra pasta original continuar aparecendo em Pendentes.
-                        continue
-
-                    name = item.name[: -len(".tar.zst")]
-                    key = f"{month_dir}/{name}"
-                    entry = entries.get(key) or ClonezillaEntry(
-                        name=name, month_dir=month_dir,
-                        raw_path=None, archive_path=None,
-                        raw_size_bytes=None, archive_size_bytes=None,
-                        modified_at=datetime.fromtimestamp(item.stat().st_mtime),
-                    )
-                    entry.archive_path = item
-                    entry.archive_size_bytes = size
-                    entries[key] = entry
+            if (month_dir / _CLONEZILLA_MARKER_FILE).exists():
+                # é uma pasta de backup crua solta (já tratada acima como
+                # item do ano), não uma subpasta de mês de verdade.
+                continue
+            _scan_items(list(month_dir.iterdir()), month_dir, entries)
 
     return sorted(entries.values(), key=lambda e: e.modified_at, reverse=True)
 
@@ -116,10 +171,13 @@ def compress_backup(dialog, name: str, month_dir: str) -> None:
     """Comprime <month_dir>/<name>/ em <month_dir>/<name>.tar.zst
     (tar + zstd, mesma ideia da função `compress()` do .bashrc), com
     progresso real via `pv`. Precisa rodar como root — chamado a partir
-    do carbonara-helper via pkexec, igual ao create_backup()."""
-    require_root()
+    do carbonara-helper via pkexec, igual ao create_backup().
 
-    from core.workers.clonezilla_worker import ClonezillaCompressWorker
+    Se `month_dir` apontar direto pra pasta do ano (caso de um backup
+    que ainda não foi organizado em nenhum mês), organiza automaticamente
+    a pasta crua pra dentro da subpasta de mês correspondente (criando-a
+    se preciso) antes de comprimir — já que aqui já temos root."""
+    require_root()
 
     month_path = Path(month_dir)
     raw_path = month_path / name
@@ -131,12 +189,27 @@ def compress_backup(dialog, name: str, month_dir: str) -> None:
         dialog.set_running(False)
         return
 
+    if month_path.parent == CLONEZILLA_ROOT:
+        # `month_path` é a pasta do ano, não de um mês — o backup ainda
+        # está solto. Organiza antes de seguir.
+        try:
+            moved = _migrate_stray_item(raw_path, month_path)
+            if moved != raw_path:
+                dialog.append_log(f"Organizando: {raw_path} -> {moved}")
+                raw_path = moved
+                month_path = raw_path.parent
+                archive_path = month_path / f"{name}.tar.zst"
+        except OSError as exc:
+            dialog.append_log(f"AVISO: não foi possível organizar a pasta do mês ({exc}); comprimindo no lugar mesmo.")
+
     dialog.set_running(True)
     dialog.progress.setRange(0, 100)
     dialog.progress.setValue(0)
     dialog.set_status(f"Preparando compressão de {name}...")
     dialog.set_current_file(str(raw_path))
     dialog.append_log(f"=== COMPRESS {name} ===")
+
+    from core.workers.clonezilla_worker import ClonezillaCompressWorker
 
     worker = ClonezillaCompressWorker(raw_path=raw_path, archive_path=archive_path, parent=dialog)
 
@@ -164,6 +237,8 @@ def compress_backup(dialog, name: str, month_dir: str) -> None:
         dialog.set_current_file("—")
         dialog.progress.setValue(100)
         dialog.set_running(False)
+        if hasattr(dialog, "set_completed"):
+            dialog.set_completed()
         if hasattr(dialog, "btn_close"):
             dialog.btn_close.setEnabled(True)
 
