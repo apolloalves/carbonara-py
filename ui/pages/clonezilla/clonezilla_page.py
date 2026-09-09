@@ -9,10 +9,11 @@ from datetime import datetime
 
 import qtawesome as qta
 from PySide6.QtCore import Qt, QTimer, Signal, QSize, QUrl
-from PySide6.QtGui import QFont, QFontMetrics, QPainter, QColor, QKeyEvent, QDesktopServices
+from PySide6.QtGui import QFont, QFontMetrics, QPainter, QColor, QKeyEvent, QDesktopServices, QCursor
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QFrame,
     QPushButton, QScrollArea, QDialog, QPlainTextEdit, QGraphicsDropShadowEffect,
+    QToolTip,
 )
 
 from core.operation_manager import OperationManager
@@ -602,10 +603,52 @@ class _SectionCard(QFrame):
             title.setStyleSheet(f"color: {accent_color};")
             labels.addWidget(title)
         elif right_text:
+            eyebrow_row = QHBoxLayout()
+            eyebrow_row.setContentsMargins(0, 0, 0, 0)
+            eyebrow_row.setSpacing(6)
+
             eyebrow_lbl = QLabel(eyebrow_text or tr("clonezilla.section_compressed_eyebrow"))
             eyebrow_lbl.setFont(QFont(FONT_FAMILY, 9, QFont.Bold))
             eyebrow_lbl.setStyleSheet("color: #c8d4e0; letter-spacing: 1px;")
-            labels.addWidget(eyebrow_lbl)
+            eyebrow_row.addWidget(eyebrow_lbl)
+
+            if hint_text:
+                info_btn = QPushButton("i")
+                info_btn.setFixedSize(15, 15)
+                info_btn.setCursor(Qt.PointingHandCursor)
+                info_btn.setStyleSheet(f"""
+                    QPushButton {{
+                        border-radius: 7px;
+                        border: 1px solid {MUTED};
+                        color: {MUTED};
+                        background: transparent;
+                        font-family: {FONT_FAMILY};
+                        font-size: 9px;
+                        font-weight: bold;
+                        padding: 0px;
+                    }}
+                    QPushButton:hover {{
+                        color: {TEXT};
+                        border: 1px solid {TEXT};
+                    }}
+                    QToolTip {{
+                        background: #14151c;
+                        color: {TEXT};
+                        border: 1px solid {MUTED};
+                        padding: 6px 11px;
+                        border-radius: 8px;
+                        font-size: 12px;
+                    }}
+                """)
+                info_btn.clicked.connect(
+                    lambda _checked=False, w=info_btn, t=hint_text: QToolTip.showText(
+                        QCursor.pos(), t, w,
+                    )
+                )
+                eyebrow_row.addWidget(info_btn)
+
+            eyebrow_row.addStretch(1)
+            labels.addLayout(eyebrow_row)
 
         if not right_text:
             path = QLabel(path_text)
@@ -650,16 +693,7 @@ class _SectionCard(QFrame):
 
         root.addLayout(head)
         root.addWidget(divider)
-        if hint_text:
-            hint = QLabel(hint_text)
-            hint.setFont(QFont(FONT_FAMILY, 9))
-            hint.setStyleSheet(f"color: {MUTED};")
-            hint.setWordWrap(True)
-            root.addSpacing(8)
-            root.addWidget(hint)
-            root.addSpacing(14)
-        else:
-            root.addSpacing(25)
+        root.addSpacing(25)
         root.addLayout(self.body)
 
     def add_card(self, widget) -> None:
