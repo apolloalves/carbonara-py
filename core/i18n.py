@@ -286,6 +286,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "clonezilla.upload_op_label": "Enviando {name} para o Drive",
         "clonezilla.list_error": "Erro ao listar backups: {exc}",
 
+        "clonezilla.compress_completed_title": "Compressão concluída às {time}",
+        "clonezilla.upload_completed_title": "Envio concluído às {time}",
+
         "clonezilla.upload_progress_title": "Enviando {name}",
         "clonezilla.upload_progress_body_title": "Envio em andamento",
         "clonezilla.upload_progress_subtitle": "Enviando {filename} para o Google Drive.",
@@ -772,6 +775,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "clonezilla.delete_op_label": "Deleting {name}",
         "clonezilla.upload_op_label": "Uploading {name} to Drive",
         "clonezilla.list_error": "Error listing backups: {exc}",
+
+        "clonezilla.compress_completed_title": "Compression completed at {time}",
+        "clonezilla.upload_completed_title": "Upload completed at {time}",
 
         "clonezilla.upload_progress_title": "Uploading {name}",
         "clonezilla.upload_progress_body_title": "Upload in progress",
@@ -1268,6 +1274,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "clonezilla.delete_op_label": "Eliminando {name}",
         "clonezilla.upload_op_label": "Enviando {name} a Drive",
         "clonezilla.list_error": "Error al listar las copias de seguridad: {exc}",
+
+        "clonezilla.compress_completed_title": "Compresión completada a las {time}",
+        "clonezilla.upload_completed_title": "Envío completado a las {time}",
 
         "clonezilla.upload_progress_title": "Enviando {name}",
         "clonezilla.upload_progress_body_title": "Envío en curso",

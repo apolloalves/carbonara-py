@@ -626,13 +626,11 @@ class ClonezillaProgressDialog(QDialog):
     def set_status(self, text: str) -> None:
         self.lbl_status.setText(text)
 
-    def set_completed(self, label: str = "Compressão") -> None:
-        """Troca o título do corpo (ex: 'Compressão em andamento') por
-        '<label> concluída às HH:MM:SS' — chamado quando o worker termina
-        com sucesso."""
-        from datetime import datetime
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        self.lbl_title.setText(f"{label} concluída às {timestamp}")
+    def set_title(self, text: str) -> None:
+        """Troca o título do corpo (o 'body_title' passado no construtor,
+        ex: 'Compressão em andamento') por outro texto — quem chama já
+        traduz via tr() antes, esse widget não sabe de idioma."""
+        self.lbl_title.setText(text)
 
     def set_current_file(self, text: str) -> None:
         self.lbl_current.set_text(f"Arquivo atual: {text}")

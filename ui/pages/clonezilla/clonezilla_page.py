@@ -1299,6 +1299,12 @@ class ClonezillaPage(QWidget):
             dialog.set_current_file("—")
             dialog.progress.setValue(100)
             dialog.set_running(False)
+            if hasattr(dialog, "set_title"):
+                dialog.set_title(
+                    tr("clonezilla.upload_completed_title").format(
+                        time=datetime.now().strftime("%H:%M:%S")
+                    )
+                )
             OperationManager.finish()
             dialog.append_log(tr("clonezilla.upload_log_fetching_link"))
             link = _fetch_drive_link(remote_folder)

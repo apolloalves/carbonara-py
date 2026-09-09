@@ -237,8 +237,14 @@ def compress_backup(dialog, name: str, month_dir: str) -> None:
         dialog.set_current_file("—")
         dialog.progress.setValue(100)
         dialog.set_running(False)
-        if hasattr(dialog, "set_completed"):
-            dialog.set_completed()
+        if hasattr(dialog, "set_title"):
+            from datetime import datetime
+            from core.i18n import tr
+            dialog.set_title(
+                tr("clonezilla.compress_completed_title").format(
+                    time=datetime.now().strftime("%H:%M:%S")
+                )
+            )
         if hasattr(dialog, "btn_close"):
             dialog.btn_close.setEnabled(True)
 
