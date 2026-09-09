@@ -39,6 +39,7 @@ ACCENT_RED = "#f87171"
 ACCENT_AMBER_SOFT = "#c3a864"  # mescla de ACCENT_AMBER + MUTED (âmbar mais fraco)
 ACCENT_TEAL = "#5cc9a7"        # identidade da página (Opção A aprovada) — substitui âmbar/azul
 ACCENT_TEAL_SOFT = "#73b0a5"   # mescla de ACCENT_TEAL + MUTED (verde-água mais fraco)
+ACCENT_RED_SOFT = "#b97a7a"    # mescla de ACCENT_RED + MUTED (vermelho mais fraco — ação reversível/baixo risco)
 
 FONT_FAMILY = "DejaVu Sans Mono"
 
@@ -536,13 +537,50 @@ def _ask_confirm(
     return dlg._confirmed
 
 
+def _action_button(glyph: str, color: str, tooltip: str) -> QPushButton:
+    btn = QPushButton()
+    btn.setIcon(qta.icon(glyph, color=color))
+    btn.setIconSize(QSize(20, 20))
+    btn.setFixedSize(42, 42)
+    btn.setCursor(Qt.PointingHandCursor)
+    btn.setToolTip(tooltip)
+    btn.setStyleSheet(f"""
+        QPushButton {{
+            padding: 0px;
+            border-radius: 9px;
+            border: 1px solid rgba({_rgba(color, 100)});
+            background: rgba({_rgba(color, 22)});
+        }}
+        QPushButton:hover {{
+            background: rgba({_rgba(color, 45)});
+            border: 1px solid rgba({_rgba(color, 180)});
+        }}
+        QPushButton:disabled {{
+            background: rgba(255, 255, 255, 4);
+            border: 1px solid rgba({_rgba(color, 50)});
+        }}
+        QPushButton:focus {{
+            outline: none;
+        }}
+        QToolTip {{
+            background: #14151c;
+            color: {TEXT};
+            border: 1px solid rgba({_rgba(color, 140)});
+            padding: 4px 8px;
+            border-radius: 6px;
+        }}
+    """)
+    return btn
+
+
 class _SectionCard(QFrame):
     """Mesmo padrão visual das seções ROOT/HOME do Timeshift: título
     colorido + subtítulo (caminho) + divisor sutil na cor de destaque."""
 
     def __init__(
         self, title_text: str, path_text: str, accent_color: str,
-        right_text: str | None = None, parent=None,
+        right_text: str | None = None, eyebrow_text: str | None = None,
+        hint_text: str | None = None, parent=None,
     ):
         super().__init__(parent)
         self.setStyleSheet("QFrame { border: none; background: transparent; }")
@@ -564,7 +602,7 @@ class _SectionCard(QFrame):
             title.setStyleSheet(f"color: {accent_color};")
             labels.addWidget(title)
         elif right_text:
-            eyebrow_lbl = QLabel(tr("clonezilla.section_compressed_eyebrow"))
+            eyebrow_lbl = QLabel(eyebrow_text or tr("clonezilla.section_compressed_eyebrow"))
             eyebrow_lbl.setFont(QFont(FONT_FAMILY, 9, QFont.Bold))
             eyebrow_lbl.setStyleSheet("color: #c8d4e0; letter-spacing: 1px;")
             labels.addWidget(eyebrow_lbl)
@@ -612,7 +650,16 @@ class _SectionCard(QFrame):
 
         root.addLayout(head)
         root.addWidget(divider)
-        root.addSpacing(25)
+        if hint_text:
+            hint = QLabel(hint_text)
+            hint.setFont(QFont(FONT_FAMILY, 9))
+            hint.setStyleSheet(f"color: {MUTED};")
+            hint.setWordWrap(True)
+            root.addSpacing(8)
+            root.addWidget(hint)
+            root.addSpacing(14)
+        else:
+            root.addSpacing(25)
         root.addLayout(self.body)
 
     def add_card(self, widget) -> None:
@@ -650,41 +697,6 @@ class _EntryCard(QFrame):
         root = QHBoxLayout(self)
         root.setContentsMargins(18, 8, 18, 8)
         root.setSpacing(16)
-
-        def _action_button(glyph: str, color: str, tooltip: str) -> QPushButton:
-            btn = QPushButton()
-            btn.setIcon(qta.icon(glyph, color=color))
-            btn.setIconSize(QSize(20, 20))
-            btn.setFixedSize(42, 42)
-            btn.setCursor(Qt.PointingHandCursor)
-            btn.setToolTip(tooltip)
-            btn.setStyleSheet(f"""
-                QPushButton {{
-                    padding: 0px;
-                    border-radius: 9px;
-                    border: 1px solid rgba({_rgba(color, 100)});
-                    background: rgba({_rgba(color, 22)});
-                }}
-                QPushButton:hover {{
-                    background: rgba({_rgba(color, 45)});
-                    border: 1px solid rgba({_rgba(color, 180)});
-                }}
-                QPushButton:disabled {{
-                    background: rgba(255, 255, 255, 4);
-                    border: 1px solid rgba({_rgba(color, 50)});
-                }}
-                QPushButton:focus {{
-                    outline: none;
-                }}
-                QToolTip {{
-                    background: #14151c;
-                    color: {TEXT};
-                    border: 1px solid rgba({_rgba(color, 140)});
-                    padding: 4px 8px;
-                    border-radius: 6px;
-                }}
-            """)
-            return btn
 
         icon_lbl = QLabel()
         icon_lbl.setFixedSize(48, 48)
@@ -806,6 +818,83 @@ class _EntryCard(QFrame):
         self.upload_requested.emit(entry)
 
 
+class _RawFolderCard(QFrame):
+    """Card compacto pra pasta crua ainda no disco (mesmo já comprimida) —
+    mostra tamanho e permite explorar (Nautilus) ou excluir só a pasta,
+    mantendo o .tar.zst já gerado intacto."""
+
+    delete_requested = Signal(object, bool)  # ClonezillaEntry, pending
+    explore_requested = Signal(object)       # ClonezillaEntry
+
+    def __init__(self, entry: ClonezillaEntry, parent=None):
+        super().__init__(parent)
+        self.entry = entry
+        self.setObjectName("RawFolderCard")
+        self.setStyleSheet(f"""
+            QFrame#RawFolderCard {{
+                border: 1px solid rgba(255, 255, 255, 12);
+                border-radius: 14px;
+                background: rgba(255, 255, 255, 6);
+            }}
+            QFrame#RawFolderCard:hover {{
+                border: 1px solid rgba(255, 255, 255, 22);
+                background: rgba(255, 255, 255, 9);
+            }}
+            QFrame#RawFolderCard QLabel {{
+                background: transparent;
+                border: none;
+            }}
+        """)
+
+        root = QHBoxLayout(self)
+        root.setContentsMargins(18, 8, 18, 8)
+        root.setSpacing(16)
+
+        icon_lbl = QLabel()
+        icon_lbl.setFixedSize(48, 48)
+        icon_lbl.setAlignment(Qt.AlignCenter)
+        icon_lbl.setPixmap(qta.icon("mdi6.folder-outline", color=ACCENT_BLUE_LIGHT).pixmap(40, 40))
+        root.addWidget(icon_lbl)
+
+        text_col = QVBoxLayout()
+        text_col.setSpacing(4)
+
+        title = QLabel(entry.name)
+        title_font = QFont(FONT_FAMILY, -1, QFont.Bold)
+        title_font.setPointSizeF(11.5)
+        title.setFont(title_font)
+        title.setStyleSheet(f"color: {TEXT};")
+
+        meta = QLabel(
+            f"{_fmt_size(entry.raw_size_bytes)}   ·   "
+            f"{tr('clonezilla.raw_already_compressed')}   ·   "
+            f"{_disk_for(entry.month_dir)}"
+        )
+        meta.setFont(QFont(FONT_FAMILY, 9))
+        meta.setStyleSheet(f"color: {MUTED};")
+
+        text_col.addWidget(title)
+        text_col.addWidget(meta)
+        root.addLayout(text_col, 1)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+
+        self.btn_explore = _action_button(
+            "mdi6.folder-open-outline", ACCENT_BLUE_LIGHT, tr("clonezilla.action_explore"),
+        )
+        self.btn_explore.clicked.connect(lambda: self.explore_requested.emit(entry))
+        btn_row.addWidget(self.btn_explore)
+
+        self.btn_delete = _action_button(
+            "mdi6.trash-can-outline", ACCENT_RED_SOFT, tr("clonezilla.action_delete"),
+        )
+        self.btn_delete.clicked.connect(lambda: self.delete_requested.emit(entry, True))
+        btn_row.addWidget(self.btn_delete)
+
+        root.addLayout(btn_row)
+
+
 class ClonezillaPage(QWidget):
     """Gerenciador de backups Clonezilla — lista pastas cruas e arquivos
     .tar.zst já comprimidos em /mnt/MDSATA/CLONEZILLA, separados em duas
@@ -886,7 +975,7 @@ class ClonezillaPage(QWidget):
         self._list_host.setStyleSheet("background: transparent;")
         self._list_layout = QVBoxLayout(self._list_host)
         self._list_layout.setContentsMargins(0, 12, 0, 0)
-        self._list_layout.setSpacing(24)
+        self._list_layout.setSpacing(100)
         self._list_layout.addStretch(1)
 
         self.scroll.setWidget(self._list_host)
@@ -1034,6 +1123,45 @@ class ClonezillaPage(QWidget):
                 card.upload_requested.connect(self._on_upload_requested)
                 section.add_card(card)
             self._list_layout.insertWidget(self._list_layout.count() - 1, section)
+
+        raw_present = [e for e in compressed if e.raw_path is not None]
+        if raw_present:
+            raw_total_bytes = sum(e.raw_size_bytes or 0 for e in raw_present)
+            raw_count_txt = (
+                tr("clonezilla.raw_count_singular") if len(raw_present) == 1
+                else tr("clonezilla.raw_count_plural").format(n=len(raw_present))
+            )
+            section = _SectionCard(
+                "",
+                "",
+                ACCENT_TEAL_SOFT,
+                right_text=(
+                    f"{raw_count_txt}   ·   {_fmt_size(raw_total_bytes)} "
+                    f"{tr('clonezilla.raw_occupied_suffix')}"
+                ),
+                eyebrow_text=tr("clonezilla.section_raw_title"),
+                hint_text=tr("clonezilla.raw_hint"),
+            )
+            for entry in raw_present:
+                card = _RawFolderCard(entry)
+                card.delete_requested.connect(self._on_delete_requested)
+                card.explore_requested.connect(self._on_explore_requested)
+                section.add_card(card)
+            self._list_layout.insertWidget(self._list_layout.count() - 1, section)
+
+    def _on_explore_requested(self, entry: ClonezillaEntry) -> None:
+        if entry.raw_path is None:
+            return
+        try:
+            subprocess.Popen(["nautilus", str(entry.raw_path)])
+        except FileNotFoundError:
+            _show_error(
+                "Carbonara",
+                tr("clonezilla.explore_not_found"),
+                parent=self,
+            )
+        except Exception as exc:
+            _show_error("Carbonara", str(exc), parent=self)
 
     def _on_compress_requested(self, entry: ClonezillaEntry) -> None:
         if OperationManager.is_running():
