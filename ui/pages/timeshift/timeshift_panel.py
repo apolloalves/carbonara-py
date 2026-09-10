@@ -5170,6 +5170,16 @@ class _DeleteProgressDialog(QDialog):
             self.move(event.globalPosition().toPoint() - self._drag)
 
 
+
+# Posição compartilhada entre os diálogos de agendamento (sync e criação) —
+# em vez de cada um recalcular sozinho onde deveria abrir (o que depende do
+# window manager cooperar, e no Mutter às vezes não coopera em setup com
+# mais de um monitor), guarda a posição real da ÚLTIMA janela desse tipo
+# que foi mostrada, e a próxima simplesmente abre exatamente ali — usa a
+# outra como referência direta, em vez de recalcular tudo de novo.
+_last_schedule_dialog_pos: dict[str, tuple[int, int] | None] = {"xy": None}
+
+
 class _SyncStatusBadge(QFrame):
     """Pill compacta no cabeçalho do Timeshift — mostra o status de um
     agendamento (sync OU criação, ver `title_key`/`disabled_key`/
@@ -5331,6 +5341,7 @@ class _ScheduledSyncDialog(QDialog):
         self.setWindowTitle(tr("snapshots.sync_dialog_title"))
         self.setModal(True)
         self.setFixedWidth(800)
+        self.setFixedHeight(960)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
         self.result_config = dict(current_config)
         self._build_ui()
@@ -5345,6 +5356,8 @@ class _ScheduledSyncDialog(QDialog):
         header = QFrame()
         header.setObjectName("SyncHeader")
         header.setFixedHeight(48)
+        header.setCursor(Qt.SizeAllCursor)
+        self._header_frame = header  # usado por mousePress/Move/ReleaseEvent pra arrastar a janela
         h_layout = QHBoxLayout(header)
         h_layout.setContentsMargins(18, 0, 16, 0)
 
@@ -5638,16 +5651,12 @@ class _ScheduledSyncDialog(QDialog):
         next_block.addWidget(self.next_value)
         status_layout.addLayout(next_block)
 
-        b_layout.addWidget(status_card)
         self._refresh_status_card()
 
         note = QLabel(tr("snapshots.sync_backend_note"))
         note.setWordWrap(True)
         note.setFont(QFont("DejaVu Sans Mono", 9))
         note.setStyleSheet("color: #6b7a8d;")
-        b_layout.addWidget(note)
-
-        b_layout.addStretch()
 
         # Botões
         btn_final_row = QHBoxLayout()
@@ -5702,10 +5711,30 @@ class _ScheduledSyncDialog(QDialog):
 
         btn_final_row.addWidget(self.btn_cancel_schedule, 1)
         btn_final_row.addWidget(self.btn_save, 1)
-        b_layout.addLayout(btn_final_row)
+
+        # Status/nota/botões ficam FORA do scroll, sempre visíveis — só
+        # os campos de configuração (frequência, horário, escopo,
+        # destinos etc.) rolam quando não cabem nos 820px fixos da
+        # janela. Assim "Salvar agendamento" nunca fica escondido
+        # embaixo de uma rolagem.
+        footer = QFrame()
+        footer.setStyleSheet("background: transparent; border: none;")
+        footer_layout = QVBoxLayout(footer)
+        footer_layout.setContentsMargins(36, 18, 36, 28)
+        footer_layout.setSpacing(14)
+        footer_layout.addWidget(status_card)
+        footer_layout.addWidget(note)
+        footer_layout.addLayout(btn_final_row)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setStyleSheet("background: transparent; border: none;")
+        scroll.setWidget(body)
 
         root.addWidget(header)
-        root.addWidget(body, 1)
+        root.addWidget(scroll, 1)
+        root.addWidget(footer)
 
     def _refresh_status_card(self) -> None:
         from core.snapshots import scheduler
@@ -5914,16 +5943,77 @@ class _ScheduledSyncDialog(QDialog):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        # Mesma lógica do _ScheduledCreateDialog — centraliza sempre
-        # sobre a janela principal do Carbonara, não importa em qual
-        # monitor ela esteja, pra evitar o Qt escolher sozinho a tela
-        # errada num setup com mais de um monitor.
+        # Mesma lógica do _ScheduledCreateDialog — ver comentário lá pro
+        # porquê do QTimer.singleShot (mover direto aqui não bastava: o
+        # window manager reposiciona esse diálogo frameless DEPOIS que
+        # ele é mapeado na tela, sobrescrevendo um move() feito cedo
+        # demais no showEvent).
+        QTimer.singleShot(0, self._reposition_over_parent)
+        # segunda tentativa um pouco depois — alguns WMs fazem uma
+        # segunda passada de posicionamento própria logo após a
+        # primeira, desfazendo o que a gente acabou de fazer
+        QTimer.singleShot(80, self._reposition_over_parent)
+
+    def _reposition_over_parent(self) -> None:
+        # Se já existe uma posição salva (de uma abertura anterior deste
+        # diálogo OU do outro — sync e criação compartilham a mesma
+        # referência), usa ela direto — sem recalcular nada, sem depender
+        # do window manager cooperar de novo.
+        saved = _last_schedule_dialog_pos["xy"]
+        if saved is not None:
+            self.move(*saved)
+            return
+
         parent = self.parentWidget()
-        if parent is not None:
-            parent_geo = parent.window().geometry()
-            x = parent_geo.x() + (parent_geo.width() - self.width()) // 2
-            y = parent_geo.y() + (parent_geo.height() - self.height()) // 2
-            self.move(x, y)
+        if parent is None:
+            return
+        parent_window = parent.window()
+
+        # Primeira vez que QUALQUER um dos dois diálogos abre nesta sessão
+        # — ainda não tem referência salva, calcula a partir da janela
+        # principal. Atribuir a QScreen explicitamente antes de mover
+        # ajuda o Mutter a não jogar a janela pra tela errada em setup
+        # com mais de um monitor.
+        parent_handle = parent_window.windowHandle()
+        own_handle = self.windowHandle()
+        if parent_handle is not None and own_handle is not None:
+            screen = parent_handle.screen()
+            if screen is not None:
+                own_handle.setScreen(screen)
+
+        parent_geo = parent_window.geometry()
+        x = parent_geo.x() + (parent_geo.width() - self.width()) // 2
+        y = parent_geo.y() + (parent_geo.height() - self.height()) // 2
+        self.move(x, y)
+
+    def moveEvent(self, event) -> None:
+        super().moveEvent(event)
+        # Guarda a posição real (inclusive quando o usuário arrasta pela
+        # barra do cabeçalho, ver mousePress/Move/ReleaseEvent abaixo) —
+        # é essa que o próximo diálogo (sync ou criação) vai reusar como
+        # referência.
+        _last_schedule_dialog_pos["xy"] = (self.x(), self.y())
+
+    def mousePressEvent(self, event) -> None:
+        # Diálogo é frameless (sem barra de título de verdade), então
+        # sem isso não dá pra arrastar pra outro monitor quando o window
+        # manager abre no lugar errado — clique-e-arraste na faixa do
+        # cabeçalho move a janela manualmente.
+        if event.button() == Qt.LeftButton and self._header_frame.geometry().contains(event.pos()):
+            self._drag_offset = event.globalPosition().toPoint() - self.pos()
+        else:
+            self._drag_offset = None
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        offset = getattr(self, "_drag_offset", None)
+        if offset is not None and (event.buttons() & Qt.LeftButton):
+            self.move(event.globalPosition().toPoint() - offset)
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        self._drag_offset = None
+        super().mouseReleaseEvent(event)
 
 
 class _ScheduledCreateDialog(QDialog):
@@ -5938,6 +6028,7 @@ class _ScheduledCreateDialog(QDialog):
         self.setWindowTitle(tr("snapshots.create_dialog_title"))
         self.setModal(True)
         self.setFixedWidth(800)
+        self.setFixedHeight(960)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
         self.result_config = dict(current_config)
         self._build_ui()
@@ -5952,6 +6043,8 @@ class _ScheduledCreateDialog(QDialog):
         header = QFrame()
         header.setObjectName("SyncHeader")
         header.setFixedHeight(48)
+        header.setCursor(Qt.SizeAllCursor)
+        self._header_frame = header  # usado por mousePress/Move/ReleaseEvent pra arrastar a janela
         h_layout = QHBoxLayout(header)
         h_layout.setContentsMargins(18, 0, 16, 0)
 
@@ -6298,16 +6391,12 @@ class _ScheduledCreateDialog(QDialog):
         next_block.addWidget(self.next_value)
         status_layout.addLayout(next_block)
 
-        b_layout.addWidget(status_card)
         self._refresh_status_card()
 
         note = QLabel(tr("snapshots.sync_backend_note"))
         note.setWordWrap(True)
         note.setFont(QFont("DejaVu Sans Mono", 9))
         note.setStyleSheet("color: #6b7a8d;")
-        b_layout.addWidget(note)
-
-        b_layout.addStretch()
 
         # Botões
         btn_final_row = QHBoxLayout()
@@ -6362,10 +6451,30 @@ class _ScheduledCreateDialog(QDialog):
 
         btn_final_row.addWidget(self.btn_cancel_schedule, 1)
         btn_final_row.addWidget(self.btn_save, 1)
-        b_layout.addLayout(btn_final_row)
+
+        # Status/nota/botões ficam FORA do scroll, sempre visíveis — só
+        # os campos de configuração (frequência, horário, escopo,
+        # destinos etc.) rolam quando não cabem nos 820px fixos da
+        # janela. Assim "Salvar agendamento" nunca fica escondido
+        # embaixo de uma rolagem.
+        footer = QFrame()
+        footer.setStyleSheet("background: transparent; border: none;")
+        footer_layout = QVBoxLayout(footer)
+        footer_layout.setContentsMargins(36, 18, 36, 28)
+        footer_layout.setSpacing(14)
+        footer_layout.addWidget(status_card)
+        footer_layout.addWidget(note)
+        footer_layout.addLayout(btn_final_row)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setStyleSheet("background: transparent; border: none;")
+        scroll.setWidget(body)
 
         root.addWidget(header)
-        root.addWidget(body, 1)
+        root.addWidget(scroll, 1)
+        root.addWidget(footer)
 
     def _refresh_status_card(self) -> None:
         from core.snapshots import scheduler
@@ -6545,14 +6654,78 @@ class _ScheduledCreateDialog(QDialog):
         # Sem isso, o Qt decide sozinho em qual monitor esse diálogo
         # frameless aparece — em setup com mais de uma tela, às vezes
         # abre na tela errada (e sem borda de janela, não dá pra
-        # arrastar pra tela certa). Centraliza sempre sobre a janela
-        # principal do Carbonara, não importa em qual monitor ela esteja.
+        # arrastar pra tela certa). Centralizar direto aqui no showEvent
+        # não bastou: o window manager reposiciona a janela DEPOIS de
+        # mapeá-la na tela, sobrescrevendo um move() feito cedo demais —
+        # QTimer.singleShot(0, ...) empurra o reposicionamento pro
+        # próximo ciclo do event loop, depois que a janela já foi
+        # mapeada de verdade, e aí o WM não sobrescreve mais.
+        QTimer.singleShot(0, self._reposition_over_parent)
+        # segunda tentativa um pouco depois — alguns WMs fazem uma
+        # segunda passada de posicionamento própria logo após a
+        # primeira, desfazendo o que a gente acabou de fazer
+        QTimer.singleShot(80, self._reposition_over_parent)
+
+    def _reposition_over_parent(self) -> None:
+        # Se já existe uma posição salva (de uma abertura anterior deste
+        # diálogo OU do outro — sync e criação compartilham a mesma
+        # referência), usa ela direto — sem recalcular nada, sem depender
+        # do window manager cooperar de novo.
+        saved = _last_schedule_dialog_pos["xy"]
+        if saved is not None:
+            self.move(*saved)
+            return
+
         parent = self.parentWidget()
-        if parent is not None:
-            parent_geo = parent.window().geometry()
-            x = parent_geo.x() + (parent_geo.width() - self.width()) // 2
-            y = parent_geo.y() + (parent_geo.height() - self.height()) // 2
-            self.move(x, y)
+        if parent is None:
+            return
+        parent_window = parent.window()
+
+        # Primeira vez que QUALQUER um dos dois diálogos abre nesta sessão
+        # — ainda não tem referência salva, calcula a partir da janela
+        # principal. Atribuir a QScreen explicitamente antes de mover
+        # ajuda o Mutter a não jogar a janela pra tela errada em setup
+        # com mais de um monitor.
+        parent_handle = parent_window.windowHandle()
+        own_handle = self.windowHandle()
+        if parent_handle is not None and own_handle is not None:
+            screen = parent_handle.screen()
+            if screen is not None:
+                own_handle.setScreen(screen)
+
+        parent_geo = parent_window.geometry()
+        x = parent_geo.x() + (parent_geo.width() - self.width()) // 2
+        y = parent_geo.y() + (parent_geo.height() - self.height()) // 2
+        self.move(x, y)
+
+    def moveEvent(self, event) -> None:
+        super().moveEvent(event)
+        # Guarda a posição real (inclusive quando o usuário arrasta pela
+        # barra do cabeçalho, ver mousePress/Move/ReleaseEvent abaixo) —
+        # é essa que o próximo diálogo (sync ou criação) vai reusar como
+        # referência.
+        _last_schedule_dialog_pos["xy"] = (self.x(), self.y())
+
+    def mousePressEvent(self, event) -> None:
+        # Diálogo é frameless (sem barra de título de verdade), então
+        # sem isso não dá pra arrastar pra outro monitor quando o window
+        # manager abre no lugar errado — clique-e-arraste na faixa do
+        # cabeçalho move a janela manualmente.
+        if event.button() == Qt.LeftButton and self._header_frame.geometry().contains(event.pos()):
+            self._drag_offset = event.globalPosition().toPoint() - self.pos()
+        else:
+            self._drag_offset = None
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        offset = getattr(self, "_drag_offset", None)
+        if offset is not None and (event.buttons() & Qt.LeftButton):
+            self.move(event.globalPosition().toPoint() - offset)
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        self._drag_offset = None
+        super().mouseReleaseEvent(event)
 
     def _apply_styles(self) -> None:
         self.setStyleSheet("""
