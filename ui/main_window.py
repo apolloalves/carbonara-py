@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import sys
 from dataclasses import dataclass
 
@@ -106,6 +107,16 @@ def _rgba(hex_color: str, alpha: int) -> str:
     h = hex_color.lstrip("#")
     r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
     return f"{r}, {g}, {b}, {alpha}"
+
+
+def _mib_to_gib(text: str) -> str:
+    """Converte cada ocorrência 'NNNNMiB' em '(N.N GB)' — o valor de
+    memória vem de sysinfo.py pronto em MiB ('2903MiB / 31923MiB'), o
+    que é ilegível de relance; GB fica muito mais claro no header."""
+    def _conv(match: "re.Match[str]") -> str:
+        gib = float(match.group(1)) / 1024
+        return f"{gib:.1f}GB"
+    return re.sub(r"(\d+(?:\.\d+)?)\s*MiB", _conv, text)
 
 
 class TitleBar(QWidget):
@@ -314,9 +325,19 @@ class TopHeader(QFrame):
 
         spec_items = []
         if info:
+            # "Intel(R) Core(TM) i7-5960X CPU" é bem mais largo que
+            # "MEMORY"/"UPTIME" ao lado, o que puxava o rótulo "CPU"
+            # (alinhado à direita) pra bem longe do início do valor —
+            # tira os símbolos de marca registrada e o sufixo "CPU"
+            # redundante (já tem o rótulo "CPU" em cima) pra encurtar.
+            cpu_display = info.cpu.replace("(R)", "").replace("(TM)", "")
+            cpu_display = " ".join(cpu_display.split())
+            if cpu_display.endswith(" CPU"):
+                cpu_display = cpu_display[: -len(" CPU")]
+
             spec_items = [
-                ("CPU", info.cpu.split(" (")[0]),
-                ("MEMORY", info.memory),
+                ("CPU", cpu_display),
+                ("MEMORY", _mib_to_gib(info.memory)),
                 ("UPTIME", info.uptime),
             ]
 
