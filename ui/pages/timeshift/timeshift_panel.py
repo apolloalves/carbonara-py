@@ -5564,7 +5564,10 @@ class _ScheduledSyncDialog(QDialog):
                 cb.setCursor(Qt.PointingHandCursor)
                 cb.setChecked(dest.mountpoint in selected_mountpoints)
 
-                label_lbl = QLabel(f"{dest.label}  ·  {dest.mountpoint}  ·  {format_gb(dest.free_gb)} livre")
+                label_lbl = QLabel(
+                    f"{dest.label}  ·  {dest.mountpoint}  ·  "
+                    f"{format_gb(dest.free_gb)} {tr('snapshots.free_label')}"
+                )
                 label_lbl.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
                 label_lbl.setStyleSheet("color: #ecf4ff;")
 
