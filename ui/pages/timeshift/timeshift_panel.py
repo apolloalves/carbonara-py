@@ -1051,12 +1051,9 @@ class SnapshotsPage(QWidget):
         self.scroll_layout.addStretch(1)
 
         self.scroll.setWidget(self.scroll_content)
-        sep_line = QFrame()
-        sep_line.setFixedHeight(1)
-        sep_line.setStyleSheet("background: rgba(255,255,255,6); border: none;")
 
         root.addWidget(self.control_card)
-        root.addWidget(sep_line)
+        root.addSpacing(14)
         root.addWidget(self.scroll, 1)
 
         # ── Toast dos tooltips de RESTORE/SYNC/DELETE (canto superior

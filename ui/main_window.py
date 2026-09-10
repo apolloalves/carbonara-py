@@ -76,13 +76,26 @@ MENU_ENTRIES = [
     MenuEntry(1, "Dashboard", "Monitor system information and quick status", "System status", "mdi6.view-dashboard"),
     MenuEntry(2, "Network", "Diagnose and configure network settings", "Wifi & links", "mdi6.wifi"),
     MenuEntry(3, "Packages", "Manage packages, mirrors and updates", "Mirrors & updates", "mdi6.package-variant"),
-    MenuEntry(4, "Backups", "Create, restore and verify snapshots", "Create & restore snapshots", "mdi6.harddisk"),
+    MenuEntry(4, "Timeshift", "Create, restore and verify snapshots", "Create & restore snapshots", "mdi6.harddisk"),
     MenuEntry(5, "Clonezilla", "Compress and manage Clonezilla disk image backups", "Manage Clonezilla backups", "mdi6.archive-outline"),
     MenuEntry(9, "Penguin's Eggs", "Create, check and install live ISOs", "ISO wizard", "mdi6.egg-outline"),
     MenuEntry(6, "Performance", "Optimize boot, swap and system responsiveness", "Boot & swap tuning", "mdi6.speedometer"),
     MenuEntry(7, "Doctor Arch", "Diagnose, clean and repair your Arch install", "Diagnostics, cleanup & repair", "mdi6.stethoscope"),
     MenuEntry(8, "Exit", "Exit Carbonara", "Close Carbonara", "mdi6.power"),
 ]
+
+# Mapeia número do MenuEntry -> método de navegação do MainWindow, usado
+# pelo item "Módulos" da barra de menu persistente do TopHeader. Só os
+# módulos com página de verdade implementada (2/3/6 ainda são stubs
+# sem back-end, então ficam de fora daqui — mesmo comportamento que já
+# tinham nos cards do MenuPage, onde clicar neles também não navega).
+_MODULE_NAV = {
+    1: "show_disks",
+    4: "show_backups",
+    5: "show_clonezilla",
+    7: "show_doctor",
+    9: "show_eggs",
+}
 
 
 def clamp(value: int, low: int, high: int) -> int:
@@ -259,7 +272,11 @@ class TopHeader(QFrame):
         super().__init__(parent)
         self.setStyleSheet("background: transparent; border: none;")
 
-        root = QHBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(8)
+
+        root = QHBoxLayout()
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(14)
 
@@ -341,7 +358,7 @@ class TopHeader(QFrame):
         right_side.setAlignment(specs_row, Qt.AlignRight)
 
         menu_row = QHBoxLayout()
-        menu_row.setContentsMargins(0, 15, 20, 0)
+        menu_row.setContentsMargins(0, 8, 20, 0)
         menu_row.setSpacing(10)
         menu_row.addStretch(1)
 
@@ -367,35 +384,83 @@ class TopHeader(QFrame):
             """)
             self.btn_back.clicked.connect(self.back_clicked.emit)
             menu_row.addWidget(self.btn_back)
+            right_side.addLayout(menu_row)
 
-        self.btn_menu = QPushButton()
-        self.btn_menu.setIcon(qta.icon("mdi6.menu", color="#ffffff"))
-        self.btn_menu.setIconSize(QSize(30, 30))
-        self.btn_menu.setToolTip("Menu")
-        self.btn_menu.setCursor(Qt.PointingHandCursor)
-        self.btn_menu.setFixedSize(46, 40)
-        self.btn_menu.setStyleSheet("""
-            QPushButton {
-                background: rgba(255, 255, 255, 6);
-                border: 1px solid rgba(59, 130, 246, 110);
-                border-radius: 8px;
-            }
-            QPushButton:hover {
-                background: #1793D1;
-                border: 1px solid #1793D1;
-            }
-        """)
-        self.btn_menu.clicked.connect(self._show_top_menu)
-        menu_row.addWidget(self.btn_menu)
-
-        right_side.addLayout(menu_row)
         root.addLayout(right_side)
+        outer.addLayout(root)
+        outer.addWidget(self._build_menu_bar())
 
     def _window(self) -> QMainWindow | None:
         w = self.window()
         return w if isinstance(w, QMainWindow) else None
 
-    def _show_top_menu(self) -> None:
+    def _build_menu_bar(self) -> QFrame:
+        """Barra de menu persistente — sempre visível, em toda página
+        (fica dentro do TopHeader, então o AppHeaderBlock já a propaga
+        pra todo mundo automaticamente). Substitui o antigo botão
+        hambúrguer por itens diretos: Módulos permite trocar de página
+        sem passar pela Home; Sair fica isolado à direita por ser
+        destrutivo/diferente dos demais."""
+        bar = QFrame()
+        bar.setStyleSheet("QFrame { background: transparent; border: none; }")
+
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(2, 0, 2, 0)
+        layout.setSpacing(2)
+
+        def _bar_button(label: str) -> QPushButton:
+            btn = QPushButton(label)
+            btn.setFont(QFont(FONT_FAMILY, 10, QFont.Bold))
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setFixedHeight(28)
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: transparent;
+                    border: none;
+                    border-radius: 7px;
+                    color: {MUTED};
+                    padding: 0 14px;
+                }}
+                QPushButton:hover {{
+                    background: rgba(255, 255, 255, 10);
+                    color: {TEXT};
+                }}
+            """)
+            return btn
+
+        self.btn_modulos = _bar_button(tr("menu.modulos"))
+        self.btn_modulos.clicked.connect(self._show_modulos_menu)
+        layout.addWidget(self.btn_modulos)
+
+        self.btn_idiomas = _bar_button(tr("menu.idioma"))
+        self.btn_idiomas.clicked.connect(self._show_language_dialog)
+        layout.addWidget(self.btn_idiomas)
+
+        self.btn_temas = _bar_button(tr("menu.temas"))
+        self.btn_temas.clicked.connect(
+            lambda: self._show_soon_dialog(tr("menu.temas"), tr("menu.temas_placeholder_msg"))
+        )
+        layout.addWidget(self.btn_temas)
+
+        self.btn_logs = _bar_button(tr("menu.central_logs"))
+        self.btn_logs.clicked.connect(self._go_logs)
+        layout.addWidget(self.btn_logs)
+
+        self.btn_config = _bar_button(tr("menu.configuracoes"))
+        self.btn_config.clicked.connect(
+            lambda: self._show_soon_dialog(tr("menu.configuracoes"), tr("menu.configuracoes_placeholder_msg"))
+        )
+        layout.addWidget(self.btn_config)
+
+        self.btn_sobre = _bar_button(tr("menu.sobre"))
+        self.btn_sobre.clicked.connect(self._go_about)
+        layout.addWidget(self.btn_sobre)
+
+        layout.addStretch(1)
+
+        return bar
+
+    def _show_modulos_menu(self) -> None:
         menu = QMenu(self)
         menu.setStyleSheet(f"""
             QMenu {{
@@ -415,36 +480,28 @@ class TopHeader(QFrame):
                 background: rgba(59, 130, 246, 40);
                 color: #ffffff;
             }}
-            QMenu::item:disabled {{
-                color: {FAINT};
-            }}
-            QMenu::separator {{
-                height: 1px;
-                background: rgba(255, 255, 255, 14);
-                margin: 6px 4px;
-            }}
         """)
 
-        act_theme = menu.addAction(qta.icon("mdi6.palette-outline", color=MUTED), tr("menu.temas"))
-        act_lang = menu.addAction(qta.icon("mdi6.web", color=MUTED), tr("menu.idioma"))
-        menu.addSeparator()
-        act_logs = menu.addAction(qta.icon("mdi6.file-document-outline", color=MUTED), tr("menu.central_logs"))
-        act_update = menu.addAction(qta.icon("mdi6.refresh", color=MUTED), tr("menu.verificar_atualizacao"))
-        act_shortcuts = menu.addAction(qta.icon("mdi6.keyboard-outline", color=MUTED), tr("menu.atalhos_teclado"))
-        menu.addSeparator()
-        act_about = menu.addAction(qta.icon("mdi6.information-outline", color=MUTED), tr("menu.sobre"))
-
         win = self._window()
+        for number, method_name in _MODULE_NAV.items():
+            entry = next((e for e in MENU_ENTRIES if e.number == number), None)
+            if entry is None:
+                continue
+            action = menu.addAction(qta.icon(entry.glyph, color=MUTED), entry.title)
+            if win is not None:
+                action.triggered.connect(getattr(win, method_name))
 
-        act_theme.triggered.connect(lambda: self._show_soon_dialog(tr("menu.temas"), tr("menu.temas_placeholder_msg")))
-        act_lang.triggered.connect(lambda: self._show_language_dialog())
-        act_update.triggered.connect(lambda: self._show_soon_dialog(tr("menu.verificar_atualizacao"), tr("menu.verificar_atualizacao_placeholder_msg")))
+        menu.exec(self.btn_modulos.mapToGlobal(self.btn_modulos.rect().bottomLeft()))
+
+    def _go_logs(self) -> None:
+        win = self._window()
         if win is not None:
-            act_logs.triggered.connect(win.show_logs)
-            act_shortcuts.triggered.connect(win._show_shortcuts_dialog)
-            act_about.triggered.connect(win._show_about_dialog)
+            win.show_logs()
 
-        menu.exec(self.btn_menu.mapToGlobal(self.btn_menu.rect().bottomLeft()))
+    def _go_about(self) -> None:
+        win = self._window()
+        if win is not None:
+            win._show_about_dialog()
 
     def _show_soon_dialog(self, title: str, message: str) -> None:
         win = self._window()
@@ -486,7 +543,7 @@ class AppHeaderBlock(QFrame):
         self.top_header.back_clicked.connect(self.back_clicked.emit)
         root.addWidget(self.top_header)
 
-        root.addSpacing(14)
+        root.addSpacing(8)
 
         divider = QFrame()
         divider.setFixedHeight(1)
@@ -1404,7 +1461,48 @@ class AboutDialog(QDialog):
         author_row.addLayout(author_block)
         author_row.addStretch()
         card_layout.addWidget(author_card)
-        card_layout.addSpacing(26)
+        card_layout.addSpacing(16)
+
+        # ── Ações extras: "Verificar atualização" e "Atalhos" perderam o
+        # lugar próprio na barra de menu (5 itens fixos já é o bastante
+        # lá); moraram aqui porque são consultas ocasionais, não algo
+        # que precise de acesso de 1 clique em toda tela ──
+        extras_row = QHBoxLayout()
+        extras_row.setSpacing(10)
+
+        def _extra_btn(text: str, glyph: str) -> QPushButton:
+            btn = QPushButton(f" {text}")
+            btn.setIcon(qta.icon(glyph, color=MUTED))
+            btn.setIconSize(QSize(15, 15))
+            btn.setFont(QFont(FONT_FAMILY, 9))
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setFixedHeight(36)
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: rgba(255, 255, 255, 5);
+                    border: 1px solid rgba(255, 255, 255, 16);
+                    border-radius: 8px;
+                    color: {MUTED};
+                    padding: 0 10px;
+                }}
+                QPushButton:hover {{
+                    background: rgba(255, 255, 255, 10);
+                    color: {TEXT};
+                    border: 1px solid rgba(255, 255, 255, 30);
+                }}
+            """)
+            return btn
+
+        self.btn_update = _extra_btn(tr("menu.verificar_atualizacao"), "mdi6.refresh")
+        self.btn_update.clicked.connect(self._on_update_clicked)
+        extras_row.addWidget(self.btn_update)
+
+        self.btn_shortcuts = _extra_btn(tr("menu.atalhos_teclado"), "mdi6.keyboard-outline")
+        self.btn_shortcuts.clicked.connect(self._on_shortcuts_clicked)
+        extras_row.addWidget(self.btn_shortcuts)
+
+        card_layout.addLayout(extras_row)
+        card_layout.addSpacing(16)
 
         btn_ok = QPushButton(tr("common.close"))
         btn_ok.setFixedHeight(40)
@@ -1428,6 +1526,18 @@ class AboutDialog(QDialog):
 
         outer.addWidget(self.card)
         outer.setAlignment(self.card, Qt.AlignCenter)
+
+    def _on_update_clicked(self) -> None:
+        win = self.parent()
+        if win is not None and hasattr(win, "_show_placeholder_dialog"):
+            win._show_placeholder_dialog(
+                tr("menu.verificar_atualizacao"), tr("menu.verificar_atualizacao_placeholder_msg"),
+            )
+
+    def _on_shortcuts_clicked(self) -> None:
+        win = self.parent()
+        if win is not None and hasattr(win, "_show_shortcuts_dialog"):
+            win._show_shortcuts_dialog()
 
     def paintEvent(self, event):
         painter = QPainter(self)
