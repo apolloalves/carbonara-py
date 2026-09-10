@@ -5,7 +5,7 @@ from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QPushButton, QDialog
 
-from ui.pages.timeshift.timeshift_panel import SnapshotsPage, icon_badge, _SyncStatusBadge, _ScheduledSyncDialog
+from ui.pages.timeshift.timeshift_panel import SnapshotsPage, icon_badge, _SyncStatusBadge, _ScheduledSyncDialog, _ScheduledCreateDialog
 from core.i18n import tr
 
 
@@ -88,9 +88,25 @@ class BackupsPage(QWidget):
         header_layout.addWidget(self.sync_badge)
         self._refresh_sync_badge()
 
+        # ── Badge de criação automática — mesmo padrão do de sync acima,
+        # mas agenda/config totalmente separadas (ver DEFAULT_CREATE_CONFIG
+        # em scheduler.py pro porquê disso).
+        self._create_config: dict = self._scheduler.load_create_schedule_config()
+        self.create_badge = _SyncStatusBadge(
+            self,
+            title_key="snapshots.create_badge_title",
+            disabled_key="snapshots.create_badge_disabled",
+            next_key="snapshots.create_badge_next",
+            not_scheduled_key="snapshots.sync_not_scheduled",
+        )
+        self.create_badge.clicked.connect(self._open_create_dialog)
+        header_layout.addWidget(self.create_badge)
+        self._refresh_create_badge()
+
         # Guarda o último "last_run" visto — usado pelo timer abaixo pra
         # saber se um sync agendado terminou desde a última checagem
         self._last_seen_sync_run = self._scheduler.load_schedule_status().get("last_run")
+        self._last_seen_create_run = self._scheduler.load_create_schedule_status().get("last_run")
 
         self.snapshots_page = SnapshotsPage(self)
 
@@ -211,10 +227,36 @@ class BackupsPage(QWidget):
             # "skipped" (outra operação em andamento) continua sem toast —
             # esse sim é passageiro, sem problema real
 
+        create_status = self._scheduler.load_create_schedule_status()
+        create_last_run = create_status.get("last_run")
+        if create_last_run and create_last_run != self._last_seen_create_run:
+            self._last_seen_create_run = create_last_run
+            self._refresh_create_badge()
+            self.snapshots_page.refresh_destinations()
+
+            create_result = create_status.get("last_result")
+            if create_result == "success":
+                kinds = ", ".join(create_status.get("created_kinds") or [])
+                self._show_sync_toast(
+                    tr("snapshots.create_toast_success").format(kinds=kinds or "—"),
+                    "mdi6.check-circle-outline", "#34d399",
+                )
+            elif create_result == "failed":
+                self._show_sync_toast(
+                    tr("snapshots.create_toast_failed"),
+                    "mdi6.alert-circle-outline", "#ff8888",
+                )
+            # "skipped" continua sem toast, mesmo motivo de sempre
+
     def _refresh_sync_badge(self) -> None:
         enabled = self._sync_config.get("enabled", False)
         next_run = self._scheduler.next_run_display(self._sync_config) if enabled else None
         self.sync_badge.set_state(enabled=enabled, next_run=next_run)
+
+    def _refresh_create_badge(self) -> None:
+        enabled = self._create_config.get("enabled", False)
+        next_run = self._scheduler.next_run_display(self._create_config) if enabled else None
+        self.create_badge.set_state(enabled=enabled, next_run=next_run)
 
     def _open_sync_dialog(self) -> None:
         # Só sugere o destino atual da tela como ponto de partida se AINDA
@@ -230,6 +272,17 @@ class BackupsPage(QWidget):
         if dialog.exec() == QDialog.Accepted:
             self._sync_config = dialog.result_config
             self._refresh_sync_badge()
+
+    def _open_create_dialog(self) -> None:
+        if not self._create_config.get("destination_mountpoints"):
+            dest = self.snapshots_page.current_destination()
+            if dest is not None:
+                self._create_config["destination_mountpoints"] = [dest.mountpoint]
+
+        dialog = _ScheduledCreateDialog(self._create_config, parent=self)
+        if dialog.exec() == QDialog.Accepted:
+            self._create_config = dialog.result_config
+            self._refresh_create_badge()
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Escape:
