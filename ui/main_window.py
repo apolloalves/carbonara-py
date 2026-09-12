@@ -2201,10 +2201,40 @@ class MainWindow(QMainWindow):
         super().keyPressEvent(event)
 
 
+def _write_gui_session_marker() -> None:
+    """Grava DISPLAY/XAUTHORITY/PID desta sessão gráfica em
+    ~/.config/carbonara/gui_session.json — é assim que o processo
+    agendado (systemd, root, sem tela própria) sabe que o Carbonara
+    está aberto e em qual tela, pra abrir uma janela de progresso de
+    verdade em vez de rodar calado. Ver core/snapshots/scheduler.py's
+    _load_gui_session()."""
+    import json
+    import os
+    from pathlib import Path
+
+    display = os.environ.get("DISPLAY")
+    if not display:
+        return  # sem X, não tem como abrir janela mesmo — nada a gravar
+
+    config_dir = Path.home() / ".config" / "carbonara"
+    try:
+        config_dir.mkdir(parents=True, exist_ok=True)
+        session = {
+            "display": display,
+            "xauthority": os.environ.get("XAUTHORITY", ""),
+            "pid": os.getpid(),
+        }
+        (config_dir / "gui_session.json").write_text(json.dumps(session), encoding="utf-8")
+    except OSError:
+        pass  # best-effort — se falhar, a criação/sync agendada só roda calada
+
+
 def main():
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     app.setFont(QFont(FONT_FAMILY, 10))
+
+    _write_gui_session_marker()
 
     win = MainWindow()
     win.show()

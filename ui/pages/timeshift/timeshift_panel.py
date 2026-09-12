@@ -686,7 +686,7 @@ class SectionCard(QFrame):
         b = int(accent_color[5:7], 16)
         divider = QFrame()
         divider.setFixedHeight(2)
-        divider.setStyleSheet(f"background: rgba({r}, {g}, {b}, 50); border: none;")
+        divider.setStyleSheet(f"background: rgba({r}, {g}, {b}, 30); border: none;")
 
         self.body = QGridLayout()
         self.body.setHorizontalSpacing(14)
@@ -1390,7 +1390,7 @@ class SnapshotsPage(QWidget):
             if kind not in ordered_kinds:
                 ordered_kinds.append(kind)
 
-        SECTION_ACCENTS = {"ROOT": "#23a6ff", "HOME": "#e0a840"}
+        SECTION_ACCENTS = {"ROOT": "#23a6ff", "HOME": "#23a6ff"}
 
         for kind in ordered_kinds:
             section_icon = ROOT_GLYPH if kind == "ROOT" else HOME_GLYPH if kind == "HOME" else SNAPSHOT_GLYPH

@@ -7,7 +7,7 @@ from PySide6.QtCore import Qt, QTimer, QSize
 from PySide6.QtGui import QFont, QMouseEvent
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout,
-    QLabel, QProgressBar, QPlainTextEdit, QPushButton, QFrame,
+    QLabel, QProgressBar, QPlainTextEdit, QPushButton, QFrame, QWidget,
 )
 
 from core.i18n import tr
@@ -207,6 +207,7 @@ class BackupProgressDialog(QDialog):
         body_layout = QVBoxLayout(body)
         body_layout.setContentsMargins(24, 26, 24, 20)
         body_layout.setSpacing(0)
+        self._body_layout = body_layout  # usado por prompt_alternative_destination pra inserir o painel
 
         # Status principal
         self.lbl_title = QLabel(self._preparing_text)
@@ -227,14 +228,14 @@ class BackupProgressDialog(QDialog):
         body_layout.addSpacing(10)
 
         # Linha de status (ex: "Copiando ROOT... 62%")
-        self.lbl_status = QLabel("Aguardando início...")
+        self.lbl_status = QLabel(tr("backup.waiting_to_start"))
         self.lbl_status.setAlignment(Qt.AlignCenter)
         self.lbl_status.setObjectName("ProgressStatus")
         body_layout.addWidget(self.lbl_status)
         body_layout.addSpacing(4)
 
         # Arquivo atual — elide para não expandir a janela
-        self.lbl_current = _ElideLabel("Arquivo atual: —")
+        self.lbl_current = _ElideLabel(tr("backup.current_file_label").format(text="—"))
         self.lbl_current.setAlignment(Qt.AlignCenter)
         self.lbl_current.setObjectName("ProgressCurrentFile")
         body_layout.addWidget(self.lbl_current)
@@ -253,13 +254,13 @@ class BackupProgressDialog(QDialog):
         btn_row.setContentsMargins(0, 0, 0, 0)
         btn_row.setSpacing(10)
 
-        self.btn_cancel = QPushButton("Cancelar")
+        self.btn_cancel = QPushButton(tr("backup.btn_cancel"))
         self.btn_cancel.setMinimumWidth(160)
         self.btn_cancel.setFixedHeight(40)
         self.btn_cancel.setObjectName("BtnCancel")
         self.btn_cancel.clicked.connect(self._on_cancel_clicked)
 
-        self.btn_close = QPushButton("Fechar")
+        self.btn_close = QPushButton(tr("backup.btn_close"))
         self.btn_close.setEnabled(False)
         self.btn_close.setFixedSize(110, 40)
         self.btn_close.setObjectName("BtnClose")
@@ -474,7 +475,7 @@ class BackupProgressDialog(QDialog):
             return
 
         self._cancel_countdown = 5
-        self.btn_cancel.setText(f"Cancelar ({self._cancel_countdown}s)")
+        self.btn_cancel.setText(tr("backup.btn_cancel_confirm").format(s=self._cancel_countdown))
         self._cancel_timer.start()
 
     def _countdown_tick(self) -> None:
@@ -482,11 +483,11 @@ class BackupProgressDialog(QDialog):
         if self._cancel_countdown <= 0:
             self._cancel_timer.stop()
             self._cancel_countdown = 0
-            self.btn_cancel.setText("Cancelar")
+            self.btn_cancel.setText(tr("backup.btn_cancel"))
             # Contagem zerou sem segundo clique → continua backup
             self.set_status(tr("backup.cancel_ignored"))
         else:
-            self.btn_cancel.setText(f"Cancelar ({self._cancel_countdown}s) — clique p/ confirmar")
+            self.btn_cancel.setText(tr("backup.btn_cancel_confirm_hint").format(s=self._cancel_countdown))
 
     def _do_cancel(self) -> None:
         """Mata os processos rsync via PID e remove snapshots incompletos em background."""
@@ -497,7 +498,7 @@ class BackupProgressDialog(QDialog):
         # quando _on_cleanup_done() confirma que tudo terminou.
         self._is_cancelling = True
         self.btn_cancel.setEnabled(True)
-        self.btn_cancel.setText("Cancelando...")
+        self.btn_cancel.setText(tr("backup.btn_cancelling"))
         self.set_status(tr("backup.interrupting"))
         self.set_current_file("—")
 
@@ -759,7 +760,101 @@ class BackupProgressDialog(QDialog):
         self.lbl_status.setText(text)
 
     def set_current_file(self, text: str) -> None:
-        self.lbl_current.set_text(f"Arquivo atual: {text}")
+        self.lbl_current.set_text(tr("backup.current_file_label").format(text=text))
+
+    def prompt_alternative_destination(self, candidates: list[dict], estimated_gb: float) -> str | None:
+        """Mesmo método do EggsProgressDialog (ui/widgets/eggs_progress.py)
+        — portado pra cá pra reaproveitar exatamente o mesmo padrão em
+        vez de reinventar, agora que a criação agendada de snapshot
+        também pode precisar sugerir um disco alternativo quando o
+        destino configurado não tem espaço. Mostra, na mesma janela
+        (sem popup separado), uma lista de discos alternativos com
+        espaço suficiente e espera o usuário escolher um ou cancelar.
+        Bloqueia com um QEventLoop local. Retorna o mountpoint
+        escolhido, ou None se cancelado."""
+        from PySide6.QtCore import QEventLoop
+
+        if not self.isVisible():
+            self.show()
+
+        panel = QFrame()
+        panel.setObjectName("AltDestPanel")
+        panel.setStyleSheet("""
+            QFrame#AltDestPanel {
+                border: 1px solid rgba(255, 184, 107, 90);
+                border-radius: 10px;
+                background: rgba(255, 184, 107, 14);
+            }
+        """)
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(16, 14, 16, 14)
+        panel_layout.setSpacing(10)
+
+        title = QLabel(tr("snapshots.alt_dest_panel_title").format(gb=f"{estimated_gb:.1f}"))
+        title.setWordWrap(True)
+        title.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
+        title.setStyleSheet("color: #ffb86b; background: transparent; border: none;")
+        panel_layout.addWidget(title)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+
+        result = {"choice": None}
+        loop = QEventLoop()
+
+        def _make_pick(mountpoint: str):
+            def _pick():
+                result["choice"] = mountpoint
+                loop.quit()
+            return _pick
+
+        for c in candidates:
+            btn = QPushButton(
+                f"{c['mountpoint']}\n{c['label']} • {c['free_gb']:.1f} GB {tr('snapshots.free_label')}"
+            )
+            btn.setStyleSheet("""
+                QPushButton {
+                    background: rgba(255,255,255,8);
+                    border: 1px solid rgba(255, 184, 107, 110);
+                    border-radius: 8px;
+                    color: #ecf4ff;
+                    font-family: "DejaVu Sans Mono";
+                    font-size: 9pt;
+                    padding: 8px 14px;
+                }
+                QPushButton:hover {
+                    background: rgba(255, 184, 107, 35);
+                    border: 1px solid rgba(255, 184, 107, 200);
+                }
+            """)
+            btn.clicked.connect(_make_pick(c["mountpoint"]))
+            btn_row.addWidget(btn)
+
+        panel_layout.addLayout(btn_row)
+
+        log_index = self._body_layout.indexOf(self.log_view)
+        self._body_layout.insertWidget(log_index, panel)
+
+        spacer = QWidget()
+        spacer.setFixedHeight(14)
+        self._body_layout.insertWidget(log_index + 1, spacer)
+
+        def _cancel_pick():
+            result["choice"] = None
+            loop.quit()
+
+        self.btn_cancel.clicked.disconnect()
+        self.btn_cancel.clicked.connect(_cancel_pick)
+        self.btn_cancel.setEnabled(True)
+
+        loop.exec()
+
+        panel.deleteLater()
+        spacer.deleteLater()
+        self.btn_cancel.clicked.disconnect()
+        self.btn_cancel.clicked.connect(self._on_cancel_clicked)
+
+        return result["choice"]
 
     def _tick_elapsed(self) -> None:
         self._elapsed_seconds += 1
