@@ -692,9 +692,20 @@ class _IsoListCard(QFrame):
         text_col.addWidget(title)
         text_col.addWidget(meta)
 
-        self.btn_delete = QPushButton(tr("eggs.btn_delete"))
+        self.btn_delete = QPushButton()
         self.btn_delete.setIcon(qta.icon("mdi6.delete", color="#ff8888"))
-        self.btn_delete.setIconSize(QSize(16, 16))
+        self.btn_delete.setIconSize(QSize(22, 22))
+        self.btn_delete.setFixedSize(36, 36)
+        self.btn_delete.setToolTip(tr("eggs.btn_delete"))
+        self.btn_delete.setStyleSheet("""
+            QToolTip {
+                background: #14151c;
+                color: #ecf4ff;
+                border: 1px solid rgba(255, 136, 136, 140);
+                padding: 6px 10px;
+                border-radius: 6px;
+            }
+        """)
 
         root.addWidget(icon_lbl)
         root.addLayout(text_col, 1)
@@ -792,7 +803,7 @@ class _EggsOptionButton(QFrame):
         text.setAlignment(Qt.AlignVCenter)
 
         self.title_lbl = _ElideLabel(title)
-        self.title_lbl.setFont(QFont("DejaVu Sans Mono", 10 if compact else 12, QFont.Bold))
+        self.title_lbl.setFont(QFont("DejaVu Sans Mono", 9 if compact else 11, QFont.Bold))
         self.title_lbl.setStyleSheet(f"color: {color}; background: transparent; border: none;")
 
         badge_lbl = None
@@ -814,7 +825,7 @@ class _EggsOptionButton(QFrame):
 
 
         self.desc_lbl = QLabel(self._wrap_desc_html(desc))
-        self.desc_lbl.setFont(QFont("DejaVu Sans Mono", 9 if compact else 10))
+        self.desc_lbl.setFont(QFont("DejaVu Sans Mono", 8 if compact else 9))
         self.desc_lbl.setWordWrap(True)
         self.desc_lbl.setStyleSheet("color: #6b7a8d; background: transparent; border: none;")
 
