@@ -101,12 +101,6 @@ class BackupsPage(QWidget):
         )
         self.create_badge.clicked.connect(self._open_create_dialog)
         header_layout.addWidget(self.create_badge)
-        # Escondido por enquanto — pro usuário comum, ter dois badges
-        # ("Auto sync" e "Auto create") lado a lado parecia a mesma
-        # coisa duas vezes, confuso. Fica dormente aqui (código intacto,
-        # timer já desinstalado no app) até decidirmos reapresentar
-        # isso de um jeito que deixe a diferença clara.
-        self.create_badge.setVisible(False)
         self._refresh_create_badge()
 
         # Guarda o último "last_run" visto — usado pelo timer abaixo pra
