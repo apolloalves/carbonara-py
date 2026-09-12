@@ -16,6 +16,14 @@ from core.i18n import tr
 _SLOT_LOCK_FILES: list = []  # mantém os file handles vivos (flock morre se o fd fecha)
 
 
+def _hex_to_rgb(hex_color: str) -> str:
+    """'#5cc9a7' -> '92, 201, 167' — usado pra montar rgba(...) nos cards
+    de disco alternativo (prompt_alternative_destination)."""
+    h = hex_color.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"{r}, {g}, {b}"
+
+
 def _next_dialog_offset() -> tuple[int, int]:
     """Coordena o deslocamento entre janelas de progresso de PROCESSOS
     diferentes — cada uma roda no seu próprio processo root (pkexec),
@@ -88,6 +96,20 @@ class BackupProgressDialog(QDialog):
 
         # Para drag da janela sem titlebar
         self._drag_pos = None
+
+        # Não-None enquanto prompt_alternative_destination() estiver
+        # esperando escolha — X/Esc/fechar do WM chamam isso em vez do
+        # accept()/reject() normal, pra não travar o loop local órfão
+        # (ver prompt_alternative_destination).
+        self._alt_dest_cancel_cb = None
+
+        # True quando o usuário fechou a janela (X/Esc/WM) DURANTE o
+        # painel de disco alternativo — o chamador (carbonara-helper /
+        # scheduler.py) confere isso depois que check_space_for_create()
+        # retorna None, pra saber que já pode fechar tudo de vez em vez
+        # de reabrir a janela numa tela de "espaço insuficiente" separada
+        # esperando um segundo clique em "Fechar".
+        self._user_requested_close = False
 
         self._build_ui()
         self._apply_styles()
@@ -670,6 +692,9 @@ class BackupProgressDialog(QDialog):
         self._drag_pos = None
 
     def _on_header_close(self) -> None:
+        if self._alt_dest_cancel_cb is not None:
+            self._alt_dest_cancel_cb()
+            return
         if any(w.isRunning() for w in self._workers):
             self.set_status(tr("backup.running_status"))
             return
@@ -771,7 +796,12 @@ class BackupProgressDialog(QDialog):
         (sem popup separado), uma lista de discos alternativos com
         espaço suficiente e espera o usuário escolher um ou cancelar.
         Bloqueia com um QEventLoop local. Retorna o mountpoint
-        escolhido, ou None se cancelado."""
+        escolhido, ou None se cancelado.
+
+        Cards ordenados do maior pro menor espaço livre, com o primeiro
+        marcado como "RECOMENDADO" e uma barrinha de progresso relativa
+        (maior espaço livre entre os candidatos = barra cheia) — mockup
+        Opção A aprovado por Apollo."""
         from PySide6.QtCore import QEventLoop
 
         if not self.isVisible():
@@ -796,8 +826,8 @@ class BackupProgressDialog(QDialog):
         title.setStyleSheet("color: #ffb86b; background: transparent; border: none;")
         panel_layout.addWidget(title)
 
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(8)
+        cards_grid = QHBoxLayout()
+        cards_grid.setSpacing(10)
 
         result = {"choice": None}
         loop = QEventLoop()
@@ -808,29 +838,69 @@ class BackupProgressDialog(QDialog):
                 loop.quit()
             return _pick
 
-        for c in candidates:
-            btn = QPushButton(
-                f"{c['mountpoint']}\n{c['label']} • {c['free_gb']:.1f} GB {tr('snapshots.free_label')}"
-            )
-            btn.setStyleSheet("""
-                QPushButton {
-                    background: rgba(255,255,255,8);
-                    border: 1px solid rgba(255, 184, 107, 110);
-                    border-radius: 8px;
-                    color: #ecf4ff;
-                    font-family: "DejaVu Sans Mono";
-                    font-size: 9pt;
-                    padding: 8px 14px;
-                }
-                QPushButton:hover {
-                    background: rgba(255, 184, 107, 35);
-                    border: 1px solid rgba(255, 184, 107, 200);
-                }
-            """)
-            btn.clicked.connect(_make_pick(c["mountpoint"]))
-            btn_row.addWidget(btn)
+        sorted_candidates = sorted(candidates, key=lambda c: c["free_gb"], reverse=True)
+        max_free = max((c["free_gb"] for c in sorted_candidates), default=1.0) or 1.0
 
-        panel_layout.addLayout(btn_row)
+        for i, c in enumerate(sorted_candidates):
+            is_best = i == 0
+            accent = "#5cc9a7" if is_best else "#c3a864"
+            card = QFrame()
+            card.setObjectName("AltDestCard")
+            card.setCursor(Qt.PointingHandCursor)
+            border_alpha = 130 if is_best else 40
+            card.setStyleSheet(f"""
+                QFrame#AltDestCard {{
+                    background: rgba(255,255,255,6);
+                    border: 1px solid rgba({_hex_to_rgb(accent)}, {border_alpha});
+                    border-radius: 8px;
+                }}
+                QFrame#AltDestCard:hover {{
+                    background: rgba(255,255,255,12);
+                }}
+                QLabel {{ background: transparent; border: none; }}
+            """)
+            card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(12, 10, 12, 10)
+            card_layout.setSpacing(4)
+
+            if is_best:
+                badge = QLabel(tr("snapshots.alt_dest_recommended"))
+                badge.setFont(QFont("DejaVu Sans Mono", 7, QFont.Bold))
+                badge.setStyleSheet(f"color: #04342c; background: {accent}; border-radius: 5px; padding: 2px 6px;")
+                badge.setFixedWidth(badge.sizeHint().width())
+                card_layout.addWidget(badge)
+
+            name_lbl = QLabel(c["label"])
+            name_lbl.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
+            name_lbl.setStyleSheet("color: #ecf4ff;")
+            card_layout.addWidget(name_lbl)
+
+            path_lbl = QLabel(c["mountpoint"])
+            path_lbl.setFont(QFont("DejaVu Sans Mono", 7))
+            path_lbl.setStyleSheet("color: #6b7a8d;")
+            card_layout.addWidget(path_lbl)
+
+            bar_bg = QFrame()
+            bar_bg.setFixedHeight(5)
+            bar_bg.setStyleSheet("background: rgba(255,255,255,12); border-radius: 2px;")
+            bar_bg_layout = QHBoxLayout(bar_bg)
+            bar_bg_layout.setContentsMargins(0, 0, 0, 0)
+            bar_fill = QFrame()
+            pct = max(0.05, min(1.0, c["free_gb"] / max_free))
+            bar_fill.setStyleSheet(f"background: {accent}; border-radius: 2px;")
+            bar_bg_layout.addWidget(bar_fill, int(pct * 100))
+            bar_bg_layout.addStretch(int((1 - pct) * 100) or 1)
+            card_layout.addWidget(bar_bg)
+
+            free_lbl = QLabel(f"{c['free_gb']:.1f} GB {tr('snapshots.free_label')}")
+            free_lbl.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
+            free_lbl.setStyleSheet(f"color: {accent};")
+            card_layout.addWidget(free_lbl)
+
+            card.mousePressEvent = lambda event, m=c["mountpoint"]: _make_pick(m)()
+            cards_grid.addWidget(card)
+
+        panel_layout.addLayout(cards_grid)
 
         log_index = self._body_layout.indexOf(self.log_view)
         self._body_layout.insertWidget(log_index, panel)
@@ -843,12 +913,37 @@ class BackupProgressDialog(QDialog):
             result["choice"] = None
             loop.quit()
 
+        # Enquanto esse painel estiver aberto, o "X" do cabeçalho, o Esc
+        # (reject()) e o fechar do window manager (closeEvent) também
+        # precisam agir como "Cancelar" — sem isso, eles ESCONDEM a janela
+        # (hide()) mas o loop local aqui embaixo nunca é avisado e fica
+        # preso pra sempre esperando uma escolha que não vai chegar,
+        # deixando o processo todo travado atrás de uma janela que parece
+        # ter fechado. `_alt_dest_cancel_cb` é checado no topo de
+        # _on_header_close/closeEvent/reject() — usa uma variante que
+        # também loga que foi ESSE caminho (fechar a janela), não o
+        # "Cancelar" comum, pra deixar claro no log o que aconteceu.
+        def _cancel_via_close():
+            self.append_log(f"✗ {tr('snapshots.alt_dest_cancelled_by_close')}")
+            self.append_log("")
+            self._flush_log_buffer()
+            self._user_requested_close = True
+            _cancel_pick()
+            # Esconde JÁ, sem esperar o resto do processo terminar — senão
+            # a janela fica visível mais um instante só com o painel
+            # sumido (sem o texto de "espaço insuficiente" ainda), o que
+            # parece uma "segunda tela" mesmo sendo só um resquício breve.
+            self.hide()
+
+        self._alt_dest_cancel_cb = _cancel_via_close
+
         self.btn_cancel.clicked.disconnect()
-        self.btn_cancel.clicked.connect(_cancel_pick)
+        self.btn_cancel.clicked.connect(_cancel_via_close)
         self.btn_cancel.setEnabled(True)
 
         loop.exec()
 
+        self._alt_dest_cancel_cb = None
         panel.deleteLater()
         spacer.deleteLater()
         self.btn_cancel.clicked.disconnect()
@@ -897,6 +992,10 @@ class BackupProgressDialog(QDialog):
         self._flush_log_buffer()
 
     def closeEvent(self, event) -> None:
+        if self._alt_dest_cancel_cb is not None:
+            event.ignore()
+            self._alt_dest_cancel_cb()
+            return
         if any(w.isRunning() for w in self._workers):
             event.ignore()
             self.set_status(tr("backup.running_status"))
@@ -909,6 +1008,9 @@ class BackupProgressDialog(QDialog):
         # bloqueado com processo rodando, mas o ESC escapava e fechava o
         # diálogo sem avisar nada, deixando o worker órfão. Replica aqui a
         # mesma trava do closeEvent.
+        if self._alt_dest_cancel_cb is not None:
+            self._alt_dest_cancel_cb()
+            return
         if any(w.isRunning() for w in self._workers):
             self.set_status(tr("backup.running_status"))
             return

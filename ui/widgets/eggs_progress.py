@@ -11,23 +11,26 @@ from PySide6.QtWidgets import (
 from core.i18n import tr
 
 
+def _hex_to_rgb(hex_color: str) -> str:
+    """'#5cc9a7' -> '92, 201, 167' — usado pra montar rgba(...) nos cards
+    de disco alternativo (prompt_alternative_destination)."""
+    h = hex_color.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"{r}, {g}, {b}"
+
+
 class EggsProgressDialog(QDialog):
-    def __init__(self, title: str = "Penguin's Eggs", preparing_text: str | None = None, icon_glyph: str = "mdi6.egg-outline", parent=None):
+    def __init__(self, title: str = "Penguin's Eggs", preparing_text: str = "Iniciando...", icon_glyph: str = "mdi6.egg-outline", parent=None):
         super().__init__(parent)
         self.setWindowTitle(title)
-        self._preparing_text = preparing_text if preparing_text is not None else tr("common.starting")
+        self._preparing_text = preparing_text
         self._icon_glyph = icon_glyph
         self.setModal(True)
         self.setMinimumSize(1000, 700)
         self.resize(1060, 760)
 
-        # Remove titlebar nativa — usamos header customizado. Qt.Window
-        # (não Qt.Dialog) porque este dialog precisa ser maximizável —
-        # muitos WMs recusam silenciosamente maximizar janelas do tipo
-        # "Dialog". A causa real do empilhamento atrás do dock (ver
-        # _toggle_maximize abaixo) nunca foi esse flag — era a sobrescrita
-        # manual de geometria depois do showMaximized().
-        self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
+        # Remove titlebar nativa — usamos header customizado
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
 
         self._workers: list = []
         # Flag independente de _workers: cobre o período em que a operação
@@ -59,13 +62,25 @@ class EggsProgressDialog(QDialog):
         # Para drag da janela sem titlebar
         self._drag_pos = None
 
+        # Não-None enquanto prompt_alternative_destination() estiver
+        # esperando escolha — X/Esc/fechar do WM chamam isso em vez do
+        # accept()/reject() normal, pra não travar o loop local órfão
+        # (ver prompt_alternative_destination).
+        self._alt_dest_cancel_cb = None
+
+        # True quando o usuário fechou a janela (X/Esc/WM) DURANTE o
+        # painel de disco alternativo — o chamador (eggs.py) confere isso
+        # depois que check_space() retorna None, pra saber que já pode
+        # fechar tudo de vez em vez de reabrir numa tela de status
+        # separada esperando um segundo clique em "Fechar".
+        self._user_requested_close = False
+
         self._build_ui()
         self._apply_styles()
         self.log_view.viewport().setStyleSheet("background: rgba(0, 0, 0, 60);")
 
     def showEvent(self, event):
-        """Centraliza na tela primária ao exibir — evita aparecer no monitor
-        errado."""
+        """Centraliza na tela primária ao exibir — evita aparecer no monitor errado."""
         super().showEvent(event)
         from PySide6.QtGui import QGuiApplication
         screen = QGuiApplication.primaryScreen()
@@ -75,8 +90,6 @@ class EggsProgressDialog(QDialog):
                 geo.x() + (geo.width() - self.width()) // 2,
                 geo.y() + (geo.height() - self.height()) // 2,
             )
-        self.raise_()
-        self.activateWindow()
 
     # ------------------------------------------------------------------ UI --
 
@@ -136,12 +149,14 @@ class EggsProgressDialog(QDialog):
         # (showMaximized/showNormal) para o gerenciador de janelas (GNOME
         # Shell) reconhecer o estado corretamente (ex: esconder dock
         # com auto-hide quando a janela está maximizada de verdade).
+        self._is_maximized = False
+        self._normal_geometry = None
         self._btn_header_maximize = QPushButton()
         self._btn_header_maximize.setIcon(qta.icon("mdi6.window-maximize", color="#9aa6b2"))
         self._btn_header_maximize.setIconSize(QSize(15, 15))
         self._btn_header_maximize.setObjectName("HeaderMaximize")
         self._btn_header_maximize.setFixedSize(32, 32)
-        self._btn_header_maximize.setToolTip(tr("common.tooltip_maximize"))
+        self._btn_header_maximize.setToolTip("Maximizar")
         self._btn_header_maximize.clicked.connect(self._toggle_maximize)
         header_layout.addWidget(self._btn_header_maximize)
         header_layout.addSpacing(4)
@@ -182,7 +197,7 @@ class EggsProgressDialog(QDialog):
         body_layout.addSpacing(10)
 
         # Linha de status (ex: "Copiando ROOT... 62%")
-        self.lbl_status = QLabel(tr("common.waiting_start"))
+        self.lbl_status = QLabel("Aguardando início...")
         self.lbl_status.setAlignment(Qt.AlignCenter)
         self.lbl_status.setObjectName("ProgressStatus")
         body_layout.addWidget(self.lbl_status)
@@ -430,7 +445,7 @@ class EggsProgressDialog(QDialog):
             return
 
         self._cancel_countdown = 5
-        self.btn_cancel.setText(tr("common.cancel_button_countdown").format(s=self._cancel_countdown))
+        self.btn_cancel.setText(f"Cancelar ({self._cancel_countdown}s)")
         self._cancel_timer.start()
 
     def _countdown_tick(self) -> None:
@@ -438,17 +453,17 @@ class EggsProgressDialog(QDialog):
         if self._cancel_countdown <= 0:
             self._cancel_timer.stop()
             self._cancel_countdown = 0
-            self.btn_cancel.setText(tr("common.cancel_button"))
+            self.btn_cancel.setText("Cancelar")
             # Contagem zerou sem segundo clique → continua backup
-            self.set_status(tr("backup.cancel_ignored"))
+            self.set_status("Cancelamento ignorado. Backup continua...")
         else:
-            self.btn_cancel.setText(tr("common.cancel_button_confirm").format(s=self._cancel_countdown))
+            self.btn_cancel.setText(f"Cancelar ({self._cancel_countdown}s) — clique p/ confirmar")
 
     def _do_cancel(self) -> None:
         """Mata o processo eggs produce via PID e limpa /home/eggs com segurança."""
         self.btn_cancel.setEnabled(False)
-        self.btn_cancel.setText(tr("common.cancelling"))
-        self.set_status(tr("eggs.cancelling_op"))
+        self.btn_cancel.setText("Cancelando...")
+        self.set_status("Cancelando operação...")
         self.set_current_file("—")
         self._had_failure = True
 
@@ -476,10 +491,10 @@ class EggsProgressDialog(QDialog):
         self._cleanup_thread.start()
 
     def _on_eggs_cleanup_done(self) -> None:
-        self.lbl_status.setText(tr("eggs.cancelled_by_user"))
+        self.lbl_status.setText("Operação cancelada pelo usuário.")
         self.lbl_status.setStyleSheet("color: #ffb86b; font-weight: bold;")
         self.append_log("")
-        self.append_log(tr("eggs.cancelled_footer"))
+        self.append_log("--- Operação cancelada. Diretório /home/eggs removido. ---")
         self._timer_active = False
         self._elapsed_timer.stop()
         self.btn_cancel.setEnabled(False)
@@ -490,11 +505,11 @@ class EggsProgressDialog(QDialog):
     def _cancel_anim_tick(self) -> None:
         self._cancel_dots = (self._cancel_dots + 1) % 4
         dots = "." * self._cancel_dots
-        self.btn_cancel.setText(f"{tr('common.cancelling').rstrip('.')}{dots}")
+        self.btn_cancel.setText(f"Cancelando{dots}")
 
     def _on_cleanup_done(self) -> None:
         self._cancel_anim.stop()
-        self.append_log(tr("backup.cancelled_footer"))
+        self.append_log("— Backup cancelado. Snapshot incompleto removido. —")
         # Fecha com código 2 → snapshots_page identifica cancelamento intencional
         self.done(2)
 
@@ -535,29 +550,56 @@ class EggsProgressDialog(QDialog):
         self._drag_pos = None
 
     def _on_header_close(self) -> None:
+        if self._alt_dest_cancel_cb is not None:
+            self._alt_dest_cancel_cb()
+            return
         if any(w.isRunning() for w in self._workers):
-            self.set_status(tr("backup.running_status"))
+            self.set_status("Backup em execução. Use Cancelar para interromper.")
             return
         self.accept()
 
     def _toggle_maximize(self) -> None:
-        """Usa o maximize nativo do Qt (showMaximized/showNormal) puro,
-        confiando inteiramente no gerenciador de janelas. A versão antiga
-        deste método evitava showMaximized() e fazia setGeometry manual
-        porque um diagnóstico anterior (errado) achava que o estado
-        "maximizado" nativo é que empilhava a janela atrás do dock — na
-        real, era a própria sobrescrita manual de geometria que causava
-        isso, confirmado ao corrigir o mesmo bug no ClonezillaProgressDialog.
-        O showMaximized() nativo já maximiza corretamente no monitor onde
-        a janela está no momento, sem precisar de screenAt() manual."""
-        if self.isMaximized():
-            self.showNormal()
-            self._btn_header_maximize.setIcon(qta.icon("mdi6.window-maximize", color="#9aa6b2"))
-            self._btn_header_maximize.setToolTip(tr("common.tooltip_maximize"))
-        else:
-            self.showMaximized()
+        """Redimensionamento manual pra tela toda (via setGeometry), sem
+        usar o showMaximized() nativo do Qt. No dock customizado do
+        Apollo, o estado "maximizado" nativo registrado junto ao WM fazia
+        essa janela (frameless) empilhar ATRÁS do dock depois de
+        maximizar — usar só setGeometry(availableGeometry()) evita entrar
+        nesse estado do WM e resolve o empilhamento na maioria dos casos.
+
+        self.screen() pode ficar desatualizado numa janela frameless que
+        acabou de ser arrastada pra outro monitor (Qt só reatribui o
+        screen "oficial" da janela em certos eventos, que uma janela sem
+        decoração às vezes não dispara a tempo) — isso fazia a largura
+        vazar pro monitor vizinho quando maximizada logo após arrastar
+        pro Dell menor. screenAt(centro real da janela) pergunta pro Qt
+        qual monitor está fisicamente sob a janela agora, sem depender
+        desse cache."""
+        if not self._is_maximized:
+            self._normal_geometry = self.geometry()
+            screen = (
+                QApplication.screenAt(self.frameGeometry().center())
+                or self.screen()
+                or QApplication.primaryScreen()
+            )
+            if screen:
+                target = screen.availableGeometry()
+                self.setGeometry(target)
+            # Força a janela pra frente — alguns docks/painéis customizados
+            # não são um _NET_WM_STRUT real reconhecido pelo WM, então
+            # availableGeometry() não os exclui e a janela pode nascer
+            # atrás deles; raise_()+activateWindow() briga por cima disso.
+            self.raise_()
+            self.activateWindow()
             self._btn_header_maximize.setIcon(qta.icon("mdi6.window-restore", color="#9aa6b2"))
-            self._btn_header_maximize.setToolTip(tr("common.tooltip_restore"))
+            self._btn_header_maximize.setToolTip("Restaurar")
+            self._is_maximized = True
+        else:
+            self.showNormal()
+            if self._normal_geometry is not None:
+                self.setGeometry(self._normal_geometry)
+            self._btn_header_maximize.setIcon(qta.icon("mdi6.window-maximize", color="#9aa6b2"))
+            self._btn_header_maximize.setToolTip("Maximizar")
+            self._is_maximized = False
 
     def mouseDoubleClickEvent(self, event) -> None:
         """Duplo clique no header também alterna maximizar, como em janelas normais."""
@@ -630,17 +672,6 @@ class EggsProgressDialog(QDialog):
     def set_status(self, text: str) -> None:
         self.lbl_status.setText(text)
 
-    def set_progress_percent(self, pct: int) -> None:
-        """Troca a barra do modo indeterminado (setRange(0,0), só um
-        segmento andando de um lado pro outro) pra uma barra real 0-100%
-        assim que o primeiro percentual real chega (ex: parseado do
-        xorriso) — antes ficava indeterminada a operação inteira, e se
-        travasse não dava pra saber em qual etapa (70%? 90%?) sem rolar
-        o log até achar a última linha."""
-        if self.progress.maximum() == 0:
-            self.progress.setRange(0, 100)
-        self.progress.setValue(max(0, min(100, pct)))
-
     def set_title(self, text: str) -> None:
         """Texto central grande (ex: 'Instalando...') — antes só dava pra
         definir na criação do diálogo (preparing_text) e ficava preso
@@ -665,7 +696,12 @@ class EggsProgressDialog(QDialog):
         escolher um ou cancelar. Bloqueia com um QEventLoop local — não
         precisa de dialog.exec() aninhado, já que a QApplication já existe
         nesse ponto (roda dentro do processo privilegiado do helper).
-        Retorna o mountpoint escolhido, ou None se cancelado."""
+        Retorna o mountpoint escolhido, ou None se cancelado.
+
+        Cards ordenados do maior pro menor espaço livre, com o primeiro
+        marcado como "RECOMENDADO" e uma barrinha de progresso relativa
+        (maior espaço livre entre os candidatos = barra cheia) — mockup
+        Opção A aprovado por Apollo."""
         from PySide6.QtCore import QEventLoop
 
         if not self.isVisible():
@@ -684,17 +720,14 @@ class EggsProgressDialog(QDialog):
         panel_layout.setContentsMargins(16, 14, 16, 14)
         panel_layout.setSpacing(10)
 
-        title = QLabel(
-            f"Espaço insuficiente no destino escolhido "
-            f"(necessário ~{estimated_gb:.1f} GB). Escolha outro disco:"
-        )
+        title = QLabel(tr("snapshots.alt_dest_panel_title").format(gb=f"{estimated_gb:.1f}"))
         title.setWordWrap(True)
         title.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
         title.setStyleSheet("color: #ffb86b; background: transparent; border: none;")
         panel_layout.addWidget(title)
 
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(8)
+        cards_grid = QHBoxLayout()
+        cards_grid.setSpacing(10)
 
         result = {"choice": None}
         loop = QEventLoop()
@@ -705,27 +738,69 @@ class EggsProgressDialog(QDialog):
                 loop.quit()
             return _pick
 
-        for c in candidates:
-            btn = QPushButton(f"{c['mountpoint']}\n{c['label']} • {c['free_gb']:.1f} GB livres")
-            btn.setStyleSheet("""
-                QPushButton {
-                    background: rgba(255,255,255,8);
-                    border: 1px solid rgba(255, 184, 107, 110);
-                    border-radius: 8px;
-                    color: #ecf4ff;
-                    font-family: "DejaVu Sans Mono";
-                    font-size: 9pt;
-                    padding: 8px 14px;
-                }
-                QPushButton:hover {
-                    background: rgba(255, 184, 107, 35);
-                    border: 1px solid rgba(255, 184, 107, 200);
-                }
-            """)
-            btn.clicked.connect(_make_pick(c["mountpoint"]))
-            btn_row.addWidget(btn)
+        sorted_candidates = sorted(candidates, key=lambda c: c["free_gb"], reverse=True)
+        max_free = max((c["free_gb"] for c in sorted_candidates), default=1.0) or 1.0
 
-        panel_layout.addLayout(btn_row)
+        for i, c in enumerate(sorted_candidates):
+            is_best = i == 0
+            accent = "#5cc9a7" if is_best else "#c3a864"
+            card = QFrame()
+            card.setObjectName("AltDestCard")
+            card.setCursor(Qt.PointingHandCursor)
+            border_alpha = 130 if is_best else 40
+            card.setStyleSheet(f"""
+                QFrame#AltDestCard {{
+                    background: rgba(255,255,255,6);
+                    border: 1px solid rgba({_hex_to_rgb(accent)}, {border_alpha});
+                    border-radius: 8px;
+                }}
+                QFrame#AltDestCard:hover {{
+                    background: rgba(255,255,255,12);
+                }}
+                QLabel {{ background: transparent; border: none; }}
+            """)
+            card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(12, 10, 12, 10)
+            card_layout.setSpacing(4)
+
+            if is_best:
+                badge = QLabel(tr("snapshots.alt_dest_recommended"))
+                badge.setFont(QFont("DejaVu Sans Mono", 7, QFont.Bold))
+                badge.setStyleSheet(f"color: #04342c; background: {accent}; border-radius: 5px; padding: 2px 6px;")
+                badge.setFixedWidth(badge.sizeHint().width())
+                card_layout.addWidget(badge)
+
+            name_lbl = QLabel(c["label"])
+            name_lbl.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
+            name_lbl.setStyleSheet("color: #ecf4ff;")
+            card_layout.addWidget(name_lbl)
+
+            path_lbl = QLabel(c["mountpoint"])
+            path_lbl.setFont(QFont("DejaVu Sans Mono", 7))
+            path_lbl.setStyleSheet("color: #6b7a8d;")
+            card_layout.addWidget(path_lbl)
+
+            bar_bg = QFrame()
+            bar_bg.setFixedHeight(5)
+            bar_bg.setStyleSheet("background: rgba(255,255,255,12); border-radius: 2px;")
+            bar_bg_layout = QHBoxLayout(bar_bg)
+            bar_bg_layout.setContentsMargins(0, 0, 0, 0)
+            bar_fill = QFrame()
+            pct = max(0.05, min(1.0, c["free_gb"] / max_free))
+            bar_fill.setStyleSheet(f"background: {accent}; border-radius: 2px;")
+            bar_bg_layout.addWidget(bar_fill, int(pct * 100))
+            bar_bg_layout.addStretch(int((1 - pct) * 100) or 1)
+            card_layout.addWidget(bar_bg)
+
+            free_lbl = QLabel(f"{c['free_gb']:.1f} GB {tr('snapshots.free_label')}")
+            free_lbl.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
+            free_lbl.setStyleSheet(f"color: {accent};")
+            card_layout.addWidget(free_lbl)
+
+            card.mousePressEvent = lambda event, m=c["mountpoint"]: _make_pick(m)()
+            cards_grid.addWidget(card)
+
+        panel_layout.addLayout(cards_grid)
 
         # Insere logo acima do log — bem visível, sem atrapalhar o resto
         # do layout (barra de progresso, título, etc. continuam no lugar).
@@ -748,12 +823,32 @@ class EggsProgressDialog(QDialog):
         # do rodapé (já existente), conectado só enquanto o painel está
         # aberto. Nada de confirmação em 2 cliques aqui: cancelar a
         # escolha do disco não interrompe nada destrutivo em andamento.
+        # `_alt_dest_cancel_cb` também é setado — X/Esc/fechar do WM
+        # chamam ele em vez de accept()/reject() normal, senão eles
+        # escondem a janela mas deixam esse loop local órfão pra sempre.
+        # Usa uma variante que também loga que foi esse caminho (fechar
+        # a janela), não o "Cancelar" comum, pra deixar claro no log.
+        def _cancel_via_close():
+            self.append_log(f"✗ {tr('snapshots.alt_dest_cancelled_by_close')}")
+            self.append_log("")
+            self._flush_log_buffer()
+            self._user_requested_close = True
+            _cancel_pick()
+            # Esconde JÁ, sem esperar o resto do processo terminar — senão
+            # a janela fica visível mais um instante só com o painel
+            # sumido (sem o texto de "espaço insuficiente" ainda), o que
+            # parece uma "segunda tela" mesmo sendo só um resquício breve.
+            self.hide()
+
+        self._alt_dest_cancel_cb = _cancel_via_close
+
         self.btn_cancel.clicked.disconnect()
-        self.btn_cancel.clicked.connect(_cancel_pick)
+        self.btn_cancel.clicked.connect(_cancel_via_close)
         self.btn_cancel.setEnabled(True)
 
         loop.exec()
 
+        self._alt_dest_cancel_cb = None
         self.btn_cancel.clicked.disconnect()
         self.btn_cancel.clicked.connect(self._on_cancel_clicked)
         panel.deleteLater()
@@ -790,24 +885,28 @@ class EggsProgressDialog(QDialog):
             # Só exibe ERRO se não foi cancelamento intencional (status já foi setado no cancel)
             if "cancelada" not in status.lower():
                 self.lbl_status.setStyleSheet("color: #ff8888; font-weight: bold;")
-                self.append_log(tr("backup.log_error_prefix").format(msg=status))
-                self.append_log(tr("backup.elapsed_time").format(elapsed=elapsed))
+                self.append_log(f"ERRO: {status}")
+                self.append_log(f"Tempo decorrido: {elapsed}")
         else:
             if "nenhuma atualização disponível" in status.lower():
                 self.lbl_status.setStyleSheet("color: #ffb86b; font-weight: bold;")
             else:
                 self.lbl_status.setStyleSheet("color: #9bf0bd; font-weight: bold;")
             self.append_log(f"✓ {status}")
-            self.append_log(tr("backup.elapsed_time").format(elapsed=elapsed))
+            self.append_log(f"Tempo decorrido: {elapsed}")
 
         # Garante que as últimas linhas apareçam na hora, sem esperar o
         # próximo tick do timer de 300ms (a operação já terminou).
         self._flush_log_buffer()
 
     def closeEvent(self, event) -> None:
+        if self._alt_dest_cancel_cb is not None:
+            event.ignore()
+            self._alt_dest_cancel_cb()
+            return
         if self._is_running or any(w.isRunning() for w in self._workers):
             event.ignore()
-            self.set_status(tr("backup.running_status"))
+            self.set_status("Backup em execução. Use Cancelar para interromper.")
             return
         super().closeEvent(event)
 
@@ -819,9 +918,14 @@ class EggsProgressDialog(QDialog):
         # ISO em andamento se perdeu). Replica aqui a mesma trava do closeEvent.
         # Checa _is_running também, não só _workers: durante o painel de
         # escolha de disco alternativo ainda não existe worker nenhum, só
-        # o QEventLoop local — sem isso o ESC escapava bem nessa janela.
+        # o QEventLoop local — mas agora esse painel tem seu próprio jeito
+        # de cancelar (_alt_dest_cancel_cb, checado acima), então X/Esc não
+        # ficam mais travados nem deixam o loop local órfão.
+        if self._alt_dest_cancel_cb is not None:
+            self._alt_dest_cancel_cb()
+            return
         if self._is_running or any(w.isRunning() for w in self._workers):
-            self.set_status(tr("backup.running_status"))
+            self.set_status("Backup em execução. Use Cancelar para interromper.")
             return
         super().reject()
 
@@ -833,7 +937,7 @@ class _SuccessDialog(QDialog):
 
     def __init__(self, message: str, elapsed_text: str = "", parent=None):
         super().__init__(parent)
-        self.setWindowTitle(tr("eggs.done_title"))
+        self.setWindowTitle("Concluído")
         self.setModal(True)
         self.setFixedSize(440, 220)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
@@ -859,7 +963,7 @@ class _SuccessDialog(QDialog):
             "QLabel { background: rgba(74,222,128,40); border-radius: 9px; }"
         )
 
-        lbl_title = QLabel(tr("eggs.done_success_label"))
+        lbl_title = QLabel("Concluído com sucesso")
         lbl_title.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
         lbl_title.setStyleSheet("color: #ffffff; background: transparent;")
 
