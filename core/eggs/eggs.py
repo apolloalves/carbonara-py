@@ -618,7 +618,7 @@ def _start_move_and_backup(dialog, iso_files: list[Path], destination: Path | No
             parent=dialog,
         )
         dialog.register_worker(rsync_worker)
-        rsync_worker.progress_changed.connect(dialog.set_progress_percent)
+        rsync_worker.progress_changed.connect(dialog.progress.setValue)
 
         def on_rsync_ok() -> None:
             dialog.append_log(tr("eggs_core.log_ready_both").format(name=dest.name))
@@ -847,7 +847,7 @@ def create_eggs(dialog, parent=None, destination: str | None = None, update_chec
 
     worker.log_line.connect(dialog.append_log)
     worker.file_changed.connect(dialog.set_current_file)
-    worker.progress_changed.connect(dialog.set_progress_percent)
+    worker.progress_changed.connect(dialog.progress.setValue)
 
     def on_ok() -> None:
         dialog.append_log(tr("eggs_core.log_iso_generated"))
@@ -1133,7 +1133,7 @@ def install_eggs(dialog, parent=None) -> None:
         worker.log_line.connect(_watch_for_nothing_to_update)
         worker.log_line.connect(dialog.append_log)
         worker.file_changed.connect(dialog.set_current_file)
-        worker.progress_changed.connect(dialog.set_progress_percent)
+        worker.progress_changed.connect(dialog.progress.setValue)
 
         def on_ok() -> None:
             run_next(index + 1)
