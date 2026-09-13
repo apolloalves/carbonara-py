@@ -1025,15 +1025,27 @@ class DiskPickerDialog(QDialog):
         intro_lbl.setStyleSheet("color: #c8d4e0;")
         body_layout.addWidget(intro_lbl)
 
-        # Nome do ISO em destaque (verde, negrito) — sem parênteses, o
-        # tamanho vem logo em seguida em cor neutra.
+        # Nome do ISO em destaque (verde, negrito) — mesmo ícone de disco
+        # do card original — sem parênteses, tamanho logo em seguida em
+        # cor neutra.
+        detail_row = QHBoxLayout()
+        detail_row.setContentsMargins(0, 10, 0, 0)
+        detail_row.setSpacing(8)
+
+        detail_icon = QLabel()
+        detail_icon.setFixedSize(20, 20)
+        detail_icon.setPixmap(qta.icon("mdi6.disc", color="#9bf0bd").pixmap(18, 18))
+        detail_row.addWidget(detail_icon)
+
         detail_lbl = QLabel(
             f'<span style="color:#9bf0bd; font-weight:700;">{iso_name}</span>'
             f'<span style="color:#8b95a5;">  ·  {iso_size_gb:.1f} GB</span>'
         )
         detail_lbl.setWordWrap(True)
         detail_lbl.setFont(QFont("DejaVu Sans Mono", 11))
-        body_layout.addWidget(detail_lbl)
+        detail_row.addWidget(detail_lbl, 1)
+
+        body_layout.addLayout(detail_row)
 
         body_layout.addSpacing(18)
 
@@ -1047,7 +1059,7 @@ class DiskPickerDialog(QDialog):
         self._combo.setMaxVisibleItems(8)
         self._combo.setFocusPolicy(Qt.StrongFocus)
         self._combo.setView(QListView())
-        self._combo.setMinimumWidth(420)
+        self._combo.setMinimumWidth(520)
         self._combo.setStyleSheet("""
             QComboBox {
                 background: rgba(10, 15, 25, 230);
@@ -1128,6 +1140,7 @@ class DiskPickerDialog(QDialog):
         body_layout.addSpacing(20)
 
         btn_row = QHBoxLayout()
+        btn_row.setSpacing(12)
         btn_row.addStretch(1)
         btn_cancel = QPushButton(tr("backup.btn_cancel"))
         btn_cancel.setCursor(Qt.PointingHandCursor)
