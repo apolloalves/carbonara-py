@@ -71,7 +71,8 @@ def style_combo_popup(combo: QComboBox) -> None:
     )
 
 
-from core.system.disks import list_relevant_disks
+from core.system.disks import list_relevant_disks, parse_size_to_gb
+from ui.widgets.eggs_progress import DiskPickerDialog
 from core.i18n import tr, i18n
 
 
@@ -707,8 +708,24 @@ class _IsoListCard(QFrame):
             }
         """)
 
+        self.btn_move = QPushButton()
+        self.btn_move.setIcon(qta.icon("mdi6.folder-move-outline", color="#8fd4ff"))
+        self.btn_move.setIconSize(QSize(22, 22))
+        self.btn_move.setFixedSize(36, 36)
+        self.btn_move.setToolTip(tr("eggs.btn_move"))
+        self.btn_move.setStyleSheet("""
+            QToolTip {
+                background: #14151c;
+                color: #ecf4ff;
+                border: 1px solid rgba(143, 212, 255, 140);
+                padding: 6px 10px;
+                border-radius: 6px;
+            }
+        """)
+
         root.addWidget(icon_lbl)
         root.addLayout(text_col, 1)
+        root.addWidget(self.btn_move)
         root.addWidget(self.btn_delete)
 
 
@@ -1424,6 +1441,7 @@ class EggsPage(QWidget):
         for entry in entries:
             card = _IsoListCard(entry)
             card.btn_delete.clicked.connect(lambda _, e=entry: self._delete_iso(e))
+            card.btn_move.clicked.connect(lambda _, e=entry: self._move_iso(e))
             cards.append(card)
 
         grid = _ResponsiveCardGrid(cards, min_card_width=ISO_CARD_MIN_WIDTH)
@@ -1446,6 +1464,65 @@ class EggsPage(QWidget):
         self._refresh_destinations()
         self.refresh_stats()
         self.rebuild_iso_list()
+
+    def _move_iso(self, entry) -> None:
+        """Move um ISO já existente pra outro disco — reaproveita o
+        DiskPickerDialog (mesmo card com badge "RECOMENDADO" e barra de
+        espaço do check_space_for_create), não um seletor novo."""
+        current_mountpoint = None
+        for d in list_relevant_disks():
+            try:
+                entry.path.relative_to(d.mountpoint)
+                current_mountpoint = d.mountpoint
+                break
+            except ValueError:
+                continue
+
+        candidates = []
+        for d in list_relevant_disks():
+            if d.mountpoint == current_mountpoint:
+                continue
+            free_gb = parse_size_to_gb(d.avail)
+            if free_gb >= entry.size_gb:
+                candidates.append({
+                    "mountpoint": d.mountpoint,
+                    "free_gb": free_gb,
+                    "label": d.model or d.name,
+                })
+
+        if not candidates:
+            _show_error("Carbonara", tr("eggs.move_no_disks"), parent=self)
+            return
+
+        title = tr("eggs.move_dialog_title").format(name=entry.name, gb=f"{entry.size_gb:.1f}")
+        dialog = DiskPickerDialog(title, candidates, parent=self)
+        if dialog.exec() != QDialog.Accepted or not dialog.chosen_mountpoint:
+            return
+
+        import json
+        import subprocess
+
+        args_json = json.dumps({
+            "path": str(entry.path),
+            "destination_mountpoint": dialog.chosen_mountpoint,
+        })
+        cmd = [
+            "pkexec",
+            "/usr/local/bin/carbonara-helper",
+            os.environ.get("DISPLAY", ""),
+            os.environ.get("XAUTHORITY", ""),
+            "eggs.move_iso",
+            args_json,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            if result.returncode == 126:
+                return  # usuário cancelou a autenticação
+            err = result.stderr.strip() or f"exit code {result.returncode}"
+            _show_error("Carbonara", tr("eggs.move_failed").format(err=err), parent=self)
+            self.refresh_list()
+            return
+        self.refresh_list()
 
     def _delete_iso(self, entry) -> None:
         dialog = _DeleteIsoConfirmDialog(entry.name, entry.size_gb, parent=self)

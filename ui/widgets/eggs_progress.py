@@ -19,6 +19,81 @@ def _hex_to_rgb(hex_color: str) -> str:
     return f"{r}, {g}, {b}"
 
 
+def build_disk_cards(candidates: list[dict], on_pick) -> QHBoxLayout:
+    """Constrói a fileira de cards de disco (badge "RECOMENDADO" no
+    maior espaço livre, barra de progresso relativa, cor teal/âmbar) —
+    extraído de prompt_alternative_destination() pra ser reaproveitado
+    também por diálogos autônomos fora de uma operação em andamento
+    (ex: "mover ISO pra outro disco"). `on_pick(mountpoint)` é chamado
+    quando um card é clicado."""
+    cards_grid = QHBoxLayout()
+    cards_grid.setSpacing(10)
+
+    sorted_candidates = sorted(candidates, key=lambda c: c["free_gb"], reverse=True)
+    max_free = max((c["free_gb"] for c in sorted_candidates), default=1.0) or 1.0
+
+    for i, c in enumerate(sorted_candidates):
+        is_best = i == 0
+        accent = "#5cc9a7" if is_best else "#c3a864"
+        card = QFrame()
+        card.setObjectName("AltDestCard")
+        card.setCursor(Qt.PointingHandCursor)
+        border_alpha = 130 if is_best else 40
+        card.setStyleSheet(f"""
+            QFrame#AltDestCard {{
+                background: rgba(255,255,255,6);
+                border: 1px solid rgba({_hex_to_rgb(accent)}, {border_alpha});
+                border-radius: 8px;
+            }}
+            QFrame#AltDestCard:hover {{
+                background: rgba(255,255,255,12);
+            }}
+            QLabel {{ background: transparent; border: none; }}
+        """)
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(12, 10, 12, 10)
+        card_layout.setSpacing(4)
+
+        if is_best:
+            badge = QLabel(tr("snapshots.alt_dest_recommended"))
+            badge.setFont(QFont("DejaVu Sans Mono", 7, QFont.Bold))
+            badge.setStyleSheet(f"color: #04342c; background: {accent}; border-radius: 5px; padding: 2px 6px;")
+            badge.setFixedWidth(badge.sizeHint().width())
+            card_layout.addWidget(badge)
+
+        name_lbl = QLabel(c["label"])
+        name_lbl.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
+        name_lbl.setStyleSheet("color: #ecf4ff;")
+        card_layout.addWidget(name_lbl)
+
+        path_lbl = QLabel(c["mountpoint"])
+        path_lbl.setFont(QFont("DejaVu Sans Mono", 7))
+        path_lbl.setStyleSheet("color: #6b7a8d;")
+        card_layout.addWidget(path_lbl)
+
+        bar_bg = QFrame()
+        bar_bg.setFixedHeight(5)
+        bar_bg.setStyleSheet("background: rgba(255,255,255,12); border-radius: 2px;")
+        bar_bg_layout = QHBoxLayout(bar_bg)
+        bar_bg_layout.setContentsMargins(0, 0, 0, 0)
+        bar_fill = QFrame()
+        pct = max(0.05, min(1.0, c["free_gb"] / max_free))
+        bar_fill.setStyleSheet(f"background: {accent}; border-radius: 2px;")
+        bar_bg_layout.addWidget(bar_fill, int(pct * 100))
+        bar_bg_layout.addStretch(int((1 - pct) * 100) or 1)
+        card_layout.addWidget(bar_bg)
+
+        free_lbl = QLabel(f"{c['free_gb']:.1f} GB {tr('snapshots.free_label')}")
+        free_lbl.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
+        free_lbl.setStyleSheet(f"color: {accent};")
+        card_layout.addWidget(free_lbl)
+
+        card.mousePressEvent = lambda event, m=c["mountpoint"]: on_pick(m)
+        cards_grid.addWidget(card)
+
+    return cards_grid
+
+
 class EggsProgressDialog(QDialog):
     def __init__(self, title: str = "Penguin's Eggs", preparing_text: str = "Iniciando...", icon_glyph: str = "mdi6.egg-outline", parent=None):
         super().__init__(parent)
@@ -703,80 +778,14 @@ class EggsProgressDialog(QDialog):
         title.setStyleSheet("color: #ffb86b; background: transparent; border: none;")
         panel_layout.addWidget(title)
 
-        cards_grid = QHBoxLayout()
-        cards_grid.setSpacing(10)
-
         result = {"choice": None}
         loop = QEventLoop()
 
-        def _make_pick(mountpoint: str):
-            def _pick():
-                result["choice"] = mountpoint
-                loop.quit()
-            return _pick
+        def _pick(mountpoint: str) -> None:
+            result["choice"] = mountpoint
+            loop.quit()
 
-        sorted_candidates = sorted(candidates, key=lambda c: c["free_gb"], reverse=True)
-        max_free = max((c["free_gb"] for c in sorted_candidates), default=1.0) or 1.0
-
-        for i, c in enumerate(sorted_candidates):
-            is_best = i == 0
-            accent = "#5cc9a7" if is_best else "#c3a864"
-            card = QFrame()
-            card.setObjectName("AltDestCard")
-            card.setCursor(Qt.PointingHandCursor)
-            border_alpha = 130 if is_best else 40
-            card.setStyleSheet(f"""
-                QFrame#AltDestCard {{
-                    background: rgba(255,255,255,6);
-                    border: 1px solid rgba({_hex_to_rgb(accent)}, {border_alpha});
-                    border-radius: 8px;
-                }}
-                QFrame#AltDestCard:hover {{
-                    background: rgba(255,255,255,12);
-                }}
-                QLabel {{ background: transparent; border: none; }}
-            """)
-            card_layout = QVBoxLayout(card)
-            card_layout.setContentsMargins(12, 10, 12, 10)
-            card_layout.setSpacing(4)
-
-            if is_best:
-                badge = QLabel(tr("snapshots.alt_dest_recommended"))
-                badge.setFont(QFont("DejaVu Sans Mono", 7, QFont.Bold))
-                badge.setStyleSheet(f"color: #04342c; background: {accent}; border-radius: 5px; padding: 2px 6px;")
-                badge.setFixedWidth(badge.sizeHint().width())
-                card_layout.addWidget(badge)
-
-            name_lbl = QLabel(c["label"])
-            name_lbl.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
-            name_lbl.setStyleSheet("color: #ecf4ff;")
-            card_layout.addWidget(name_lbl)
-
-            path_lbl = QLabel(c["mountpoint"])
-            path_lbl.setFont(QFont("DejaVu Sans Mono", 7))
-            path_lbl.setStyleSheet("color: #6b7a8d;")
-            card_layout.addWidget(path_lbl)
-
-            bar_bg = QFrame()
-            bar_bg.setFixedHeight(5)
-            bar_bg.setStyleSheet("background: rgba(255,255,255,12); border-radius: 2px;")
-            bar_bg_layout = QHBoxLayout(bar_bg)
-            bar_bg_layout.setContentsMargins(0, 0, 0, 0)
-            bar_fill = QFrame()
-            pct = max(0.05, min(1.0, c["free_gb"] / max_free))
-            bar_fill.setStyleSheet(f"background: {accent}; border-radius: 2px;")
-            bar_bg_layout.addWidget(bar_fill, int(pct * 100))
-            bar_bg_layout.addStretch(int((1 - pct) * 100) or 1)
-            card_layout.addWidget(bar_bg)
-
-            free_lbl = QLabel(f"{c['free_gb']:.1f} GB {tr('snapshots.free_label')}")
-            free_lbl.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
-            free_lbl.setStyleSheet(f"color: {accent};")
-            card_layout.addWidget(free_lbl)
-
-            card.mousePressEvent = lambda event, m=c["mountpoint"]: _make_pick(m)()
-            cards_grid.addWidget(card)
-
+        cards_grid = build_disk_cards(candidates, _pick)
         panel_layout.addLayout(cards_grid)
 
         # Insere logo acima do log — bem visível, sem atrapalhar o resto
@@ -905,6 +914,70 @@ class EggsProgressDialog(QDialog):
             self.set_status("Backup em execução. Use Cancelar para interromper.")
             return
         super().reject()
+
+
+# ── Diálogo de escolha de disco — fora de uma operação em andamento ────────
+
+class DiskPickerDialog(QDialog):
+    """Diálogo autônomo de escolha de disco — mesma peça visual do
+    painel de disco alternativo (build_disk_cards), só que sem estar
+    embutido numa operação já em progresso. Usado por ações isoladas
+    como "mover ISO para outro disco". Bloqueia com .exec() normal
+    (não precisa do QEventLoop manual que o painel embutido usa, já
+    que aqui não tem nenhuma outra operação rodando por baixo)."""
+
+    def __init__(self, title_text: str, candidates: list[dict], parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title_text)
+        self.setModal(True)
+        self.chosen_mountpoint: str | None = None
+
+        self.setStyleSheet("""
+            QDialog { background: #14151c; border-radius: 14px; }
+            QLabel { background: transparent; border: none; }
+        """)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(24, 22, 24, 20)
+        root.setSpacing(16)
+
+        title = QLabel(title_text)
+        title.setWordWrap(True)
+        title.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+        title.setStyleSheet("color: #ecf4ff;")
+        root.addWidget(title)
+
+        cards_grid = build_disk_cards(candidates, self._on_pick)
+        root.addLayout(cards_grid)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch(1)
+        btn_cancel = QPushButton(tr("backup.btn_cancel"))
+        btn_cancel.setCursor(Qt.PointingHandCursor)
+        btn_cancel.setFixedHeight(38)
+        btn_cancel.setStyleSheet("""
+            QPushButton {
+                background: rgba(255,255,255,6);
+                border: 1px solid rgba(255,255,255,18);
+                border-radius: 8px;
+                color: #ecf4ff;
+                font-family: "DejaVu Sans Mono";
+                font-size: 11px;
+                font-weight: bold;
+                padding: 0 18px;
+            }
+            QPushButton:hover {
+                background: rgba(255,120,120,40);
+                border-color: rgba(255,120,120,140);
+            }
+        """)
+        btn_cancel.clicked.connect(self.reject)
+        btn_row.addWidget(btn_cancel)
+        root.addLayout(btn_row)
+
+    def _on_pick(self, mountpoint: str) -> None:
+        self.chosen_mountpoint = mountpoint
+        self.accept()
 
 
 # ── Dialog de sucesso ────────────────────────────────────────────────────────
