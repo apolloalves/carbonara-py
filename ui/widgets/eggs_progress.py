@@ -922,33 +922,102 @@ class DiskPickerDialog(QDialog):
     """Diálogo autônomo de escolha de disco — mesma peça visual do
     painel de disco alternativo (build_disk_cards), só que sem estar
     embutido numa operação já em progresso. Usado por ações isoladas
-    como "mover ISO para outro disco". Bloqueia com .exec() normal
-    (não precisa do QEventLoop manual que o painel embutido usa, já
-    que aqui não tem nenhuma outra operação rodando por baixo)."""
+    como "mover/copiar ISO para outro disco". Bloqueia com .exec()
+    normal (não precisa do QEventLoop manual que o painel embutido usa,
+    já que aqui não tem nenhuma outra operação rodando por baixo).
+
+    Cabeçalho customizado (sem decoração nativa do SO) igual ao resto
+    do app — não um QDialog cru, que destoava visualmente."""
 
     def __init__(self, title_text: str, candidates: list[dict], parent=None):
         super().__init__(parent)
         self.setWindowTitle(title_text)
         self.setModal(True)
         self.chosen_mountpoint: str | None = None
+        self._drag_pos = None
 
+        self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
         self.setStyleSheet("""
-            QDialog { background: #14151c; border-radius: 14px; }
+            DiskPickerDialog {
+                background: #131417;
+                border-radius: 14px;
+            }
+            QFrame#DialogHeader {
+                background: rgba(74, 222, 128, 35);
+                border-bottom: 1px solid rgba(74, 222, 128, 25);
+                border-top-left-radius: 14px;
+                border-top-right-radius: 14px;
+            }
+            QLabel#HeaderTitle {
+                color: #ecf4ff;
+                background: transparent;
+                letter-spacing: 1px;
+            }
+            QPushButton#HeaderClose {
+                background: transparent;
+                border: none;
+                color: #dce6f0;
+                font-size: 15px;
+                border-radius: 6px;
+            }
+            QPushButton#HeaderClose:hover {
+                background: rgba(200, 60, 60, 60);
+                color: #ff8888;
+            }
+            QFrame#DialogBody {
+                background: #131417;
+                border-bottom-left-radius: 14px;
+                border-bottom-right-radius: 14px;
+            }
             QLabel { background: transparent; border: none; }
         """)
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(24, 22, 24, 20)
-        root.setSpacing(16)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        title = QLabel(title_text)
-        title.setWordWrap(True)
-        title.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
-        title.setStyleSheet("color: #ecf4ff;")
-        root.addWidget(title)
+        # ── Header ──────────────────────────────────────────────────
+        header = QFrame()
+        header.setObjectName("DialogHeader")
+        header.setFixedHeight(52)
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(18, 0, 12, 0)
+        header_layout.setSpacing(0)
+
+        lbl_icon = QLabel()
+        lbl_icon.setFixedSize(34, 34)
+        lbl_icon.setAlignment(Qt.AlignCenter)
+        lbl_icon.setPixmap(qta.icon("mdi6.harddisk", color="#9bf0bd").pixmap(19, 19))
+        lbl_icon.setStyleSheet("QLabel { background: rgba(74, 222, 128, 40); border-radius: 9px; }")
+
+        lbl_header = QLabel(title_text)
+        lbl_header.setObjectName("HeaderTitle")
+        lbl_header.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+        lbl_header.setWordWrap(False)
+
+        header_layout.addWidget(lbl_icon)
+        header_layout.addSpacing(10)
+        header_layout.addWidget(lbl_header)
+        header_layout.addStretch(1)
+
+        btn_close = QPushButton("✕")
+        btn_close.setObjectName("HeaderClose")
+        btn_close.setFixedSize(30, 30)
+        btn_close.setCursor(Qt.PointingHandCursor)
+        btn_close.clicked.connect(self.reject)
+        header_layout.addWidget(btn_close)
+
+        root.addWidget(header)
+
+        # ── Corpo ───────────────────────────────────────────────────
+        body = QFrame()
+        body.setObjectName("DialogBody")
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(24, 22, 24, 20)
+        body_layout.setSpacing(16)
 
         cards_grid = build_disk_cards(candidates, self._on_pick)
-        root.addLayout(cards_grid)
+        body_layout.addLayout(cards_grid)
 
         btn_row = QHBoxLayout()
         btn_row.addStretch(1)
@@ -973,7 +1042,22 @@ class DiskPickerDialog(QDialog):
         """)
         btn_cancel.clicked.connect(self.reject)
         btn_row.addWidget(btn_cancel)
-        root.addLayout(btn_row)
+        body_layout.addLayout(btn_row)
+
+        root.addWidget(body)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event) -> None:
+        if event.buttons() == Qt.LeftButton and self._drag_pos is not None:
+            self.move(event.globalPosition().toPoint() - self._drag_pos)
+            event.accept()
+
+    def mouseReleaseEvent(self, event) -> None:
+        self._drag_pos = None
 
     def _on_pick(self, mountpoint: str) -> None:
         self.chosen_mountpoint = mountpoint

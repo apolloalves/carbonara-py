@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QListView,
     QScrollArea,
     QSizePolicy,
+    QMenu,
 )
 
 
@@ -654,7 +655,7 @@ class _IsoListCard(QFrame):
                 border: 1px solid rgba(255, 255, 255, 22);
                 background: rgba(255, 255, 255, 9);
             }
-            QPushButton {
+            QPushButton#IsoDeleteBtn {
                 padding: 0px 18px;
                 border-radius: 9px;
                 border: 1px solid rgba(200, 60, 60, 100);
@@ -663,7 +664,7 @@ class _IsoListCard(QFrame):
                 font: 700 9pt "DejaVu Sans Mono";
                 min-height: 34px;
             }
-            QPushButton:hover {
+            QPushButton#IsoDeleteBtn:hover {
                 background: rgba(200, 60, 60, 40);
                 border: 1px solid rgba(255, 100, 100, 180);
                 color: #ffaaaa;
@@ -694,6 +695,7 @@ class _IsoListCard(QFrame):
         text_col.addWidget(meta)
 
         self.btn_delete = QPushButton()
+        self.btn_delete.setObjectName("IsoDeleteBtn")
         self.btn_delete.setIcon(qta.icon("mdi6.delete", color="#ff8888"))
         self.btn_delete.setIconSize(QSize(22, 22))
         self.btn_delete.setFixedSize(36, 36)
@@ -708,16 +710,30 @@ class _IsoListCard(QFrame):
             }
         """)
 
-        self.btn_move = QPushButton()
-        self.btn_move.setIcon(qta.icon("mdi6.folder-move-outline", color="#8fd4ff"))
-        self.btn_move.setIconSize(QSize(22, 22))
-        self.btn_move.setFixedSize(36, 36)
-        self.btn_move.setToolTip(tr("eggs.btn_move"))
-        self.btn_move.setStyleSheet("""
+        # "⋮" — abre um menu com Copiar/Mover, em vez de mais um ícone
+        # solto no card (só a lixeira fica direto, por ser a ação mais
+        # comum e a única sem confirmação de disco).
+        self.btn_more = QPushButton("⋮")
+        self.btn_more.setFixedSize(36, 36)
+        self.btn_more.setCursor(Qt.PointingHandCursor)
+        self.btn_more.setToolTip(tr("eggs.btn_more_options"))
+        self.btn_more.setStyleSheet("""
+            QPushButton {
+                background: rgba(255,255,255,6);
+                border: 1px solid rgba(255,255,255,18);
+                border-radius: 9px;
+                color: #c8d4e0;
+                font: 700 14pt "DejaVu Sans Mono";
+                padding-bottom: 6px;
+            }
+            QPushButton:hover {
+                background: rgba(255,255,255,14);
+                border: 1px solid rgba(255,255,255,35);
+            }
             QToolTip {
                 background: #14151c;
                 color: #ecf4ff;
-                border: 1px solid rgba(143, 212, 255, 140);
+                border: 1px solid rgba(255,255,255,60);
                 padding: 6px 10px;
                 border-radius: 6px;
             }
@@ -725,7 +741,7 @@ class _IsoListCard(QFrame):
 
         root.addWidget(icon_lbl)
         root.addLayout(text_col, 1)
-        root.addWidget(self.btn_move)
+        root.addWidget(self.btn_more)
         root.addWidget(self.btn_delete)
 
 
@@ -1441,7 +1457,7 @@ class EggsPage(QWidget):
         for entry in entries:
             card = _IsoListCard(entry)
             card.btn_delete.clicked.connect(lambda _, e=entry: self._delete_iso(e))
-            card.btn_move.clicked.connect(lambda _, e=entry: self._move_iso(e))
+            card.btn_more.clicked.connect(lambda _, e=entry, b=card.btn_more: self._show_iso_more_menu(e, b))
             cards.append(card)
 
         grid = _ResponsiveCardGrid(cards, min_card_width=ISO_CARD_MIN_WIDTH)
@@ -1465,10 +1481,38 @@ class EggsPage(QWidget):
         self.refresh_stats()
         self.rebuild_iso_list()
 
-    def _move_iso(self, entry) -> None:
-        """Move um ISO já existente pra outro disco — reaproveita o
-        DiskPickerDialog (mesmo card com badge "RECOMENDADO" e barra de
-        espaço do check_space_for_create), não um seletor novo."""
+    def _show_iso_more_menu(self, entry, button) -> None:
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background: #111318;
+                border: 1px solid rgba(255, 255, 255, 24);
+                border-radius: 10px;
+                padding: 6px;
+                font-family: "DejaVu Sans Mono";
+                font-size: 10pt;
+            }
+            QMenu::item {
+                color: #ecf4ff;
+                padding: 8px 14px 8px 10px;
+                border-radius: 6px;
+            }
+            QMenu::item:selected {
+                background: rgba(59, 130, 246, 40);
+                color: #ffffff;
+            }
+        """)
+        act_copy = menu.addAction(qta.icon("mdi6.content-copy", color="#8fd4ff"), tr("eggs.btn_copy"))
+        act_move = menu.addAction(qta.icon("mdi6.folder-move-outline", color="#c3a864"), tr("eggs.btn_move"))
+        act_copy.triggered.connect(lambda: self._move_iso(entry, copy=True))
+        act_move.triggered.connect(lambda: self._move_iso(entry, copy=False))
+        menu.exec(button.mapToGlobal(button.rect().bottomRight()))
+
+    def _move_iso(self, entry, copy: bool = False) -> None:
+        """Move (ou copia, se copy=True) um ISO já existente pra outro
+        disco — reaproveita o DiskPickerDialog (mesmo card com badge
+        "RECOMENDADO" e barra de espaço do check_space_for_create), não
+        um seletor novo."""
         current_mountpoint = None
         for d in list_relevant_disks():
             try:
@@ -1494,7 +1538,8 @@ class EggsPage(QWidget):
             _show_error("Carbonara", tr("eggs.move_no_disks"), parent=self)
             return
 
-        title = tr("eggs.move_dialog_title").format(name=entry.name, gb=f"{entry.size_gb:.1f}")
+        title_key = "eggs.copy_dialog_title" if copy else "eggs.move_dialog_title"
+        title = tr(title_key).format(name=entry.name, gb=f"{entry.size_gb:.1f}")
         dialog = DiskPickerDialog(title, candidates, parent=self)
         if dialog.exec() != QDialog.Accepted or not dialog.chosen_mountpoint:
             return
@@ -1511,7 +1556,7 @@ class EggsPage(QWidget):
             "/usr/local/bin/carbonara-helper",
             os.environ.get("DISPLAY", ""),
             os.environ.get("XAUTHORITY", ""),
-            "eggs.move_iso",
+            "eggs.copy_iso" if copy else "eggs.move_iso",
             args_json,
         ]
         result = subprocess.run(cmd, capture_output=True, text=True)
@@ -1519,7 +1564,8 @@ class EggsPage(QWidget):
             if result.returncode == 126:
                 return  # usuário cancelou a autenticação
             err = result.stderr.strip() or f"exit code {result.returncode}"
-            _show_error("Carbonara", tr("eggs.move_failed").format(err=err), parent=self)
+            err_key = "eggs.copy_failed" if copy else "eggs.move_failed"
+            _show_error("Carbonara", tr(err_key).format(err=err), parent=self)
             self.refresh_list()
             return
         self.refresh_list()
