@@ -6,6 +6,7 @@ from PySide6.QtGui import QFont, QMouseEvent
 from PySide6.QtWidgets import (
     QApplication, QDialog, QVBoxLayout, QHBoxLayout,
     QLabel, QProgressBar, QPlainTextEdit, QPushButton, QFrame, QWidget,
+    QComboBox, QListView,
 )
 
 from core.i18n import tr
@@ -929,9 +930,9 @@ class DiskPickerDialog(QDialog):
     Cabeçalho customizado (sem decoração nativa do SO) igual ao resto
     do app — não um QDialog cru, que destoava visualmente."""
 
-    def __init__(self, title_text: str, candidates: list[dict], parent=None):
+    def __init__(self, intro_text: str, iso_name: str, iso_size_gb: float, candidates: list[dict], parent=None):
         super().__init__(parent)
-        self.setWindowTitle(title_text)
+        self.setWindowTitle(tr("eggs.choose_disk_header"))
         self.setModal(True)
         self.chosen_mountpoint: str | None = None
         self._drag_pos = None
@@ -990,7 +991,7 @@ class DiskPickerDialog(QDialog):
         lbl_icon.setPixmap(qta.icon("mdi6.harddisk", color="#9bf0bd").pixmap(19, 19))
         lbl_icon.setStyleSheet("QLabel { background: rgba(74, 222, 128, 40); border-radius: 9px; }")
 
-        lbl_header = QLabel(title_text)
+        lbl_header = QLabel(tr("eggs.choose_disk_header"))
         lbl_header.setObjectName("HeaderTitle")
         lbl_header.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
         lbl_header.setWordWrap(False)
@@ -1000,8 +1001,10 @@ class DiskPickerDialog(QDialog):
         header_layout.addWidget(lbl_header)
         header_layout.addStretch(1)
 
-        btn_close = QPushButton("✕")
+        btn_close = QPushButton()
         btn_close.setObjectName("HeaderClose")
+        btn_close.setIcon(qta.icon("mdi6.close", color="#dce6f0"))
+        btn_close.setIconSize(QSize(16, 16))
         btn_close.setFixedSize(30, 30)
         btn_close.setCursor(Qt.PointingHandCursor)
         btn_close.clicked.connect(self.reject)
@@ -1014,10 +1017,115 @@ class DiskPickerDialog(QDialog):
         body.setObjectName("DialogBody")
         body_layout = QVBoxLayout(body)
         body_layout.setContentsMargins(24, 22, 24, 20)
-        body_layout.setSpacing(16)
+        body_layout.setSpacing(4)
 
-        cards_grid = build_disk_cards(candidates, self._on_pick)
-        body_layout.addLayout(cards_grid)
+        intro_lbl = QLabel(intro_text)
+        intro_lbl.setWordWrap(True)
+        intro_lbl.setFont(QFont("DejaVu Sans Mono", 10))
+        intro_lbl.setStyleSheet("color: #c8d4e0;")
+        body_layout.addWidget(intro_lbl)
+
+        # Nome do ISO em destaque (verde, negrito) — sem parênteses, o
+        # tamanho vem logo em seguida em cor neutra.
+        detail_lbl = QLabel(
+            f'<span style="color:#9bf0bd; font-weight:700;">{iso_name}</span>'
+            f'<span style="color:#8b95a5;">  ·  {iso_size_gb:.1f} GB</span>'
+        )
+        detail_lbl.setWordWrap(True)
+        detail_lbl.setFont(QFont("DejaVu Sans Mono", 11))
+        body_layout.addWidget(detail_lbl)
+
+        body_layout.addSpacing(18)
+
+        # Combo — mesmo componente/estilo já usado no "ISO destination:"
+        # desta mesma página, em vez do grid de cards (que não ficou bom
+        # aqui fora do contexto de sugestão automática de espaço).
+        sorted_candidates = sorted(candidates, key=lambda c: c["free_gb"], reverse=True)
+        self._combo = QComboBox()
+        self._combo.setEditable(False)
+        self._combo.setInsertPolicy(QComboBox.NoInsert)
+        self._combo.setMaxVisibleItems(8)
+        self._combo.setFocusPolicy(Qt.StrongFocus)
+        self._combo.setView(QListView())
+        self._combo.setMinimumWidth(420)
+        self._combo.setStyleSheet("""
+            QComboBox {
+                background: rgba(10, 15, 25, 230);
+                color: #ecf4ff;
+                border: 1px solid rgba(31, 92, 255, 120);
+                border-radius: 10px;
+                padding: 8px 12px;
+                min-height: 28px;
+                font: 9pt "DejaVu Sans Mono";
+            }
+            QComboBox:hover,
+            QComboBox:focus {
+                border: 1px solid rgba(35, 166, 255, 200);
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 30px;
+            }
+            QComboBox::down-arrow {
+                width: 0px;
+                height: 0px;
+            }
+        """)
+        for c in sorted_candidates:
+            label = f"{c['mountpoint']}  •  {c['label']}  •  {c['free_gb']:.1f} GB {tr('snapshots.free_label')}"
+            self._combo.addItem(label, c["mountpoint"])
+
+        # Chevron — mesmo truque cacheado do combo "ISO destination:"
+        # (o CSS de seta nativa do Qt não renderiza de forma confiável).
+        import tempfile as _tempfile
+        from pathlib import Path
+        chevron_path = Path(_tempfile.gettempdir()) / "carbonara_chevron_down_v2.png"
+        if not chevron_path.exists():
+            qta.icon("mdi6.chevron-down", color="#23a6ff").pixmap(28, 28).save(str(chevron_path))
+        self._combo.setStyleSheet(
+            self._combo.styleSheet()
+            + "QComboBox::down-arrow { image: url(" + chevron_path.as_posix() + "); "
+            + "width: 14px; height: 14px; margin-right: 10px; }"
+        )
+
+        # Popup do combo — cópia do style_combo_popup() de eggs_page.py
+        # (não importado aqui pra não criar import circular entre os
+        # dois arquivos).
+        view = self._combo.view()
+        view.setMouseTracking(True)
+        view.viewport().setMouseTracking(True)
+        view.setAttribute(Qt.WA_Hover, True)
+        view.viewport().setAttribute(Qt.WA_Hover, True)
+        view.setUniformItemSizes(True)
+        view.setStyleSheet("""
+            QListView {
+                background: #0a0f19;
+                color: #ecf4ff;
+                border: 1px solid rgba(31, 92, 255, 140);
+                outline: 0;
+                padding: 4px;
+            }
+            QListView::item {
+                min-height: 32px;
+                padding: 8px 10px;
+                border-radius: 6px;
+            }
+            QListView::item:hover {
+                background: rgba(35, 166, 255, 70);
+                color: #ecf4ff;
+            }
+            QListView::item:selected {
+                background: rgba(35, 166, 255, 180);
+                color: #08111d;
+            }
+            QListView::item:selected:hover {
+                background: rgba(70, 188, 255, 220);
+                color: #08111d;
+            }
+        """)
+
+        body_layout.addWidget(self._combo)
+        body_layout.addSpacing(20)
 
         btn_row = QHBoxLayout()
         btn_row.addStretch(1)
@@ -1041,7 +1149,29 @@ class DiskPickerDialog(QDialog):
             }
         """)
         btn_cancel.clicked.connect(self.reject)
+
+        btn_confirm = QPushButton(tr("eggs.btn_confirm_destination"))
+        btn_confirm.setCursor(Qt.PointingHandCursor)
+        btn_confirm.setFixedHeight(38)
+        btn_confirm.setStyleSheet("""
+            QPushButton {
+                background: #23a6ff;
+                border: none;
+                border-radius: 8px;
+                color: #04203a;
+                font-family: "DejaVu Sans Mono";
+                font-size: 11px;
+                font-weight: bold;
+                padding: 0 18px;
+            }
+            QPushButton:hover {
+                background: #4fb8ff;
+            }
+        """)
+        btn_confirm.clicked.connect(self._on_confirm)
+
         btn_row.addWidget(btn_cancel)
+        btn_row.addWidget(btn_confirm)
         body_layout.addLayout(btn_row)
 
         root.addWidget(body)
@@ -1059,8 +1189,8 @@ class DiskPickerDialog(QDialog):
     def mouseReleaseEvent(self, event) -> None:
         self._drag_pos = None
 
-    def _on_pick(self, mountpoint: str) -> None:
-        self.chosen_mountpoint = mountpoint
+    def _on_confirm(self) -> None:
+        self.chosen_mountpoint = self._combo.currentData()
         self.accept()
 
 

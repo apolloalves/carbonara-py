@@ -741,8 +741,8 @@ class _IsoListCard(QFrame):
 
         root.addWidget(icon_lbl)
         root.addLayout(text_col, 1)
-        root.addWidget(self.btn_more)
         root.addWidget(self.btn_delete)
+        root.addWidget(self.btn_more)
 
 
 class _StatCard(QFrame):
@@ -1538,9 +1538,8 @@ class EggsPage(QWidget):
             _show_error("Carbonara", tr("eggs.move_no_disks"), parent=self)
             return
 
-        title_key = "eggs.copy_dialog_title" if copy else "eggs.move_dialog_title"
-        title = tr(title_key).format(name=entry.name, gb=f"{entry.size_gb:.1f}")
-        dialog = DiskPickerDialog(title, candidates, parent=self)
+        intro_key = "eggs.copy_dialog_title" if copy else "eggs.move_dialog_title"
+        dialog = DiskPickerDialog(tr(intro_key), entry.name, entry.size_gb, candidates, parent=self)
         if dialog.exec() != QDialog.Accepted or not dialog.chosen_mountpoint:
             return
 
