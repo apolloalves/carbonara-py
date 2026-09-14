@@ -115,8 +115,8 @@ class EggsProgressDialog(QDialog):
             # ficava com um vão enorme vazio embaixo. Compacta cabe só
             # barra + status + uma faixa pequena de log, do tamanho do
             # que essas operações realmente produzem.
-            self.setMinimumSize(660, 380)
-            self.resize(660, 400)
+            self.setMinimumSize(720, 440)
+            self.resize(720, 460)
         else:
             self.setMinimumSize(1000, 700)
             self.resize(1060, 760)
@@ -419,7 +419,7 @@ class EggsProgressDialog(QDialog):
             }
 
             QLabel#ElapsedTime {
-                color: #9bf0bd;
+                color: __HEADER_COLOR__;
                 background: transparent;
             }
 
@@ -436,8 +436,8 @@ class EggsProgressDialog(QDialog):
             QProgressBar#BackupProgress::chunk {
                 background-color: qlineargradient(
                     x1:0, y1:0, x2:1, y2:0,
-                    stop:0 rgba(35, 166, 80, 130),
-                    stop:1 rgba(94, 234, 149, 130)
+                    stop:0 __GRADIENT_STOP_0__,
+                    stop:1 __GRADIENT_STOP_1__
                 );
                 border-radius: 3px;
             }
@@ -449,7 +449,7 @@ class EggsProgressDialog(QDialog):
                 color: #dce6f0;
                 font-family: "DejaVu Sans Mono";
                 font-size: 12px;
-                line-height: 180%;
+                line-height: 130%;
                 padding: 10px;
                 selection-background-color: rgba(35, 166, 255, 80);
             }
@@ -529,14 +529,17 @@ class EggsProgressDialog(QDialog):
                 background: rgba(255,255,255,3);
             }
         """)
-        # Header/badge com a cor verde padrão hardcoded no bloco acima —
-        # troca pra self._header_color quando a operação pede outra cor
-        # (ex: copiar = azul, mover = âmbar), sem precisar reescrever o
-        # CSS inteiro como f-string.
-        if self._header_color != "#4ade80":
-            self.setStyleSheet(
-                self.styleSheet().replace("74, 222, 128", _hex_to_rgb(self._header_color))
-            )
+        # Header/badge/barra de progresso usam placeholders/RGB verde
+        # hardcoded no bloco acima — troca pra self._header_color sempre
+        # (pra cor padrão isso não muda nada, já que #4ade80 == rgb(74,
+        # 222, 128)), sem precisar reescrever o CSS inteiro como f-string.
+        hc_rgb = _hex_to_rgb(self._header_color)
+        css = self.styleSheet()
+        css = css.replace("74, 222, 128", hc_rgb)
+        css = css.replace("__GRADIENT_STOP_0__", f"rgba({hc_rgb}, 110)")
+        css = css.replace("__GRADIENT_STOP_1__", f"rgba({hc_rgb}, 200)")
+        css = css.replace("__HEADER_COLOR__", self._header_color)
+        self.setStyleSheet(css)
 
     # --------------------------------------------------- cancel countdown --
 

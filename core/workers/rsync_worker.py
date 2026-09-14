@@ -27,9 +27,11 @@ class RsyncWorker(QThread):
         self.title = title
         self.log_path = Path(log_path) if log_path else None
         self._process: subprocess.Popen | None = None
+        self._killed = False
 
     def kill(self) -> None:
         """Mata o processo rsync pelo PID — não bloqueia a thread chamadora."""
+        self._killed = True
         proc = self._process
         if proc is not None:
             try:
@@ -107,6 +109,12 @@ class RsyncWorker(QThread):
                 self.progress_changed.emit(100)
                 self.status_changed.emit("Concluído com sucesso.")
                 self.finished_ok.emit()
+            elif self._killed:
+                # Morto de propósito via kill()/cancel() — não é uma
+                # falha real, é o usuário cancelando. Quem chamou já
+                # trata o estado de "cancelado" (_do_cancel), não faz
+                # sentido emitir failed() e mostrar isso como erro.
+                pass
             else:
                 self.failed.emit(f"rsync terminou com código {rc}")
 
