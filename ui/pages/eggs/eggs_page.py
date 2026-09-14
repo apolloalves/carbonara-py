@@ -1513,6 +1513,11 @@ class EggsPage(QWidget):
         disco — reaproveita o DiskPickerDialog (mesmo card com badge
         "RECOMENDADO" e barra de espaço do check_space_for_create), não
         um seletor novo."""
+        # Evita disparar uma segunda cópia/mover em paralelo enquanto a
+        # anterior ainda está rodando (mesma guarda de _run_with_progress).
+        if getattr(self, "_move_proc", None) is not None and self._move_proc.poll() is None:
+            return
+
         current_mountpoint = None
         for d in list_relevant_disks():
             try:
@@ -1550,24 +1555,55 @@ class EggsPage(QWidget):
             "path": str(entry.path),
             "destination_mountpoint": dialog.chosen_mountpoint,
         })
+        action = "eggs.copy_iso" if copy else "eggs.move_iso"
         cmd = [
             "pkexec",
             "/usr/local/bin/carbonara-helper",
             os.environ.get("DISPLAY", ""),
             os.environ.get("XAUTHORITY", ""),
-            "eggs.copy_iso" if copy else "eggs.move_iso",
+            action,
             args_json,
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            if result.returncode == 126:
-                return  # usuário cancelou a autenticação
-            err = result.stderr.strip() or f"exit code {result.returncode}"
-            err_key = "eggs.copy_failed" if copy else "eggs.move_failed"
-            _show_error("Carbonara", tr(err_key).format(err=err), parent=self)
-            self.refresh_list()
+
+        # subprocess.Popen (não .run) — a janela de progresso real que
+        # roda dentro desse processo pode levar minutos num ISO grande;
+        # .run() bloquearia a janela principal do Carbonara inteira até
+        # o usuário fechar aquele diálogo. Um QTimer local faz o poll
+        # sem travar nada, e dispara o refresh da lista assim que o
+        # processo (e o diálogo dele) realmente terminam.
+        err_key = "eggs.copy_failed" if copy else "eggs.move_failed"
+        try:
+            self._move_proc = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            )
+        except Exception as exc:
+            _show_error("Carbonara", tr(err_key).format(err=exc), parent=self)
             return
-        self.refresh_list()
+
+        if not hasattr(self, "_move_poll_timer"):
+            self._move_poll_timer = QTimer(self)
+            self._move_poll_timer.setInterval(400)
+        else:
+            self._move_poll_timer.stop()
+            self._move_poll_timer.timeout.disconnect()
+
+        def _poll() -> None:
+            rc = self._move_proc.poll()
+            if rc is None:
+                return
+            self._move_poll_timer.stop()
+            try:
+                _stdout, stderr = self._move_proc.communicate()
+            except Exception:
+                stderr = ""
+            self._move_proc = None
+            self.refresh_list()
+            if rc != 0 and rc != 126:
+                err = (stderr or f"exit code {rc}").strip()
+                _show_error("Carbonara", tr(err_key).format(err=err), parent=self)
+
+        self._move_poll_timer.timeout.connect(_poll)
+        self._move_poll_timer.start()
 
     def _delete_iso(self, entry) -> None:
         dialog = _DeleteIsoConfirmDialog(entry.name, entry.size_gb, parent=self)

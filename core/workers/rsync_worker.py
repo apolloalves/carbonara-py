@@ -37,6 +37,15 @@ class RsyncWorker(QThread):
             except OSError:
                 pass
 
+    def cancel(self) -> None:
+        """Alias pra kill() — EggsProgressDialog._do_cancel() chama
+        worker.cancel() genericamente em qualquer worker registrado;
+        sem esse alias, a chamada falhava silenciosa (engolida por um
+        try/except) e o processo rsync nunca era morto de verdade,
+        deixando a QThread rodando até a janela fechar por cima dela
+        ("QThread: Destroyed while thread is still running")."""
+        self.kill()
+
     def run(self) -> None:
         log_fh = None
         try:

@@ -311,9 +311,25 @@ class IsoEntry:
 def list_existing_isos(directories: list[Path] | None = None) -> list[IsoEntry]:
     """Lista todas as ISOs já geradas (padrão ARCHLINUX_*.iso) nos
     diretórios de destino informados — usado pela listagem estilo
-    Timeshift na tela do Eggs. Por padrão, olha em VENTOY e MDSATA_EGGS
-    (os dois destinos reais usados hoje)."""
-    dirs = directories or [VENTOY, MDSATA_EGGS]
+    Timeshift na tela do Eggs. Por padrão, varre todo disco relevante do
+    sistema (não só VENTOY/MDSATA_EGGS): desde que passou a existir o
+    recurso de mover/copiar ISO pra qualquer disco escolhido, uma ISO
+    pode legitimamente estar em qualquer um deles, não só nos dois
+    destinos "de fábrica"."""
+    if directories is not None:
+        dirs = directories
+    else:
+        from core.system.disks import list_relevant_disks
+        dirs = []
+        for d in list_relevant_disks():
+            mountpoint = Path(d.mountpoint)
+            dirs.append(MDSATA_EGGS if mountpoint == MDSATA else mountpoint)
+        # VENTOY/MDSATA_EGGS sempre entram, mesmo que list_relevant_disks()
+        # não os traga por algum motivo (ex: disco momentaneamente sem
+        # espaço detectável) — são os dois destinos "de fábrica".
+        for fixed_dir in (VENTOY, MDSATA_EGGS):
+            if fixed_dir not in dirs:
+                dirs.append(fixed_dir)
     entries: list[IsoEntry] = []
     seen: set[Path] = set()
     for directory in dirs:

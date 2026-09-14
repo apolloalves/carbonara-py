@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import qtawesome as qta
 from PySide6.QtCore import Qt, QTimer, QSize
-from PySide6.QtGui import QFont, QMouseEvent
+from PySide6.QtGui import QFont, QMouseEvent, QFontMetrics
 from PySide6.QtWidgets import (
     QApplication, QDialog, QVBoxLayout, QHBoxLayout,
     QLabel, QProgressBar, QPlainTextEdit, QPushButton, QFrame, QWidget,
@@ -96,14 +96,30 @@ def build_disk_cards(candidates: list[dict], on_pick) -> QHBoxLayout:
 
 
 class EggsProgressDialog(QDialog):
-    def __init__(self, title: str = "Penguin's Eggs", preparing_text: str = "Iniciando...", icon_glyph: str = "mdi6.egg-outline", parent=None):
+    def __init__(
+        self, title: str = "Penguin's Eggs", preparing_text: str = "Iniciando...",
+        icon_glyph: str = "mdi6.egg-outline", parent=None, compact: bool = False,
+        header_color: str = "#4ade80", needs_eggs_cleanup: bool = True,
+    ):
         super().__init__(parent)
         self.setWindowTitle(title)
         self._preparing_text = preparing_text
         self._icon_glyph = icon_glyph
+        self._header_color = header_color
+        self._needs_eggs_cleanup = needs_eggs_cleanup
         self.setModal(True)
-        self.setMinimumSize(1000, 700)
-        self.resize(1060, 760)
+        if compact:
+            # Operações simples (ex: copiar/mover um único arquivo) não
+            # têm o volume de log das operações "pesadas" (build da ISO,
+            # rsync -v de árvore inteira) — a janela grande de 1000x700
+            # ficava com um vão enorme vazio embaixo. Compacta cabe só
+            # barra + status + uma faixa pequena de log, do tamanho do
+            # que essas operações realmente produzem.
+            self.setMinimumSize(660, 380)
+            self.resize(660, 400)
+        else:
+            self.setMinimumSize(1000, 700)
+            self.resize(1060, 760)
 
         # Remove titlebar nativa — usamos header customizado. Qt.Window
         # (não Qt.Dialog) — mesma flag do BackupProgressDialog, é o que
@@ -189,15 +205,18 @@ class EggsProgressDialog(QDialog):
         lbl_icon = QLabel()
         lbl_icon.setFixedSize(38, 38)
         lbl_icon.setAlignment(Qt.AlignCenter)
-        lbl_icon.setPixmap(qta.icon(self._icon_glyph, color="#9bf0bd").pixmap(22, 22))
+        lbl_icon.setPixmap(qta.icon(self._icon_glyph, color=self._header_color).pixmap(22, 22))
         lbl_icon.setStyleSheet(
-            "QLabel { background: rgba(74, 222, 128, 40); border-radius: 10px; }"
+            f"QLabel {{ background: rgba({_hex_to_rgb(self._header_color)}, 40); border-radius: 10px; }}"
         )
 
-        lbl_header = QLabel(self.windowTitle())
+        lbl_header = QLabel()
         lbl_header.setObjectName("HeaderTitle")
-        lbl_header.setFont(QFont("DejaVu Sans Mono", 12, QFont.Bold))
+        header_font = QFont("DejaVu Sans Mono", 12, QFont.Bold)
+        lbl_header.setFont(header_font)
         self.lbl_header = lbl_header
+        self._header_font_metrics = QFontMetrics(header_font)
+        self._set_elided_header_text(self.windowTitle())
 
         header_layout.addWidget(lbl_icon)
         header_layout.addSpacing(10)
@@ -212,7 +231,7 @@ class EggsProgressDialog(QDialog):
         eb_layout.setSpacing(6)
 
         elapsed_icon = QLabel()
-        elapsed_icon.setPixmap(qta.icon("mdi6.clock-outline", color="#9bf0bd").pixmap(14, 14))
+        elapsed_icon.setPixmap(qta.icon("mdi6.clock-outline", color=self._header_color).pixmap(14, 14))
         elapsed_icon.setStyleSheet("background: transparent;")
 
         self.lbl_elapsed = QLabel("00:00")
@@ -510,6 +529,14 @@ class EggsProgressDialog(QDialog):
                 background: rgba(255,255,255,3);
             }
         """)
+        # Header/badge com a cor verde padrão hardcoded no bloco acima —
+        # troca pra self._header_color quando a operação pede outra cor
+        # (ex: copiar = azul, mover = âmbar), sem precisar reescrever o
+        # CSS inteiro como f-string.
+        if self._header_color != "#4ade80":
+            self.setStyleSheet(
+                self.styleSheet().replace("74, 222, 128", _hex_to_rgb(self._header_color))
+            )
 
     # --------------------------------------------------- cancel countdown --
 
@@ -538,20 +565,37 @@ class EggsProgressDialog(QDialog):
             self.btn_cancel.setText(f"Cancelar ({self._cancel_countdown}s) — clique p/ confirmar")
 
     def _do_cancel(self) -> None:
-        """Mata o processo eggs produce via PID e limpa /home/eggs com segurança."""
+        """Cancela a operação em andamento. Mata os workers registrados
+        (ShellWorker via .cancel(), RsyncWorker via o alias cancel()
+        que também existe) e ESPERA a thread terminar de verdade antes
+        de seguir — sem isso, fechar a janela logo em seguida podia
+        destruir a QThread ainda rodando ("QThread: Destroyed while
+        thread is still running"). A limpeza de /home/eggs só roda
+        quando `self._needs_eggs_cleanup` (True por padrão, preservando
+        o comportamento de sempre pra build de ISO) — pra copiar/mover
+        um arquivo isso não tem nada a ver, `/home/eggs` nem existe
+        nesse fluxo."""
         self.btn_cancel.setEnabled(False)
         self.btn_cancel.setText("Cancelando...")
         self.set_status("Cancelando operação...")
         self.set_current_file("—")
         self._had_failure = True
 
-        # Cancela todos os ShellWorkers ativos
+        # Cancela todos os workers ativos e espera de verdade terminarem
         for worker in list(self._workers):
             try:
                 worker.cancel()
             except Exception:
                 pass
+            try:
+                worker.wait(5000)
+            except Exception:
+                pass
         self._workers.clear()
+
+        if not getattr(self, "_needs_eggs_cleanup", True):
+            self._on_eggs_cleanup_done()
+            return
 
         # Limpeza em thread separada (umount + rmtree pode demorar)
         from PySide6.QtCore import QThread, Signal as QSignal
@@ -572,7 +616,10 @@ class EggsProgressDialog(QDialog):
         self.lbl_status.setText("Operação cancelada pelo usuário.")
         self.lbl_status.setStyleSheet("color: #ffb86b; font-weight: bold;")
         self.append_log("")
-        self.append_log("--- Operação cancelada. Diretório /home/eggs removido. ---")
+        if self._needs_eggs_cleanup:
+            self.append_log("--- Operação cancelada. Diretório /home/eggs removido. ---")
+        else:
+            self.append_log("--- Operação cancelada. ---")
         self._timer_active = False
         self._elapsed_timer.stop()
         self.btn_cancel.setEnabled(False)
@@ -653,6 +700,11 @@ class EggsProgressDialog(QDialog):
             self.showMaximized()
             self._btn_header_maximize.setIcon(qta.icon("mdi6.window-restore", color="#9aa6b2"))
             self._btn_header_maximize.setToolTip("Restaurar")
+        # Reaplica o elide do título com a largura nova — maximizado
+        # sobra espaço de sobra, então o nome completo deve voltar a
+        # caber. singleShot(0) porque a geometria só reflete a mudança
+        # depois desse ciclo do event loop.
+        QTimer.singleShot(0, lambda: self._set_elided_header_text(self.windowTitle()))
 
     def mouseDoubleClickEvent(self, event) -> None:
         """Duplo clique no header também alterna maximizar, como em janelas normais."""
@@ -725,6 +777,16 @@ class EggsProgressDialog(QDialog):
     def set_status(self, text: str) -> None:
         self.lbl_status.setText(text)
 
+    def _set_elided_header_text(self, text: str) -> None:
+        """Trunca com "…" quando não cabe (ex: nome de ISO comprido +
+        janela compacta) em vez de deixar o texto colidir com o badge
+        de tempo/maximizar/fechar — sem precisar ficar ajustando a
+        largura da janela toda vez que o título muda de tamanho."""
+        self.lbl_header.setToolTip(text)
+        available = max(80, self.width() - 220)
+        elided = self._header_font_metrics.elidedText(text, Qt.ElideRight, available)
+        self.lbl_header.setText(elided)
+
     def set_title(self, text: str) -> None:
         """Texto central grande (ex: 'Instalando...') — antes só dava pra
         definir na criação do diálogo (preparing_text) e ficava preso
@@ -738,7 +800,7 @@ class EggsProgressDialog(QDialog):
         sem titlebar nativa) — mesma limitação do set_title: antes só
         dava pra definir na criação."""
         self.setWindowTitle(text)
-        self.lbl_header.setText(text)
+        self._set_elided_header_text(text)
 
     def set_current_file(self, text: str) -> None:
         self.lbl_current.set_text(f"Arquivo atual: {text}")
@@ -1033,8 +1095,9 @@ class DiskPickerDialog(QDialog):
         detail_row.setSpacing(8)
 
         detail_icon = QLabel()
-        detail_icon.setFixedSize(20, 20)
-        detail_icon.setPixmap(qta.icon("mdi6.disc", color="#9bf0bd").pixmap(18, 18))
+        detail_icon.setFixedSize(48, 48)
+        detail_icon.setAlignment(Qt.AlignCenter)
+        detail_icon.setPixmap(qta.icon("mdi6.disc", color="#9bf0bd").pixmap(44, 44))
         detail_row.addWidget(detail_icon)
 
         detail_lbl = QLabel(
