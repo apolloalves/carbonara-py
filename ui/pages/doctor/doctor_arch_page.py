@@ -44,6 +44,7 @@ FRIENDLY_DETAIL = {
     "orphan_kernels": "Kernel instalado que você não está usando no momento.",
     "log_dirs": "Pastas que alguns programas esperam encontrar e não existem.",
     "empty_libs": "Um update foi interrompido no meio e deixou biblioteca(s) corrompida(s).",
+    "pkg_corruption": "Arquivo(s) de pacote(s) instalado(s) foram alterados ou corrompidos — reinstalar restaura o original.",
     "critical_timers": "Uma automação que evita quebras parou de rodar.",
     "volumes": "Um disco pode ter erro de sistema de arquivos.",
     "smart": "Um disco está reportando problema de saúde física.",
@@ -58,6 +59,7 @@ FINDING_ACTION_MAP = {
     "log_dirs": ("doctor.fix_log_dirs", {}),
     "volumes": ("doctor.fsck_repair", {}),
     "empty_libs": ("doctor.fix_empty_libs", {}),
+    "pkg_corruption": ("doctor.fix_package_corruption", {}),
 }
 
 CARD_STYLE = """

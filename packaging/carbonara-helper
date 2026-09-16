@@ -27,14 +27,32 @@ import json
 import os
 import shutil
 import subprocess
+import os
+import pwd
 import sys
 from pathlib import Path
 
-PROJECT_ROOT = Path("/home/apollo/carbonara-py")
+
+def _resolve_real_user_home() -> Path:
+    """Mesma técnica de core/i18n.py's _resolve_config_home() — esse
+    script sempre roda via pkexec (root), então Path.home() puro
+    resolveria pra /root. PKEXEC_UID é setado pelo próprio pkexec com
+    o UID de quem chamou; SUDO_UID cobre o caso raro de rodar via
+    sudo direto em vez de pkexec."""
+    uid_str = os.environ.get("PKEXEC_UID") or os.environ.get("SUDO_UID")
+    if uid_str:
+        try:
+            return Path(pwd.getpwuid(int(uid_str)).pw_dir)
+        except (ValueError, KeyError):
+            pass
+    return Path.home()
+
+
+_REAL_HOME = _resolve_real_user_home()
+PROJECT_ROOT = _REAL_HOME / "carbonara-py"
 sys.path.insert(0, str(PROJECT_ROOT))
 
-VENV_PYTHON = "/home/apollo/venvs/pyside/bin/python3"
-CARBONARA_USER = "apollo"
+VENV_PYTHON = str(_REAL_HOME / "venvs" / "pyside" / "bin" / "python3")
 
 
 def _run_eggs_action(args: dict) -> None:
@@ -737,6 +755,53 @@ def _run_doctor_fsck_repair(args: dict) -> None:
         print(f"{dev}: {status}", flush=True)
 
 
+def _run_doctor_fix_package_corruption(args: dict) -> None:
+    """Correção do achado "Pacotes com arquivos corrompidos" —
+    pacman -Qkk (deep check) detecta arquivos alterados/truncados, não só
+    ausentes. Mesmo padrão de _run_doctor_fix_empty_libs: re-detecta
+    fresh (não confia na lista que veio do checkup, pode estar
+    desatualizada) e reinstala via pacman -S --needed. Aqui nem precisa
+    de pacman -Qqo pra achar o dono — o próprio -Qkk já diz o pacote em
+    cada linha de warning."""
+    from core.i18n import tr
+    result = subprocess.run(
+        ["pacman", "-Qkk"], capture_output=True, text=True, timeout=90,
+    )
+    warnings = [l for l in result.stdout.splitlines() if l.startswith("warning:")]
+
+    if not warnings:
+        print("Nenhum arquivo corrompido encontrado — nada a fazer.", flush=True)
+        return
+
+    pkgs = set()
+    for line in warnings:
+        parts = line.split(":", 2)
+        if len(parts) >= 2:
+            pkgs.add(parts[1].strip())
+    pkgs = sorted(pkgs)
+
+    print(f"Arquivos corrompidos/alterados encontrados ({len(warnings)}):", flush=True)
+    for line in warnings:
+        print(f"  {line}", flush=True)
+
+    if not pkgs:
+        print(tr("helper.no_owner_pkg_found"), flush=True)
+        return
+
+    print(f"Pacotes a reinstalar: {', '.join(pkgs)}", flush=True)
+    proc = subprocess.run(
+        ["pacman", "-S", "--needed", "--noconfirm", *pkgs],
+        capture_output=True, text=True, timeout=600,
+    )
+    for line in (proc.stdout + proc.stderr).splitlines():
+        print(f"  {line}", flush=True)
+
+    if proc.returncode == 0:
+        print(tr("helper.reinstall_done").format(pkgs=', '.join(pkgs)), flush=True)
+    else:
+        print(tr("helper.pacman_exit_code").format(code=proc.returncode), flush=True)
+
+
 def _run_doctor_fix_empty_libs(args: dict) -> None:
     """Correção do achado "Bibliotecas .so vazias" — origem: FixArch.sh.
     Re-detecta (não confia no resultado do checkup, que pode estar
@@ -868,7 +933,7 @@ def _run_scheduler_install(args: dict) -> None:
         "[Service]\n"
         "Type=oneshot\n"
         "User=root\n"
-        f"Environment=HOME=/home/{CARBONARA_USER}\n"
+        f"Environment=HOME={_REAL_HOME}\n"
         f"WorkingDirectory={PROJECT_ROOT}\n"
         f"ExecStart={VENV_PYTHON} -m core.snapshots.scheduler\n"
     )
@@ -945,7 +1010,7 @@ def _run_scheduler_create_install(args: dict) -> None:
         "[Service]\n"
         "Type=oneshot\n"
         "User=root\n"
-        f"Environment=HOME=/home/{CARBONARA_USER}\n"
+        f"Environment=HOME={_REAL_HOME}\n"
         f"WorkingDirectory={PROJECT_ROOT}\n"
         f"ExecStart={VENV_PYTHON} -m core.snapshots.scheduler --run-create\n"
     )
@@ -1013,6 +1078,7 @@ ACTIONS = {
     "doctor.fix_log_dirs": _run_doctor_fix_log_dirs,
     "doctor.fsck_repair": _run_doctor_fsck_repair,
     "doctor.fix_empty_libs": _run_doctor_fix_empty_libs,
+    "doctor.fix_package_corruption": _run_doctor_fix_package_corruption,
     "restore.home_live": _run_restore_home_live,
     "live.mount_known_disks": _run_live_mount_known_disks,
     "clonezilla.compress": _run_clonezilla_compress,

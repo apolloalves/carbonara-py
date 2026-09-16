@@ -181,6 +181,31 @@ def check_empty_libraries() -> Finding:
                     "critical", "diagnostico", count=len(empty_libs), fixable=True)
 
 
+def check_package_corruption() -> Finding:
+    """pacman -Qkk (deep check) — mais rigoroso que -Qk (que só confere
+    se os arquivos existem): também confere tamanho/permissões/conteúdo
+    contra o esperado. Detecta corrupção de verdade (arquivo alterado
+    ou truncado), não só arquivo ausente — esse caso já é coberto
+    separadamente por log_dirs/empty_libs."""
+    out = _run(["pacman", "-Qkk"], timeout=90)
+    warnings = [l for l in out.splitlines() if l.startswith("warning:")]
+    if not warnings:
+        return Finding("pkg_corruption", "Integridade dos pacotes",
+                        "Nenhum arquivo corrompido/alterado detectado (pacman -Qkk)",
+                        "ok", "diagnostico")
+    packages = set()
+    for line in warnings:
+        # formato de cada linha: "warning: <pacote>: <caminho> (motivo)"
+        parts = line.split(":", 2)
+        if len(parts) >= 2:
+            packages.add(parts[1].strip())
+    example = sorted(packages)[0] if packages else "?"
+    return Finding("pkg_corruption", "Pacotes com arquivos corrompidos",
+                    f"{len(warnings)} arquivo(s) em {len(packages)} pacote(s) — ex: {example}",
+                    "critical", "diagnostico", count=len(warnings), fixable=True,
+                    extra="\n".join(warnings))
+
+
 def check_critical_timers() -> Finding:
     broken = []
     for timer in CRITICAL_TIMERS:
@@ -311,6 +336,7 @@ def run_full_checkup() -> DoctorReport:
         check_orphan_kernels(),
         check_missing_log_dirs(),
         check_empty_libraries(),
+        check_package_corruption(),
         check_critical_timers(),
         check_volumes_integrity(),
         *check_aur_watchlist(),
