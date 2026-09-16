@@ -1,0 +1,1065 @@
+#!/home/apollo/venvs/pyside/bin/python3
+"""
+carbonara-helper — dispatcher central pra ações privilegiadas do Carbonara.
+
+Existe pra dar ao polkit um ALVO FIXO de executável, permitindo uma
+política customizada (auth_admin_keep) em vez de cair na ação genérica
+"org.freedesktop.policykit.exec" (que sempre pede senha de novo e mostra
+o script inteiro na caixa de diálogo).
+
+Uso:
+    carbonara-helper <DISPLAY> <XAUTHORITY> <ação> ['<json de argumentos>']
+
+Ex:
+    carbonara-helper :1 /run/user/1000/gdm/Xauthority eggs_action '{"func_name": "create_eggs", "title": "Create Penguin's Eggs"}'
+    carbonara-helper :1 /run/user/1000/gdm/Xauthority backup.create_backup '{"destination_mountpoint": "/mnt/X", "scope": "both"}'
+    carbonara-helper :1 /run/user/1000/gdm/Xauthority backup.sync_snapshot '{"snapshot_path": "/mnt/X/CarbonaraSnapshots/ROOT/xxx"}'
+    carbonara-helper :1 /run/user/1000/gdm/Xauthority clonezilla.compress '{"name": "2026-08-10-ARCHGOLD", "month_dir": "/mnt/MDSATA/CLONEZILLA/2026/AUGUST"}'
+
+Cada ação sabe qual módulo importar, qual função chamar, e qual dialog
+de progresso usar — tudo centralizado aqui, em vez de espalhado em
+cada tela.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path("/home/apollo/carbonara-py")
+sys.path.insert(0, str(PROJECT_ROOT))
+
+VENV_PYTHON = "/home/apollo/venvs/pyside/bin/python3"
+CARBONARA_USER = "apollo"
+
+
+def _run_eggs_action(args: dict) -> None:
+    from PySide6.QtWidgets import QApplication
+    from core.eggs import eggs as eggs_module
+    from ui.widgets.eggs_progress import EggsProgressDialog
+    from core.i18n import tr
+    import traceback
+
+    func = getattr(eggs_module, args["func_name"])
+    app = QApplication([])
+    dialog = EggsProgressDialog(
+        args["title"],
+        preparing_text=args.get("preparing_text"),
+        icon_glyph=args.get("icon_glyph", "mdi6.egg-outline"),
+    )
+    # Repassa kwargs extras conhecidos (ex: "destination", escolhido no
+    # combo da UI) — antes disso, o valor chegava até aqui mas nunca era
+    # encaminhado pra função de verdade, então era sempre ignorado.
+    extra_kwargs = {}
+    if "destination" in args:
+        extra_kwargs["destination"] = args["destination"]
+    if "update_check_version" in args:
+        extra_kwargs["update_check_version"] = args["update_check_version"]
+
+    try:
+        func(dialog, **extra_kwargs)
+    except Exception as exc:
+        # Bug interno inesperado (não é uma falha "esperada" de operação,
+        # tipo espaço insuficiente — essas já se tratam sozinhas) — em vez
+        # de deixar subir cru e virar uma janela de traceback separada na
+        # cara do usuário, mostra como uma falha normal dentro do próprio
+        # diálogo (que já está aberto). O traceback completo ainda vai
+        # pro log técnico (rolável, quem quiser investigar encontra), só
+        # não é mais a PRIMEIRA coisa que aparece.
+        dialog.append_log(f"✗ {tr('helper.unexpected_error')}: {exc}")
+        dialog.append_log(traceback.format_exc())
+        dialog.set_status(tr("eggs_core.status_op_failed"))
+        dialog.progress.setRange(0, 100)
+        dialog.progress.setValue(0)
+        dialog._had_failure = True
+        dialog.set_running(False)
+
+    # Se o usuário já fechou a janela pelo X durante o painel de disco
+    # alternativo (dentro de check_space(), chamado por create_eggs/
+    # install_eggs/etc — ver prompt_alternative_destination), o log já
+    # registrou isso. Não reabre a mesma janela numa tela final pedindo
+    # mais um clique em "Fechar": ele já disse que queria fechar. Mesmo
+    # fix já aplicado em _run_backup_create/_run_single_create_and_exit.
+    if getattr(dialog, "_user_requested_close", False):
+        return
+
+    dialog.exec()
+
+
+def _run_eggs_delete_iso(args: dict) -> None:
+    """Remove um arquivo .iso (Ventoy/MDSATA pertencem a root, criados via
+    pkexec pelo eggs) — ação simples, sem dialog de progresso, já que é
+    quase instantânea (só um unlink)."""
+    from core.i18n import tr
+    path = Path(args["path"])
+    if not path.exists():
+        print(tr("helper.file_not_found").format(path=path), file=sys.stderr)
+        sys.exit(1)
+    path.unlink()
+
+
+def _run_eggs_move_iso(args: dict) -> None:
+    _run_eggs_copy_or_move_iso(args, delete_source=True)
+
+
+def _run_eggs_copy_iso(args: dict) -> None:
+    _run_eggs_copy_or_move_iso(args, delete_source=False)
+
+
+def _run_eggs_copy_or_move_iso(args: dict, delete_source: bool) -> None:
+    """Copia um .iso pra outro disco escolhido pelo usuário (via
+    DiskPickerDialog) — e, se `delete_source`, apaga a origem depois de
+    confirmar que a cópia terminou com sucesso, virando um "mover" de
+    verdade (rsync não tem um modo nativo de mover entre dispositivos
+    diferentes). Mesma convenção de pasta que o eggs.py já usa: MDSATA
+    guarda em MDSATA/ARCHEGGS/, os demais discos direto na raiz do
+    mountpoint.
+
+    Janela de progresso de verdade — reaproveita o EggsProgressDialog e
+    o RsyncWorker já usados em todo o resto do app (mesmo padrão de
+    create_backup/create_eggs), em vez de rodar silencioso feito o
+    delete (que é só um unlink instantâneo, não precisa de tela)."""
+    from PySide6.QtWidgets import QApplication
+    from ui.widgets.eggs_progress import EggsProgressDialog
+    from core.workers.rsync_worker import RsyncWorker
+    from core.i18n import tr
+
+    src = Path(args["path"])
+    if not src.exists():
+        print(tr("helper.file_not_found").format(path=src), file=sys.stderr)
+        sys.exit(1)
+
+    destination_mountpoint = Path(args["destination_mountpoint"])
+    if destination_mountpoint == Path("/mnt/MDSATA"):
+        dest_dir = destination_mountpoint / "ARCHEGGS"
+    else:
+        dest_dir = destination_mountpoint
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest_path = dest_dir / src.name
+
+    app = QApplication([])
+
+    title_key = "eggs.moving_title" if delete_source else "eggs.copying_title"
+    title = tr(title_key).format(name=src.name)
+    icon_glyph = "mdi6.folder-move-outline" if delete_source else "mdi6.content-copy"
+    # Cores diferentes pra não ficar tudo igual: mover usa a mesma cor
+    # âmbar do ícone no menu "⋮" (eggs_page.py's act_move), copiar usa
+    # azul — só essas duas telas, o resto (Create/Check/Install) segue
+    # verde como sempre.
+    header_color = "#c3a864" if delete_source else "#3b82f6"
+    dialog = EggsProgressDialog(
+        title, icon_glyph=icon_glyph, compact=True,
+        header_color=header_color, needs_eggs_cleanup=False,
+    )
+
+    cmd = ["rsync", "-ahv", "--info=progress2", str(src), str(dest_path)]
+    worker = RsyncWorker(cmd, title=title)
+
+    register = getattr(dialog, "register_worker", None)
+    if callable(register):
+        dialog.register_worker(worker)
+    else:
+        dialog._worker = worker
+
+    worker.progress_changed.connect(dialog.progress.setValue)
+    worker.status_changed.connect(dialog.set_status)
+    worker.log_line.connect(dialog.append_log)
+    if hasattr(dialog, "set_current_file"):
+        worker.file_changed.connect(dialog.set_current_file)
+
+    def _on_ok() -> None:
+        if delete_source:
+            try:
+                src.unlink()
+            except OSError as exc:
+                dialog.append_log(f"✗ {tr('helper.unexpected_error')}: {exc}")
+        dialog.set_status(tr("eggs_core.status_op_done"))
+        dialog.progress.setValue(100)
+        dialog.set_running(False)
+
+    def _on_failed(msg: str) -> None:
+        dialog.append_log(f"✗ {msg}")
+        dialog.set_status(tr("eggs_core.status_op_failed"))
+        dialog._had_failure = True
+        dialog.set_running(False)
+
+    worker.finished_ok.connect(_on_ok)
+    worker.failed.connect(_on_failed)
+
+    dialog.set_running(True)
+    worker.start()
+    dialog.exec()
+
+
+def _run_backup_create(args: dict) -> None:
+    from PySide6.QtWidgets import QApplication
+    from core.snapshots.backup import create_backup
+    from core.snapshots.scheduler import check_space_for_create, load_create_schedule_config
+    from ui.widgets.backup_progress import BackupProgressDialog
+
+    app = QApplication([])
+    from core.i18n import tr
+    dialog = BackupProgressDialog(tr("backup.dialog_title_create"))
+
+    # Mesma checagem de espaço (com sugestão de disco alternativo) já
+    # usada na criação agendada — reaproveitada aqui pro botão manual
+    # "Create Snapshot" também, que nunca teve isso antes.
+    min_free_gb = float(load_create_schedule_config().get("min_free_gb", 5) or 0)
+    destination_mountpoint = check_space_for_create(
+        dialog, args["destination_mountpoint"], args["scope"], min_free_gb,
+    )
+    if destination_mountpoint is None:
+        if dialog._user_requested_close:
+            # Usuário já fechou a janela pelo X durante a escolha de
+            # disco — o log já registrou isso (em vermelho). Não faz
+            # sentido reabrir numa tela de "espaço insuficiente" separada
+            # pedindo mais um clique em "Fechar": ele já disse que queria
+            # fechar. Só sai.
+            return
+        dialog.set_status(tr("snapshots.create_space_failed_status"))
+        dialog.progress.setRange(0, 100)
+        dialog.progress.setValue(0)
+        dialog._had_failure = True
+        dialog.set_running(False)
+        dialog.exec()
+        return
+
+    import traceback
+    try:
+        create_backup(
+            dialog,
+            destination_mountpoint=destination_mountpoint,
+            scope=args["scope"],
+        )
+    except Exception as exc:
+        # Mesmo tratamento do _run_eggs_action — bug interno vira uma
+        # falha normal dentro do próprio diálogo, não um traceback cru.
+        dialog.append_log(f"✗ {tr('helper.unexpected_error')}: {exc}")
+        dialog.append_log(traceback.format_exc())
+        dialog.set_status(tr("helper.unexpected_error_status"))
+        dialog.progress.setRange(0, 100)
+        dialog.progress.setValue(0)
+        dialog._had_failure = True
+        dialog.set_running(False)
+    dialog.exec()
+
+
+def _run_backup_sync(args: dict) -> None:
+    import subprocess
+    import traceback
+    from PySide6.QtCore import QThread, Signal as QSignal
+    from PySide6.QtWidgets import QApplication
+    from core.snapshots.backup import sync_snapshot, ROOT_EXCLUDES, HOME_EXCLUDES
+    from ui.widgets.backup_progress import BackupProgressDialog, PairCheckProgressDialog
+
+    app = QApplication([])
+    from core.i18n import tr
+    dialog = BackupProgressDialog(tr("backup.dialog_title_sync"))
+    sync_snapshot(dialog, snapshot_path=args["snapshot_path"])
+    dialog.exec()
+
+    if not args.get("offer_pair"):
+        return
+
+    # Verifica via rsync --dry-run se o snapshot irmão (ROOT/HOME) tem
+    # mudanças pendentes reais — não adivinha por horário/synced_at.
+    # Roda dentro da mesma sessão pkexec, sem pedir senha de novo.
+    # TUDO aqui fica dentro do try: essa checagem é um extra pós-sync e
+    # nunca pode derrubar o processo com erro, já que o sync em si já
+    # terminou (com sucesso ou falha) antes desta parte.
+    payload = dict(needs_sync=False, sibling_kind=None, sibling_path=None)
+
+    try:
+        entry_path = Path(args["snapshot_path"])
+        kind = entry_path.parent.name.upper()
+        sibling_kind = "HOME" if kind == "ROOT" else ("ROOT" if kind == "HOME" else None)
+        payload["sibling_kind"] = sibling_kind
+
+        if sibling_kind:
+            backup_root = entry_path.parent.parent
+            sibling_dir = backup_root / sibling_kind / entry_path.name
+            meta_file = sibling_dir / "snapshot.json"
+
+            if sibling_dir.exists() and meta_file.exists():
+                meta = json.loads(meta_file.read_text(encoding="utf-8"))
+                source = meta.get("source", "")
+                excludes = ROOT_EXCLUDES if sibling_kind == "ROOT" else HOME_EXCLUDES
+                payload["sibling_path"] = str(sibling_dir)
+
+                if source:
+                    class _DryRunWorker(QThread):
+                        done = QSignal(bool)
+
+                        def run(self):
+                            cmd = [
+                                "rsync", "-aAXHh", "--delete",
+                                "--dry-run", "--itemize-changes", "--numeric-ids",
+                            ]
+                            for ex in excludes:
+                                cmd += ["--exclude", ex]
+                            cmd += [source, str(sibling_dir) + "/"]
+                            result = subprocess.run(cmd, capture_output=True, text=True)
+                            changed = [l for l in result.stdout.splitlines() if l.strip()]
+                            # Ruído normal: HOME/ROOT são diretórios vivos
+                            # (cache de navegador, histórico, logs, etc.)
+                            # que mudam o tempo todo, mesmo segundos após
+                            # um sync perfeito. Só considera "desatualizado"
+                            # com uma quantidade significativa de mudanças.
+                            NOISE_THRESHOLD = 15
+                            self.done.emit(len(changed) > NOISE_THRESHOLD)
+
+                    check_dialog = PairCheckProgressDialog(sibling_kind + " " + entry_path.name)
+                    worker = _DryRunWorker()
+
+                    def _on_dry_run_done(has_changes):
+                        payload["needs_sync"] = has_changes
+                        check_dialog.accept()
+
+                    worker.done.connect(_on_dry_run_done)
+                    worker.start()
+                    check_dialog.exec()
+    except Exception:
+        payload["error"] = traceback.format_exc()
+
+    try:
+        result_path = Path(args["pair_check_path"])
+        result_path.write_text(json.dumps(payload), encoding="utf-8")
+        result_path.chmod(0o666)
+    except Exception:
+        pass
+
+
+def _run_verify(args: dict) -> None:
+    import subprocess
+    from PySide6.QtCore import QThread, Signal as QSignal
+    from PySide6.QtWidgets import QApplication
+    from core.snapshots.backup import ROOT_EXCLUDES, HOME_EXCLUDES
+    from ui.widgets.backup_progress import PairCheckProgressDialog
+
+    app = QApplication([])
+
+    targets = args["targets"]  # {{id_: {{"kind": ..., "path": ...}}}}
+    results = dict()
+
+    class _VerifyWorker(QThread):
+        done = QSignal(dict)
+
+        def run(self):
+            out = dict()
+            for id_, info in targets.items():
+                kind = info["kind"]
+                snap_path = info["path"]
+                snap_dir = Path(snap_path)
+                meta_file = snap_dir / "snapshot.json"
+                if not meta_file.exists():
+                    out[id_] = dict(status="error", detail="snapshot.json nao encontrado")
+                    continue
+                try:
+                    meta = json.loads(meta_file.read_text(encoding="utf-8"))
+                    source = meta.get("source", "")
+                    excludes = ROOT_EXCLUDES if kind == "ROOT" else HOME_EXCLUDES
+                    if not source:
+                        out[id_] = dict(status="error", detail="campo source ausente no snapshot.json")
+                        continue
+                    cmd = [
+                        "rsync", "-aAXHh", "--delete",
+                        "--dry-run", "--itemize-changes", "--numeric-ids",
+                    ]
+                    for ex in excludes:
+                        cmd = cmd + ["--exclude", ex]
+                    cmd = cmd + [source, str(snap_dir) + "/"]
+                    result = subprocess.run(cmd, capture_output=True, text=True)
+                    if result.returncode not in (0, 23, 24):
+                        detail = "rsync codigo " + str(result.returncode) + ": " + result.stderr.strip()[:200]
+                        out[id_] = dict(status="error", detail=detail)
+                        continue
+                    changed = [l for l in result.stdout.splitlines() if l.strip()]
+                    # Ruído normal do sistema (cache, logs, etc.) — só
+                    # acusa desatualizado com uma quantidade significativa
+                    # de mudanças pendentes.
+                    NOISE_THRESHOLD = 15
+                    is_stale = len(changed) > NOISE_THRESHOLD
+                    out[id_] = dict(
+                        status=("stale" if is_stale else "ok"),
+                        detail=str(len(changed)) + " itens no dry-run",
+                    )
+                except Exception as exc:
+                    out[id_] = dict(status="error", detail=str(exc))
+            self.done.emit(out)
+
+    check_dialog = PairCheckProgressDialog(args.get("label", "verificacao"))
+    worker = _VerifyWorker()
+
+    def _on_verify_done(res):
+        results.update(res)
+        check_dialog.accept()
+
+    worker.done.connect(_on_verify_done)
+    worker.start()
+    check_dialog.exec()
+
+    try:
+        result_path = Path(args["result_path"])
+        result_path.write_text(json.dumps(results), encoding="utf-8")
+        result_path.chmod(0o666)
+    except Exception:
+        pass
+
+
+def _run_restore_generate(args: dict) -> None:
+    from datetime import datetime
+    from core.snapshots.restore import generate_restore_script
+
+    generate_restore_script(
+        snapshot_root_path=args.get("root_path"),
+        snapshot_home_path=args.get("home_path"),
+        output_path=args["output"],
+    )
+
+    out_instr = Path(args["output_instr"])
+    suggested_iso = args["suggested_iso"]
+    output = args["output"]
+    content = f"""
+================================================================================
+  CARBONARA — INSTRUCOES DE RESTORE COMPLETO DO SISTEMA
+  Gerado em: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+================================================================================
+
+PASSO 1 — Boot pelo Ventoy
+  Reinicie o computador e selecione pelo Ventoy:
+  -> {suggested_iso}
+
+PASSO 2 — Execute no shell do live ISO
+  Cole o comando abaixo e pressione Enter:
+
+  bash <(mount /dev/sdc3 /mnt/bk 2>/dev/null; cat /mnt/bk/carbonara-restore.sh)
+
+  O script ira:
+  OK Montar o disco de backup automaticamente
+  OK Montar o array RAID0 (/dev/md127)
+  OK Restaurar ROOT e HOME via rsync
+  OK Reinstalar o GRUB (legacy BIOS)
+  OK Desmontar tudo ao finalizar
+
+PASSO 3 — Confirmacao
+  Quando solicitado, digite exatamente:  RESTAURAR
+  (qualquer outra entrada cancela a operacao)
+
+================================================================================
+  ARQUIVOS GERADOS
+  Script:      {output}
+  Instrucoes:  {str(out_instr)}
+================================================================================
+""".strip()
+    out_instr.write_text(content, encoding="utf-8")
+
+
+def _run_restore_copy_files(args: dict) -> None:
+    import shutil
+
+    snapshot_root = Path(args["snapshot_root"])
+    items = args["items"]
+    conflict = args["conflict"]
+    dest_prefix = args.get("dest_prefix", "")
+
+    def to_dest(rel: Path) -> Path:
+        if dest_prefix:
+            return Path("/") / dest_prefix / rel
+        return Path("/") / rel
+
+    for src_str in items:
+        src = Path(src_str)
+        try:
+            rel = src.relative_to(snapshot_root)
+        except ValueError:
+            continue
+        dst = to_dest(rel)
+        if src.is_dir():
+            for f in src.rglob("*"):
+                if f.is_file() or f.is_symlink():
+                    try:
+                        rel_f = f.relative_to(snapshot_root)
+                        dst_f = to_dest(rel_f)
+                        if dst_f.exists() and conflict == "skip":
+                            print(f"SKIP: {dst_f}")
+                            continue
+                        dst_f.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(f, dst_f)
+                        print(f"OK: {dst_f}")
+                    except Exception as ex:
+                        print(f"ERR: {dst_f} -- {ex}")
+        else:
+            try:
+                if dst.exists() and conflict == "skip":
+                    print(f"SKIP: {dst}")
+                else:
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(src, dst)
+                    print(f"OK: {dst}")
+            except Exception as ex:
+                print(f"ERR: {dst} -- {ex}")
+
+
+def _run_restore_copy_to_alt_disk(args: dict) -> None:
+    from PySide6.QtWidgets import QApplication
+    from ui.widgets.backup_progress import BackupProgressDialog
+    from core.workers.rsync_worker import RsyncWorker
+
+    snap = Path(args["snap_path"])
+    dest_base = Path(args["dest_path"]) / "CarbonaraSnapshots" / snap.parent.name
+    dest_base.mkdir(parents=True, exist_ok=True)
+    dest_dir = dest_base / snap.name
+
+    cmd = [
+        "rsync", "-aAXHh",
+        "--numeric-ids",
+        "--info=progress2",
+        "--out-format=Copiando: %n",
+    ]
+    if args.get("use_delete"):
+        cmd.append("--delete")
+    if args.get("use_hardlinks"):
+        cmd.append("-H")
+    cmd += [str(snap) + "/", str(dest_dir) + "/"]
+
+    app = QApplication([])
+    from core.i18n import tr
+    dialog = BackupProgressDialog(tr("backup.dialog_title_restore").format(dest=args['dest_label']))
+    dialog.set_running(True)
+    dialog.set_status(tr("backup.starting_restore"))
+    dialog.progress.setRange(0, 100)
+    dialog.progress.setValue(0)
+
+    worker = RsyncWorker(cmd, title=tr("backup.copying_snapshot"), parent=dialog)
+    dialog.register_worker(worker)
+    worker.progress_changed.connect(dialog.progress.setValue)
+    worker.status_changed.connect(dialog.set_status)
+    worker.file_changed.connect(dialog.set_current_file)
+    worker.log_line.connect(dialog.append_log)
+
+    def on_ok():
+        dialog.set_status(tr("backup.restore_done_ok"))
+        dialog.progress.setValue(100)
+        dialog.set_running(False)
+        dialog.btn_close.setEnabled(True)
+
+    def on_fail(msg):
+        dialog.set_status(tr("backup.error_prefix").format(msg=msg))
+        dialog.set_running(False)
+        dialog.btn_close.setEnabled(True)
+
+    worker.finished_ok.connect(on_ok)
+    worker.failed.connect(on_fail)
+    worker.start()
+    dialog.exec()
+
+
+def _run_delete_snapshot(args: dict) -> None:
+    import shutil
+    from core.snapshots.backup import _try_generate_restore_script
+
+    target = Path(args["target"])
+    link = Path(args["link"])
+    new_latest = args.get("new_latest")
+
+    shutil.rmtree(target)
+
+    # Atualiza symlink latest
+    if link.is_symlink() or link.exists():
+        link.unlink()
+    if new_latest:
+        link.symlink_to(Path(new_latest).name)
+
+    # Remove a pasta ROOT/HOME em si se ficou vazia — os.rmdir só funciona
+    # se estiver realmente vazia (nunca apaga nada com conteúdo dentro),
+    # então é seguro tentar sem checagem extra.
+    kind_base = target.parent
+    try:
+        os.rmdir(kind_base)
+    except OSError:
+        pass  # ainda tem outros snapshots, ou não está vazia por outro motivo
+    else:
+        # kind_base (ROOT ou HOME) ficou vazia e foi removida — confere se
+        # CarbonaraSnapshots inteira também ficou vazia (o outro kind já
+        # não existe ou também está vazio) e remove ela também
+        carbonara_snapshots_dir = kind_base.parent
+        try:
+            os.rmdir(carbonara_snapshots_dir)
+        except OSError:
+            pass  # ainda tem o outro kind (ROOT ou HOME) com conteúdo
+
+    # Regenera (ou remove, se não sobrar ROOT) o carbonara-restore.sh —
+    # mesmo processo usado após backup/sync, pra nunca deixar o script
+    # apontando para um snapshot que acabou de ser apagado.
+    snapshot_base = kind_base.parent
+    destination_mountpoint = str(kind_base.parent.parent)
+    _try_generate_restore_script(snapshot_base, destination_mountpoint)
+
+
+def _run_doctor_cleanup(args: dict) -> None:
+    from core.system.cleanup import RUNNERS
+
+    categories = args.get("categories", [])
+    for cat in categories:
+        runner = RUNNERS.get(cat)
+        if runner is None:
+            continue
+        try:
+            msg = runner()
+        except Exception as exc:
+            msg = f"Erro: {exc}"
+        print(f"{cat}: {msg}", flush=True)
+
+
+def _run_doctor_fix_log_dirs(args: dict) -> None:
+    from core.system.doctor import EXPECTED_LOG_DIRS_BY_PACKAGE, _is_installed
+    from core.i18n import tr
+
+    created = []
+    for package, dirs in EXPECTED_LOG_DIRS_BY_PACKAGE.items():
+        if not _is_installed(package):
+            continue
+        for d in dirs:
+            path = Path(d)
+            if not path.is_dir():
+                path.mkdir(parents=True, exist_ok=True)
+                created.append(d)
+    print(tr("helper.dirs_created").format(created=created or tr("helper.none_placeholder")))
+
+
+# Mesma lista de fstypes que não fazem sentido fsckar diretamente (origem:
+# FsckMonstro.sh) — RAID member/LUKS/swap/LVM/squashfs/iso9660 nunca são
+# alvo de fsck direto, só o que está por baixo deles depois de montado.
+_FSCK_SKIP_FSTYPES = {
+    "linux_raid_member", "crypto_LUKS", "swap",
+    "LVM2_member", "squashfs", "iso9660",
+}
+_FSCK_TOOL_BY_FSTYPE = {
+    "vfat": ("fsck.vfat", ["-v", "-r", "-f"]),
+    "fat32": ("fsck.vfat", ["-v", "-r", "-f"]),
+    "fat16": ("fsck.vfat", ["-v", "-r", "-f"]),
+    "ext2": ("fsck.ext4", ["-f", "-y", "-v"]),
+    "ext3": ("fsck.ext4", ["-f", "-y", "-v"]),
+    "ext4": ("fsck.ext4", ["-f", "-y", "-v"]),
+    "xfs": ("xfs_repair", []),
+    "exfat": ("fsck.exfat", ["-v"]),
+    "ntfs": ("ntfsfix", []),
+}
+
+
+def _run_doctor_fsck_repair(args: dict) -> None:
+    """Correção de verdade por trás do achado "Integridade dos volumes"
+    do Doctor Arch — o check em core/system/doctor.py só faz fsck -n
+    (leitura, nunca corrige, nunca roda em montado). Este helper roda o
+    fsck REAL, mas com exatamente a mesma seleção segura de dispositivos
+    do FsckMonstro.sh: nunca em algo montado, nunca em RAID
+    member/LUKS/swap/LVM. Btrfs fica de fora de propósito — 'btrfs check'
+    sem --repair só diagnostica, e --repair é perigoso o bastante pra não
+    automatizar sem revisão manual."""
+    from core.i18n import tr
+    result = subprocess.run(
+        ["lsblk", "-J", "-o", "NAME,FSTYPE,MOUNTPOINT,TYPE"],
+        capture_output=True, text=True, timeout=15,
+    )
+    try:
+        tree = json.loads(result.stdout or "{}")
+    except json.JSONDecodeError:
+        tree = {}
+
+    # lsblk -J aninha partições dentro do disco pai — achata tudo (disco +
+    # partições) numa lista só, que é o que interessa aqui.
+    def _flatten(nodes: list) -> list:
+        flat = []
+        for node in nodes:
+            flat.append(node)
+            flat.extend(_flatten(node.get("children", [])))
+        return flat
+
+    devices = _flatten(tree.get("blockdevices", []))
+
+    results: dict[str, str] = {}
+    seen_devs: set[str] = set()
+    for dev_info in devices:
+        dev = dev_info.get("name") or ""
+        fstype = dev_info.get("fstype") or ""
+        mountpoint = dev_info.get("mountpoint")
+        if not dev.startswith("/"):
+            dev = f"/dev/{dev}"
+
+        # RAID com mais de um disco físico membro faz o lsblk duplicar a
+        # árvore inteira do array (md127, md127p1, p2, p3...) embaixo de
+        # CADA disco físico que alimenta ele — sem isso, "Pulando ..."
+        # aparece repetido uma vez por disco membro, sem fazer mal nenhum
+        # (não roda fsck duas vezes), só polui o log.
+        if dev in seen_devs:
+            continue
+        seen_devs.add(dev)
+        if not fstype:
+            continue
+        if fstype in _FSCK_SKIP_FSTYPES:
+            continue
+        if mountpoint:
+            print(f"Pulando {dev} (montado em {mountpoint})", flush=True)
+            continue
+
+        tool_info = _FSCK_TOOL_BY_FSTYPE.get(fstype)
+        if tool_info is None:
+            print(f"Pulando {dev} (fstype={fstype} sem checador conhecido)", flush=True)
+            continue
+        tool, opts = tool_info
+
+        if shutil.which(tool) is None:
+            print(tr("helper.skipping_no_tool").format(dev=dev, tool=tool), flush=True)
+            results[dev] = f"FERRAMENTA AUSENTE ({tool})"
+            continue
+
+        print(f"Executando: {tool} {' '.join(opts)} {dev}", flush=True)
+        proc = subprocess.run(
+            [tool, *opts, dev], capture_output=True, text=True, timeout=1800,
+        )
+        for out_line in (proc.stdout + proc.stderr).splitlines():
+            print(f"  {out_line}", flush=True)
+
+        if proc.returncode <= 1:
+            results[dev] = f"OK ({fstype}, code={proc.returncode})"
+        else:
+            results[dev] = f"FALHOU ({fstype}, code={proc.returncode})"
+
+    print("", flush=True)
+    print("=== Resumo ===", flush=True)
+    if not results:
+        print(tr("helper.no_eligible_volume"), flush=True)
+    for dev, status in results.items():
+        print(f"{dev}: {status}", flush=True)
+
+
+def _run_doctor_fix_empty_libs(args: dict) -> None:
+    """Correção do achado "Bibliotecas .so vazias" — origem: FixArch.sh.
+    Re-detecta (não confia no resultado do checkup, que pode estar
+    desatualizado) e reinstala os pacotes donos via pacman -S --needed,
+    que sobrescreve só os arquivos que já vêm no pacote — não apaga nada
+    que não seja parte dele."""
+    from core.i18n import tr
+    result = subprocess.run(
+        ["find", "/usr/lib", "-type", "f", "-size", "0", "-name", "*.so*"],
+        capture_output=True, text=True, timeout=30,
+    )
+    empty_libs = [l for l in result.stdout.splitlines() if l.strip()]
+
+    if not empty_libs:
+        print("Nenhuma biblioteca .so vazia encontrada — nada a fazer.", flush=True)
+        return
+
+    print(f"Bibliotecas vazias encontradas ({len(empty_libs)}):", flush=True)
+    for lib in empty_libs:
+        print(f"  {lib}", flush=True)
+
+    owner_result = subprocess.run(
+        ["pacman", "-Qqo", *empty_libs],
+        capture_output=True, text=True, timeout=30,
+    )
+    pkgs = sorted(set(l.strip() for l in owner_result.stdout.splitlines() if l.strip()))
+
+    if not pkgs:
+        print(tr("helper.no_owner_pkg_found"), flush=True)
+        return
+
+    print(f"Pacotes a reinstalar: {', '.join(pkgs)}", flush=True)
+    proc = subprocess.run(
+        ["pacman", "-S", "--needed", "--noconfirm", *pkgs],
+        capture_output=True, text=True, timeout=600,
+    )
+    for line in (proc.stdout + proc.stderr).splitlines():
+        print(f"  {line}", flush=True)
+
+    if proc.returncode == 0:
+        print(tr("helper.reinstall_done").format(pkgs=', '.join(pkgs)), flush=True)
+    else:
+        print(tr("helper.pacman_exit_code").format(code=proc.returncode), flush=True)
+
+
+def _run_restore_home_live(args: dict) -> None:
+    from PySide6.QtWidgets import QApplication
+    from core.snapshots.restore import restore_home_live
+    from ui.widgets.backup_progress import BackupProgressDialog
+
+    app = QApplication([])
+    from core.i18n import tr
+    dialog = BackupProgressDialog(tr("backup.dialog_title_restore_home"), icon_glyph="mdi6.home-import-outline")
+    restore_home_live(dialog, home_snapshot_path=args["home_snapshot_path"])
+    dialog.exec()
+
+
+def _run_eggs_force_kill(args: dict) -> None:
+    """Mata qualquer processo travado do Penguin's Eggs (xorriso, eggs
+    produce) — existe porque a janela de progresso roda DENTRO do
+    processo privilegiado (root, via pkexec). Quando trava, o "Force
+    Quit" do GNOME é disparado pela sessão do usuário normal, que não
+    tem permissão pra matar um processo do root — a janela fecha
+    visualmente mas o processo (e o xorriso filho) continua vivo,
+    escondido, travando a UI pra sempre. Isso dá um jeito de matar via
+    root de verdade, sem precisar reiniciar o Carbonara."""
+    for pattern in ("xorriso", "eggs produce", "eggs calamares", "mksquashfs"):
+        subprocess.run(["pkill", "-9", "-f", pattern], capture_output=True)
+    print("Processos travados do Penguin's Eggs encerrados (se existiam).")
+
+
+def _run_clonezilla_compress(args: dict) -> None:
+    from PySide6.QtWidgets import QApplication
+    from core.clonezilla.manager import compress_backup
+    from ui.widgets.clonezilla_progress import ClonezillaProgressDialog
+
+    app = QApplication([])
+    dialog = ClonezillaProgressDialog(
+        f"Comprimindo {args['name']}",
+        icon_glyph="mdi6.archive-arrow-down-outline",
+    )
+    compress_backup(dialog, name=args["name"], month_dir=args["month_dir"])
+    dialog.exec()
+
+
+def _run_clonezilla_delete(args: dict) -> None:
+    import shutil
+
+    path = Path(args["path"])
+    is_dir = bool(args.get("is_dir"))
+
+    if not path.exists():
+        return  # já foi removido — nada a fazer
+
+    if is_dir:
+        shutil.rmtree(path)
+    else:
+        path.unlink()
+
+
+# ── Registro de ações conhecidas ──────────────────────────────────────────────
+def _run_live_mount_known_disks(args: dict) -> None:
+    from core.system.live_mount import mount_system_disks
+
+    results = mount_system_disks()
+    for item, msg in results.items():
+        print(f"{item}: {msg}")
+
+
+def _run_scheduler_install(args: dict) -> None:
+    """Escreve/atualiza carbonara-sync.service + carbonara-sync.timer e
+    ativa (ou desativa, se enabled=False) o timer. Chamado toda vez que
+    o usuário clica em "Salvar agendamento" na tela do Timeshift — a
+    config chega inteira via args["config"] (o mesmo dict que a UI
+    também grava em ~/.config/carbonara/schedule.json)."""
+    import subprocess
+    from core.snapshots.scheduler import build_oncalendar
+
+    config = args["config"]
+
+    SERVICE_PATH = Path("/etc/systemd/system/carbonara-sync.service")
+    TIMER_PATH = Path("/etc/systemd/system/carbonara-sync.timer")
+
+    service_content = (
+        "[Unit]\n"
+        "Description=Carbonara - sincronizacao automatica de snapshots\n"
+        "After=local-fs.target\n"
+        "\n"
+        "[Service]\n"
+        "Type=oneshot\n"
+        "User=root\n"
+        f"Environment=HOME=/home/{CARBONARA_USER}\n"
+        f"WorkingDirectory={PROJECT_ROOT}\n"
+        f"ExecStart={VENV_PYTHON} -m core.snapshots.scheduler\n"
+    )
+    SERVICE_PATH.write_text(service_content, encoding="utf-8")
+    SERVICE_PATH.chmod(0o644)
+
+    if config.get("enabled"):
+        oncalendar = build_oncalendar(config)
+        timer_content = (
+            "[Unit]\n"
+            "Description=Carbonara - timer da sincronizacao automatica\n"
+            "\n"
+            "[Timer]\n"
+            f"OnCalendar={oncalendar}\n"
+            "Persistent=true\n"
+            "\n"
+            "[Install]\n"
+            "WantedBy=timers.target\n"
+        )
+        TIMER_PATH.write_text(timer_content, encoding="utf-8")
+        TIMER_PATH.chmod(0o644)
+
+        subprocess.run(["systemctl", "daemon-reload"], check=True)
+        subprocess.run(["systemctl", "enable", "--now", "carbonara-sync.timer"], check=True)
+        print(f"Timer instalado e ativado: OnCalendar={oncalendar}")
+    else:
+        # desativado -> desliga e remove só o .timer; o .service pode
+        # ficar (nunca é disparado sem o timer apontando pra ele)
+        subprocess.run(["systemctl", "disable", "--now", "carbonara-sync.timer"], check=False)
+        if TIMER_PATH.exists():
+            TIMER_PATH.unlink()
+        subprocess.run(["systemctl", "daemon-reload"], check=True)
+        print("Timer desativado e removido.")
+
+
+def _run_scheduler_uninstall(args: dict) -> None:
+    """Remove COMPLETAMENTE os units (.timer e .service) — diferente de
+    salvar com enabled=False, que só desliga o timer e mantém o .service.
+    Não usado no fluxo normal do botão "Salvar agendamento"; existe pra
+    um eventual botão de "remover agendamento" por completo, se vier a
+    ser necessário."""
+    import subprocess
+
+    subprocess.run(["systemctl", "disable", "--now", "carbonara-sync.timer"], check=False)
+    for p in (
+        Path("/etc/systemd/system/carbonara-sync.timer"),
+        Path("/etc/systemd/system/carbonara-sync.service"),
+    ):
+        if p.exists():
+            p.unlink()
+    subprocess.run(["systemctl", "daemon-reload"], check=True)
+    print("Agendamento removido do systemd.")
+
+
+def _run_scheduler_create_install(args: dict) -> None:
+    """Mesma ideia de `_run_scheduler_install`, mas pro timer de CRIAÇÃO
+    automática (unit separado — ver DEFAULT_CREATE_CONFIG em
+    core/snapshots/scheduler.py pro porquê de ser uma agenda própria).
+    Chamado quando o usuário clica em \"Salvar agendamento\" no diálogo
+    de criação automática do Timeshift."""
+    import subprocess
+    from core.snapshots.scheduler import build_oncalendar
+
+    config = args["config"]
+
+    SERVICE_PATH = Path("/etc/systemd/system/carbonara-create.service")
+    TIMER_PATH = Path("/etc/systemd/system/carbonara-create.timer")
+
+    service_content = (
+        "[Unit]\n"
+        "Description=Carbonara - criacao automatica de snapshots\n"
+        "After=local-fs.target\n"
+        "\n"
+        "[Service]\n"
+        "Type=oneshot\n"
+        "User=root\n"
+        f"Environment=HOME=/home/{CARBONARA_USER}\n"
+        f"WorkingDirectory={PROJECT_ROOT}\n"
+        f"ExecStart={VENV_PYTHON} -m core.snapshots.scheduler --run-create\n"
+    )
+    SERVICE_PATH.write_text(service_content, encoding="utf-8")
+    SERVICE_PATH.chmod(0o644)
+
+    if config.get("enabled"):
+        oncalendar = build_oncalendar(config)
+        timer_content = (
+            "[Unit]\n"
+            "Description=Carbonara - timer da criacao automatica\n"
+            "\n"
+            "[Timer]\n"
+            f"OnCalendar={oncalendar}\n"
+            "Persistent=true\n"
+            "\n"
+            "[Install]\n"
+            "WantedBy=timers.target\n"
+        )
+        TIMER_PATH.write_text(timer_content, encoding="utf-8")
+        TIMER_PATH.chmod(0o644)
+
+        subprocess.run(["systemctl", "daemon-reload"], check=True)
+        subprocess.run(["systemctl", "enable", "--now", "carbonara-create.timer"], check=True)
+        print(f"Timer de criação instalado e ativado: OnCalendar={oncalendar}")
+    else:
+        subprocess.run(["systemctl", "disable", "--now", "carbonara-create.timer"], check=False)
+        if TIMER_PATH.exists():
+            TIMER_PATH.unlink()
+        subprocess.run(["systemctl", "daemon-reload"], check=True)
+        print("Timer de criação desativado e removido.")
+
+
+def _run_scheduler_create_uninstall(args: dict) -> None:
+    """Remove COMPLETAMENTE os units do timer de criação (.timer e
+    .service) — mesmo papel de `_run_scheduler_uninstall`, mas pro
+    agendamento de criação em vez do de sync."""
+    import subprocess
+
+    subprocess.run(["systemctl", "disable", "--now", "carbonara-create.timer"], check=False)
+    for p in (
+        Path("/etc/systemd/system/carbonara-create.timer"),
+        Path("/etc/systemd/system/carbonara-create.service"),
+    ):
+        if p.exists():
+            p.unlink()
+    subprocess.run(["systemctl", "daemon-reload"], check=True)
+    print("Agendamento de criação removido do systemd.")
+
+
+ACTIONS = {
+    "eggs_action": _run_eggs_action,
+    "eggs.delete_iso": _run_eggs_delete_iso,
+    "eggs.move_iso": _run_eggs_move_iso,
+    "eggs.copy_iso": _run_eggs_copy_iso,
+    "eggs.force_kill": _run_eggs_force_kill,
+    "backup.create_backup": _run_backup_create,
+    "backup.sync_snapshot": _run_backup_sync,
+    "backup.verify": _run_verify,
+    "restore.generate_script": _run_restore_generate,
+    "restore.copy_files": _run_restore_copy_files,
+    "restore.copy_to_alt_disk": _run_restore_copy_to_alt_disk,
+    "backup.delete_snapshot": _run_delete_snapshot,
+    "doctor.cleanup": _run_doctor_cleanup,
+    "doctor.fix_log_dirs": _run_doctor_fix_log_dirs,
+    "doctor.fsck_repair": _run_doctor_fsck_repair,
+    "doctor.fix_empty_libs": _run_doctor_fix_empty_libs,
+    "restore.home_live": _run_restore_home_live,
+    "live.mount_known_disks": _run_live_mount_known_disks,
+    "clonezilla.compress": _run_clonezilla_compress,
+    "clonezilla.delete": _run_clonezilla_delete,
+    "scheduler.install": _run_scheduler_install,
+    "scheduler.uninstall": _run_scheduler_uninstall,
+    "scheduler.create_install": _run_scheduler_create_install,
+    "scheduler.create_uninstall": _run_scheduler_create_uninstall,
+}
+
+
+def main() -> int:
+    from core.i18n import tr
+    # Recebe DISPLAY/XAUTHORITY como argumentos posicionais (não via `env`
+    # na linha de comando) — isso é essencial: se o pkexec vir "env" como
+    # o programa a ser executado, ele não bate com o exec.path da política
+    # customizada (que aponta pro carbonara-helper), e cai de volta na
+    # ação genérica do sistema (a caixa feia mostrando o comando cru).
+    if len(sys.argv) < 4:
+        print(
+            "Uso: carbonara-helper <DISPLAY> <XAUTHORITY> <ação> ['<json>']",
+            file=sys.stderr,
+        )
+        return 2
+
+    display, xauthority, action = sys.argv[1], sys.argv[2], sys.argv[3]
+    raw_args = sys.argv[4] if len(sys.argv) > 4 else "{}"
+
+    if display:
+        os.environ["DISPLAY"] = display
+    if xauthority:
+        os.environ["XAUTHORITY"] = xauthority
+
+    try:
+        args = json.loads(raw_args)
+    except json.JSONDecodeError as exc:
+        print(tr("helper.invalid_json_args").format(exc=exc), file=sys.stderr)
+        return 2
+
+    handler = ACTIONS.get(action)
+    if handler is None:
+        print(tr("helper.unknown_action").format(action=action), file=sys.stderr)
+        return 2
+
+    handler(args)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

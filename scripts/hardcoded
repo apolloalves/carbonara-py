@@ -1,0 +1,16 @@
+echo "=== RAID ==="
+mdadm --detail /dev/md127 | grep -E "UUID|Raid Devices|State"
+cat /proc/mdstat
+
+echo "=== UUIDs reais ==="
+findmnt -no SOURCE,UUID /
+findmnt -no SOURCE,UUID /boot
+findmnt -no SOURCE,UUID /home
+
+echo "=== Membros do RAID ==="
+mdadm --detail /dev/md127 | grep "active sync"
+
+echo "=== Discos externos ==="
+findmnt -no SOURCE,UUID /mnt/BACK_EMERGENCY
+findmnt -no SOURCE,UUID /mnt/MDSATA
+findmnt -no SOURCE,UUID /mnt/VENTOY

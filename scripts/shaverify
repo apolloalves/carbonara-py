@@ -1,0 +1,18 @@
+cd ~/carbonara-py
+sha256sum \
+  core/snapshots/backup.py \
+  ui/widgets/backup_progress.py \
+  /usr/local/bin/carbonara-helper \
+  ui/pages/clonezilla/clonezilla_page.py \
+  ui/widgets/clonezilla_progress.py \
+  core/eggs/eggs.py \
+  ui/pages/eggs/eggs_page.py \
+  ui/widgets/eggs_progress.py \
+  core/i18n.py \
+  ui/main_window.py \
+  core/clonezilla/manager.py \
+  core/snapshots/restore.py \
+  core/workers/rsync_worker.py \
+  core/snapshots/scheduler.py \
+  ui/pages/timeshift/timeshift_page.py \
+  ui/pages/timeshift/timeshift_panel.py
