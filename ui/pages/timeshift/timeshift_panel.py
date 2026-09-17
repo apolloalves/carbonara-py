@@ -43,6 +43,7 @@ from PySide6.QtWidgets import (
 
 from core.operation_manager import OperationManager
 from core.i18n import tr, i18n
+from ui.widgets.collecting_data_dialog import ModalBackdrop
 from core.system.storage import (
     StorageDestination,
     format_gb,
@@ -730,6 +731,7 @@ class SnapshotsPage(QWidget):
         self._verify_check_path: Path | None = None
         self._verify_entries: dict[str, SnapshotEntry] = {}
         self._sync_queue: list[SnapshotEntry] = []
+        self._backdrop: ModalBackdrop | None = None
 
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(1000)
@@ -1553,6 +1555,15 @@ class SnapshotsPage(QWidget):
         self._verify_entries = {}
         self._sync_queue = []
 
+        # Só remove o backdrop se nenhum encadeamento (fila de sync, ou
+        # o próprio _maybe_offer_pair_sync) iniciou um NOVO processo
+        # durante este poll — nesse caso self._backup_proc já estaria
+        # setado de novo, e o fundo escurecido precisa continuar.
+        if self._backup_proc is None and self._backdrop is not None:
+            self._backdrop.hide()
+            self._backdrop.deleteLater()
+            self._backdrop = None
+
     def restore_snapshot(self, entry: SnapshotEntry):
         if OperationManager.is_running():
             QMessageBox.warning(
@@ -1585,6 +1596,15 @@ class SnapshotsPage(QWidget):
         self._current_op_kind = "sync"
         self._sync_entry = entry
         self._offer_pair_after_sync = offer_pair
+
+        # Fundo escurecido — cobre a janela principal (aqui, no MESMO
+        # processo da página) enquanto o sync roda no processo
+        # privilegiado separado, inclusive durante a checagem do
+        # snapshot irmão (PairCheckProgressDialog) que pode vir depois.
+        # Widget-filho não alcança janela de outro processo, por isso
+        # isso mora aqui, não dentro do PairCheckProgressDialog em si.
+        if self._backdrop is None:
+            self._backdrop = ModalBackdrop(self.window())
 
         # Arquivo onde o processo elevado (pkexec) grava o resultado real
         # da checagem de pendências do snapshot irmão — evita um segundo

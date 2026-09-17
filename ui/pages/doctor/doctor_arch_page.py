@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import qtawesome as qta
-from PySide6.QtCore import Qt, QThread, Signal, QRectF
+from PySide6.QtCore import Qt, QThread, Signal, QRectF, QTimer
 from PySide6.QtGui import QFont, QPainter, QPen, QColor, QKeyEvent
 from PySide6.QtWidgets import (
     QWidget,
@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QFrame,
     QDialog,
+    QProgressBar,
 )
 
 from core.system.doctor import run_full_checkup, DoctorReport, Finding
@@ -421,6 +422,158 @@ FINDING_GUIDANCE = {
 }
 
 
+class CollectingDataDialog(QDialog):
+    """Dialog leve exibido enquanto o checkup roda em background — mesmo
+    desenho do PairCheckProgressDialog (backup_progress.py: header com
+    ícone, spinner, status, barra indeterminada), só com tema azul em
+    vez de verde pra combinar com a identidade do Doctor Arch. Fecha
+    sozinho quando run_checkup() termina (accept()), sem botão de
+    cancelar — não tem como cancelar um checkup de leitura no meio."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Doctor Arch")
+        self.setModal(True)
+        self.setFixedSize(420, 160)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self._dots = 0
+        self._spinner_frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+        self._build_ui()
+        self._apply_styles()
+
+        self._timer = QTimer(self)
+        self._timer.setInterval(80)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start()
+
+    def _build_ui(self) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        header = QFrame()
+        header.setObjectName("CDHeader")
+        header.setFixedHeight(46)
+        h_layout = QHBoxLayout(header)
+        h_layout.setContentsMargins(18, 0, 18, 0)
+
+        icon = QLabel()
+        icon.setFixedSize(26, 26)
+        icon.setAlignment(Qt.AlignCenter)
+        icon.setPixmap(qta.icon("mdi6.stethoscope", color="#8fd4ff").pixmap(16, 16))
+        icon.setStyleSheet(
+            "QLabel { background: rgba(59,130,246,40); border-radius: 7px; }"
+        )
+
+        lbl = QLabel("Doctor Arch")
+        lbl.setFont(QFont(FONT_FAMILY, 10, QFont.Bold))
+        lbl.setStyleSheet("color: #ecf4ff;")
+
+        h_layout.addWidget(icon)
+        h_layout.addSpacing(10)
+        h_layout.addWidget(lbl)
+        h_layout.addStretch()
+
+        body = QFrame()
+        body.setObjectName("CDBody")
+        b_layout = QVBoxLayout(body)
+        b_layout.setContentsMargins(24, 16, 24, 20)
+        b_layout.setSpacing(10)
+
+        self.lbl_status = QLabel("Coletando dados do sistema...")
+        self.lbl_status.setFont(QFont(FONT_FAMILY, 10))
+        self.lbl_status.setStyleSheet("color: #c8d4e0;")
+        self.lbl_status.setAlignment(Qt.AlignCenter)
+
+        status_row = QHBoxLayout()
+        status_row.setSpacing(10)
+        status_row.addStretch(1)
+
+        self.lbl_spinner = QLabel("⠋")
+        self.lbl_spinner.setFont(QFont(FONT_FAMILY, 12, QFont.Bold))
+        self.lbl_spinner.setStyleSheet("color: #23a6ff;")
+        status_row.addWidget(self.lbl_spinner)
+        status_row.addWidget(self.lbl_status)
+        status_row.addStretch(1)
+
+        subtitle = QLabel("Serviços, pacotes, volumes, RAID, SMART...")
+        subtitle.setFont(QFont(FONT_FAMILY, 9))
+        subtitle.setStyleSheet("color: #6b7a8d;")
+        subtitle.setAlignment(Qt.AlignCenter)
+
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 0)  # modo indeterminado — pulsa
+        self.progress.setFixedHeight(4)
+        self.progress.setTextVisible(False)
+        self.progress.setObjectName("CDBar")
+
+        b_layout.addLayout(status_row)
+        b_layout.addWidget(subtitle)
+        b_layout.addSpacing(4)
+        b_layout.addWidget(self.progress)
+
+        root.addWidget(header)
+        root.addWidget(body, stretch=1)
+
+    def _apply_styles(self) -> None:
+        self.setStyleSheet("""
+            CollectingDataDialog {
+                background: #131417;
+                border-radius: 14px;
+            }
+            QFrame#CDHeader {
+                background: rgba(59, 130, 246, 35);
+                border-bottom: 1px solid rgba(59, 130, 246, 25);
+                border-top-left-radius: 12px;
+                border-top-right-radius: 12px;
+            }
+            QFrame#CDBody {
+                background: #131417;
+                border-bottom-left-radius: 12px;
+                border-bottom-right-radius: 12px;
+            }
+            QProgressBar#CDBar {
+                background: rgba(59, 130, 246, 20);
+                border: none;
+                border-radius: 2px;
+            }
+            QProgressBar#CDBar::chunk {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:0,
+                    stop:0 rgba(35, 100, 220, 220),
+                    stop:1 rgba(94, 166, 234, 220)
+                );
+                border-radius: 2px;
+            }
+        """)
+
+    def _tick(self) -> None:
+        self._dots = (self._dots + 1) % len(self._spinner_frames)
+        self.lbl_spinner.setText(self._spinner_frames[self._dots])
+
+    def closeEvent(self, event) -> None:
+        self._timer.stop()
+        super().closeEvent(event)
+
+    def reject(self) -> None:
+        # Mesma decisão do PairCheckProgressDialog: sem botão de
+        # cancelar (é só leitura, rodando em background), então ESC
+        # não fecha nada — só o código externo fecha de verdade
+        # quando o checkup termina.
+        pass
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        from PySide6.QtGui import QGuiApplication
+        screen = QGuiApplication.primaryScreen()
+        if screen:
+            geo = screen.availableGeometry()
+            self.move(
+                geo.x() + (geo.width() - self.width()) // 2,
+                geo.y() + (geo.height() - self.height()) // 2,
+            )
+
+
 class ActionResultDialog(QDialog):
     """Clone exato do padrão _ErrorDialog/_show_error de eggs_page.py
     (header com ícone+título+X, corpo com mensagem+OK) — mesmo componente
@@ -672,14 +825,57 @@ class DoctorArchPage(QWidget):
 
         hero_text = QVBoxLayout()
         hero_text.setSpacing(4)
-        self.hero_title = QLabel("Rodando checkup...")
+        self.hero_title = QLabel("Nenhum checkup rodado ainda")
         self.hero_title.setFont(QFont(FONT_FAMILY, 15, QFont.Bold))
         self.hero_title.setStyleSheet(f"color: {TEXT};")
-        self.hero_status = QLabel("")
+        self.hero_status = QLabel("Clique em \"Rodar checkup\" pra ver o estado do sistema")
         self.hero_status.setFont(QFont(FONT_FAMILY, 11))
+        self.hero_status.setStyleSheet(f"color: {MUTED};")
         hero_text.addWidget(self.hero_title)
         hero_text.addWidget(self.hero_status)
         hero_layout.addLayout(hero_text, 1)
+
+        # Divisor + selo "Disaster Recovery" — mockup Opção B aprovado
+        # por Apollo: em vez de um card separado ou faixa própria, fica
+        # colado no card de score, entre o texto e o botão de checkup.
+        # TODO: clique ainda não abre nada — a checagem de prontidão em
+        # si (scripts/RAID/snapshots/ISOs) é o próximo passo, isso aqui
+        # só resolve o lugar na tela.
+        dr_divider = QFrame()
+        dr_divider.setFixedWidth(1)
+        dr_divider.setStyleSheet("background: rgba(255,255,255,12);")
+        hero_layout.addWidget(dr_divider)
+
+        dr_block = QFrame()
+        dr_block.setObjectName("DisasterRecoveryBadge")
+        dr_block.setCursor(Qt.PointingHandCursor)
+        dr_block.setStyleSheet(f"""
+            QFrame#DisasterRecoveryBadge {{
+                background: rgba(251, 191, 36, 14);
+                border: 1px solid rgba(251, 191, 36, 90);
+                border-radius: 10px;
+            }}
+            QFrame#DisasterRecoveryBadge:hover {{
+                background: rgba(251, 191, 36, 28);
+                border: 1px solid rgba(251, 191, 36, 160);
+            }}
+        """)
+        dr_layout = QVBoxLayout(dr_block)
+        dr_layout.setContentsMargins(14, 8, 14, 8)
+        dr_layout.setSpacing(2)
+        dr_layout.setAlignment(Qt.AlignCenter)
+        dr_icon = QLabel()
+        dr_icon.setAlignment(Qt.AlignCenter)
+        dr_icon.setStyleSheet("background: transparent; border: none;")
+        dr_icon.setPixmap(qta.icon("mdi6.shield-check-outline", color=ACCENT_AMBER).pixmap(20, 20))
+        dr_label = QLabel("DISASTER\nRECOVERY")
+        dr_label.setFont(QFont(FONT_FAMILY, 8, QFont.Bold))
+        dr_label.setStyleSheet(f"color: {ACCENT_AMBER}; letter-spacing: 0.5px; background: transparent; border: none;")
+        dr_label.setAlignment(Qt.AlignCenter)
+        dr_layout.addWidget(dr_icon)
+        dr_layout.addWidget(dr_label)
+        dr_block.mousePressEvent = lambda event: self.open_disaster_recovery()
+        hero_layout.addWidget(dr_block)
 
         checkup_block = QVBoxLayout()
         checkup_block.setSpacing(6)
@@ -707,6 +903,7 @@ class DoctorArchPage(QWidget):
         findings_frame.setStyleSheet("QFrame { border: 1px solid rgba(255,255,255,12); border-radius: 14px; }")
         findings_frame.setLayout(self.findings_container)
         content_col.addWidget(findings_frame)
+        self._add_placeholder_row(self.findings_container, "Rode um checkup pra ver os achados aqui")
 
         lbl_actions = QLabel("MANUTENÇÃO")
         lbl_actions.setFont(QFont(FONT_FAMILY, 10, QFont.Bold))
@@ -716,6 +913,7 @@ class DoctorArchPage(QWidget):
         self.actions_row = QGridLayout()
         self.actions_row.setSpacing(12)
         content_col.addLayout(self.actions_row)
+        self._add_placeholder_row(self.actions_row, "Rode um checkup pra ver o estado de manutenção")
 
         # Log ao vivo — some por padrão, aparece durante uma ação
         self.progress_frame = QFrame()
@@ -739,18 +937,26 @@ class DoctorArchPage(QWidget):
         self.vitals_row = QGridLayout()
         self.vitals_row.setSpacing(12)
         content_col.addLayout(self.vitals_row)
+        self._add_placeholder_row(self.vitals_row, "Rode um checkup pra ver os vitals do sistema")
 
         content_col.addStretch()
 
         self._worker: CheckupWorker | None = None
         self._action_worker: HelperActionWorker | None = None
-        self.run_checkup()
+
+    def open_disaster_recovery(self) -> None:
+        """Placeholder — o lugar na tela já está definido (selo no card
+        de score, Opção B do mockup), falta implementar a checagem de
+        verdade (scripts/RAID/snapshots/ISOs)."""
+        pass
 
     def run_checkup(self) -> None:
         if self._worker is not None and self._worker.isRunning():
             return
         self.btn_checkup.setEnabled(False)
         self.hero_title.setText("Rodando checkup...")
+        self._collecting_dialog = CollectingDataDialog(parent=self.window())
+        self._collecting_dialog.show()
         worker = CheckupWorker(parent=self)
         worker.finished_checkup.connect(self._on_checkup_done)
         self._worker = worker
@@ -820,7 +1026,23 @@ class DoctorArchPage(QWidget):
             elif item.layout() is not None:
                 self._clear_layout(item.layout())
 
+    def _add_placeholder_row(self, layout, text: str) -> None:
+        """Estado inicial "ainda sem dados" pras seções que só se
+        preenchem depois de rodar o checkup pelo menos uma vez — sem
+        isso, ficavam vazias de verdade (parecia página quebrada), já
+        que o auto-run no __init__ foi removido a pedido do Apollo."""
+        placeholder = QLabel(text)
+        placeholder.setFont(QFont(FONT_FAMILY, 11))
+        placeholder.setStyleSheet(f"color: {FAINT}; padding: 16px; background: #0d0e13; border-radius: 14px;")
+        if isinstance(layout, QGridLayout):
+            layout.addWidget(placeholder, 0, 0)
+        else:
+            layout.addWidget(placeholder)
+
     def _on_checkup_done(self, report: DoctorReport, cleanup_sizes: dict, cleanup_total: int) -> None:
+        if getattr(self, "_collecting_dialog", None) is not None:
+            self._collecting_dialog.accept()
+            self._collecting_dialog = None
         self.btn_checkup.setEnabled(True)
         self.ring.set_score(report.score)
 
