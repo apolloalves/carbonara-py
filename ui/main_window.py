@@ -91,11 +91,11 @@ MENU_ENTRIES = [
 # sem back-end, então ficam de fora daqui — mesmo comportamento que já
 # tinham nos cards do MenuPage, onde clicar neles também não navega).
 _MODULE_NAV = {
-    1: "show_disks",
     4: "show_backups",
     5: "show_clonezilla",
-    7: "show_doctor",
     9: "show_eggs",
+    7: "show_doctor",
+    1: "show_disks",
 }
 
 
@@ -426,21 +426,24 @@ class TopHeader(QFrame):
         bar.setStyleSheet("QFrame { background: transparent; border: none; }")
 
         layout = QHBoxLayout(bar)
-        layout.setContentsMargins(2, 0, 2, 0)
+        layout.setContentsMargins(0, 8, 2, 0)
         layout.setSpacing(2)
 
-        def _bar_button(label: str) -> QPushButton:
+        def _bar_button(label: str, first: bool = False) -> QPushButton:
             btn = QPushButton(label)
-            btn.setFont(QFont(FONT_FAMILY, 10, QFont.Bold))
+            btn_font = QFont(FONT_FAMILY, weight=QFont.DemiBold)
+            btn_font.setPointSizeF(10.5)
+            btn.setFont(btn_font)
             btn.setCursor(Qt.PointingHandCursor)
             btn.setFixedHeight(28)
+            left_padding = 0 if first else 14
             btn.setStyleSheet(f"""
                 QPushButton {{
                     background: transparent;
                     border: none;
                     border-radius: 7px;
-                    color: {MUTED};
-                    padding: 0 14px;
+                    color: #ffffff;
+                    padding: 0 14px 0 {left_padding}px;
                 }}
                 QPushButton:hover {{
                     background: rgba(255, 255, 255, 10);
@@ -449,7 +452,7 @@ class TopHeader(QFrame):
             """)
             return btn
 
-        self.btn_modulos = _bar_button(tr("menu.modulos"))
+        self.btn_modulos = _bar_button(tr("menu.modulos"), first=True)
         self.btn_modulos.clicked.connect(self._show_modulos_menu)
         layout.addWidget(self.btn_modulos)
 
@@ -490,7 +493,7 @@ class TopHeader(QFrame):
                 border-radius: 10px;
                 padding: 6px;
                 font-family: "{FONT_FAMILY}";
-                font-size: 10pt;
+                font-size: 10.5pt;
             }}
             QMenu::item {{
                 color: {TEXT};

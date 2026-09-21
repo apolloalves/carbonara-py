@@ -273,6 +273,7 @@ def _run_backup_sync(args: dict) -> None:
     from PySide6.QtWidgets import QApplication
     from core.snapshots.backup import sync_snapshot, ROOT_EXCLUDES, HOME_EXCLUDES
     from ui.widgets.backup_progress import BackupProgressDialog, PairCheckProgressDialog
+    from ui.widgets.collecting_data_dialog import ModalBackdrop
 
     app = QApplication([])
     from core.i18n import tr
@@ -330,6 +331,7 @@ def _run_backup_sync(args: dict) -> None:
                             NOISE_THRESHOLD = 15
                             self.done.emit(len(changed) > NOISE_THRESHOLD)
 
+                    pair_backdrop = ModalBackdrop(None)
                     check_dialog = PairCheckProgressDialog(sibling_kind + " " + entry_path.name)
                     worker = _DryRunWorker()
 
@@ -340,6 +342,8 @@ def _run_backup_sync(args: dict) -> None:
                     worker.done.connect(_on_dry_run_done)
                     worker.start()
                     check_dialog.exec()
+                    pair_backdrop.hide()
+                    pair_backdrop.deleteLater()
     except Exception:
         payload["error"] = traceback.format_exc()
 

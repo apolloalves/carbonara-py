@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import qtawesome as qta
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QFont, QGuiApplication
+from PySide6.QtGui import QFont, QGuiApplication, QPainter, QColor
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QProgressBar, QWidget
 
 FONT_FAMILY = "DejaVu Sans Mono"
@@ -16,26 +16,43 @@ def _hex_to_rgb(hex_color: str) -> str:
     return f"{r}, {g}, {b}"
 
 
-class ModalBackdrop(QWidget):
-    """Overlay semi-transparente cobrindo a janela principal por baixo
-    do CollectingDataDialog — reforça visualmente que nada mais é
-    clicável enquanto o carregamento roda (não só os botões desabilitados
-    manualmente, como hoje o Eggs já faz em create/check). Filho da
-    própria janela (não uma segunda janela top-level), pra acompanhar
-    posição/tamanho/minimizar automaticamente sem código extra."""
+class ModalBackdrop(QDialog):
+    """Overlay escurecendo a tela por baixo do CollectingDataDialog/
+    PairCheckProgressDialog. Antes era QWidget com Qt.Tool/Qt.Window —
+    nunca renderizava de forma confiável. Causa raiz real: no processo
+    isolado do pkexec (carbonara-helper) não existe a janela principal
+    do Carbonara pra "escurecer" (é outro processo) — comparado ao
+    Doctor Arch, cujo CollectingDataDialog escurece sozinho porque tem
+    parent=self.window() na MESMA GUI. Sem parent real, não tem o que
+    dimmer via modal nativo. Solução: virou um QDialog raso (mesma
+    receita comprovada — Qt.Dialog|FramelessWindowHint, igual ao
+    PairCheckProgressDialog, que já renderiza nesse processo) cobrindo
+    a tela inteira com uma cor sólida escura, mostrado ANTES do diálogo
+    real (fica atrás dele por ordem de mapeamento)."""
 
-    def __init__(self, parent: QWidget):
+    def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
-        self.setStyleSheet("background: rgba(6, 7, 10, 165);")
-        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self.setModal(False)  # não pode ser modal de verdade — bloquearia o dialog que vem em seguida
+        self.setWindowOpacity(165 / 255)
         self._sync_geometry()
-        self.raise_()
         self.show()
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor(6, 7, 10, 255))
 
     def _sync_geometry(self) -> None:
         parent = self.parentWidget()
         if parent is not None:
-            self.setGeometry(parent.rect())
+            top_left = parent.mapToGlobal(parent.rect().topLeft())
+            self.setGeometry(top_left.x(), top_left.y(), parent.width(), parent.height())
+            return
+        # Sem parent (processo separado do pkexec, sem acesso à janela
+        # principal, que mora noutro processo) — cobre a tela inteira.
+        screen = QGuiApplication.primaryScreen()
+        if screen is not None:
+            self.setGeometry(screen.geometry())
 
     def resizeToParent(self) -> None:
         self._sync_geometry()
