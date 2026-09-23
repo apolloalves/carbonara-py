@@ -932,7 +932,8 @@ def _run_scheduler_install(args: dict) -> None:
     service_content = (
         "[Unit]\n"
         "Description=Carbonara - sincronizacao automatica de snapshots\n"
-        "After=local-fs.target\n"
+        "After=local-fs.target time-sync.target\n"
+        "Wants=time-sync.target\n"
         "\n"
         "[Service]\n"
         "Type=oneshot\n"
@@ -1009,7 +1010,8 @@ def _run_scheduler_create_install(args: dict) -> None:
     service_content = (
         "[Unit]\n"
         "Description=Carbonara - criacao automatica de snapshots\n"
-        "After=local-fs.target\n"
+        "After=local-fs.target time-sync.target\n"
+        "Wants=time-sync.target\n"
         "\n"
         "[Service]\n"
         "Type=oneshot\n"
