@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import pwd
 import re
 import signal
 import shutil
@@ -234,18 +235,35 @@ def check_eggs_update() -> str | None:
     return None
 
 
-def _safe_remove_eggs_dir() -> None:
-    """Desmonta todos os bind mounts dentro de /home/eggs antes de remover o diretório."""
-    if not EGGS_DIRECTORY.exists():
-        return
+def _resolve_real_user_home() -> Path:
+    """Mesma técnica do carbonara-helper/core.i18n — create_eggs() roda
+    como root (via pkexec), então Path.home() puro resolveria pra /root,
+    e o cache de yay/paru de verdade (do usuário, ex: apollo) nunca seria
+    encontrado nem limpo."""
+    uid_str = os.environ.get("PKEXEC_UID") or os.environ.get("SUDO_UID")
+    if uid_str:
+        try:
+            return Path(pwd.getpwuid(int(uid_str)).pw_dir)
+        except (ValueError, KeyError):
+            pass
+    return Path.home()
 
-    # Lê /proc/mounts e desmonta em ordem reversa (mais profundo primeiro)
+
+def _unmount_under(path: Path) -> None:
+    """Desmonta todo bind mount dentro de `path`, mais profundo primeiro.
+
+    Extraído de _safe_remove_eggs_dir() pra ser reaproveitado também em
+    cima de /home/eggs.old — vestígio de builds anteriores que pode ter
+    os MESMOS bind mounts presos (liveroot/home, liveroot/usr, etc). Sem
+    desmontar antes, um shutil.rmtree cego nesse caminho atravessaria o
+    bind mount de liveroot/home e apagaria dados REAIS do /home do
+    usuário, não só o lixo do Eggs."""
     try:
         with open("/proc/mounts") as f:
             mounts = [
                 line.split()[1]
                 for line in f
-                if line.split()[1].startswith(str(EGGS_DIRECTORY))
+                if line.split()[1].startswith(str(path))
             ]
         for mount in sorted(mounts, reverse=True):
             subprocess.run(
@@ -255,6 +273,58 @@ def _safe_remove_eggs_dir() -> None:
     except Exception:
         pass
 
+
+def _pre_build_cleanup(dialog) -> None:
+    """Limpa lixo de cache (pacman/yay/paru) e vestígios de builds
+    anteriores do Eggs ANTES da checagem de espaço (check_space) —
+    o espaço liberado aqui já entra na conta dessa checagem, evitando
+    uma falha por "sem espaço" que a própria limpeza já teria resolvido.
+
+    yay/paru recusam rodar como root, então em vez de invocar os
+    binários (que também pediriam confirmação interativa), os diretórios
+    de cache são removidos diretamente — mesmo efeito de `yay -Sc`/
+    `paru -Sc`, sem precisar do binário nem de prompt.
+    """
+    dialog.append_log(tr("eggs_core.log_precleanup_header"))
+
+    # Se pacman/paru/yay estiver REALMENTE rodando agora (build/instalação
+    # em andamento em outra janela/terminal), não mexe em cache nenhum —
+    # mesma checagem usada em _clear_stale_pacman_lock. Apagar o cache
+    # de um pacote no meio do download/build dele corrompe a operação.
+    if _pkg_manager_running():
+        dialog.append_log(tr("eggs_core.log_precleanup_skipped_busy"))
+        return
+
+    # 1. Cache do pacman (/var/cache/pacman/pkg — geralmente no
+    # filesystem raiz). paccache (pacman-contrib) mantém só a última
+    # versão em cache de cada pacote; sem ele, cai pro `pacman -Sc`.
+    root_before = _free_gb(Path("/"))
+    if shutil.which("paccache"):
+        subprocess.run(["paccache", "-r", "-k", "1"], capture_output=True, text=True)
+    else:
+        subprocess.run(["pacman", "-Sc", "--noconfirm"], capture_output=True, text=True)
+    root_freed = max(_free_gb(Path("/")) - root_before, 0.0)
+    dialog.append_log(tr("eggs_core.log_precleanup_pacman").format(freed=root_freed))
+
+    # 2. Cache do yay/paru (~/.cache/yay, ~/.cache/paru — dentro de
+    # /home) e vestígios de builds anteriores do Eggs (/home/eggs.old).
+    home_before = _free_gb(Path("/home"))
+    real_home = _resolve_real_user_home()
+    for tool_dir in ("yay", "paru"):
+        shutil.rmtree(real_home / ".cache" / tool_dir, ignore_errors=True)
+    eggs_old = EGGS_DIRECTORY.parent / "eggs.old"
+    if eggs_old.exists():
+        _unmount_under(eggs_old)
+        shutil.rmtree(eggs_old, ignore_errors=True)
+    home_freed = max(_free_gb(Path("/home")) - home_before, 0.0)
+    dialog.append_log(tr("eggs_core.log_precleanup_home").format(freed=home_freed))
+
+
+def _safe_remove_eggs_dir() -> None:
+    """Desmonta todos os bind mounts dentro de /home/eggs antes de remover o diretório."""
+    if not EGGS_DIRECTORY.exists():
+        return
+    _unmount_under(EGGS_DIRECTORY)
     shutil.rmtree(str(EGGS_DIRECTORY), ignore_errors=True)
 
 
@@ -694,6 +764,22 @@ def _used_root_gb() -> float:
         return 0.0
 
 
+def _used_root_gb_raw() -> float:
+    """Mesma leitura de _used_root_gb(), mas SEM o fator de compressão —
+    usada pra estimar o espaço TEMPORÁRIO que o próprio processo de
+    build precisa em /home (não no destino final). O penguins-eggs monta
+    a árvore completa da live (overlay de /usr e /var + a ISO bruta em
+    /home/eggs/mnt/ antes de virar o .iso comprimido) inteiramente
+    dentro de /home — isso é bem maior que o .iso final compactado, e
+    check_space() não conferia isso, só o destino e o MDSATA."""
+    try:
+        st = os.statvfs("/")
+        used = (st.f_blocks - st.f_bfree) * st.f_frsize
+        return used / (1024 ** 3)
+    except OSError:
+        return 0.0
+
+
 def _fail_space_check(dialog, message: str) -> None:
     dialog.set_status(message)
     dialog.progress.setRange(0, 100)
@@ -717,6 +803,22 @@ def check_space(dialog, destination: Path | None = None) -> Path | None:
     dest = destination or VENTOY
     estimated_gb = _used_root_gb()
     mdsata_free = _free_gb(MDSATA_EGGS.parent) if _is_mountpoint(MDSATA) else 0.0
+
+    # /home é onde o penguins-eggs monta TUDO antes de empacotar (overlay
+    # de /usr e /var + a ISO bruta) — sem espaço aí, o build falha ou fica
+    # incompleto silenciosamente, mesmo que o destino final tenha espaço
+    # de sobra. Isso não tinha checagem nenhuma antes.
+    home_free = _free_gb(Path("/home"))
+    home_needed = _used_root_gb_raw()
+    if home_free < home_needed:
+        dialog.append_log(tr("eggs_core.log_space_insufficient_header"))
+        dialog.append_log(
+            tr("eggs_core.log_space_home_detail").format(
+                free=home_free, needed=home_needed,
+            )
+        )
+        _fail_space_check(dialog, tr("eggs_core.status_space_home_fail"))
+        return None
 
     # MDSATA é o backup fixo (não escolhido pelo usuário) — sem espaço
     # ali não tem "alternativa" que faça sentido sugerir, é só falha.
@@ -832,6 +934,8 @@ def create_eggs(dialog, parent=None, destination: str | None = None, update_chec
     dialog.append_log(tr("eggs_core.log_cleaning").format(dir=EGGS_DIRECTORY))
     _safe_remove_eggs_dir()
 
+    _pre_build_cleanup(dialog)
+
     resolved_dest = check_space(dialog, dest_dir)
     if resolved_dest is None:
         return
@@ -940,6 +1044,27 @@ def check_eggs(dialog, parent=None, destination: str | None = None) -> None:
 _PACMAN_LOCK = Path("/var/lib/pacman/db.lck")
 
 
+def _pkg_manager_running() -> bool:
+    """True se pacman/paru/yay estiver REALMENTE rodando neste momento.
+
+    # pgrep -x "pacman|paru|yay" tem um bug de precedência de regex: o -x
+    # ancora só as pontas do padrão INTEIRO (^pacman|paru|yay$), não cada
+    # alternativa — "paru" fica sem âncora nenhuma e pode casar com
+    # qualquer processo que contenha esse texto em qualquer lugar do
+    # nome. Chamadas separadas evitam essa ambiguidade por completo.
+    Usado tanto pra decidir se é seguro remover o lock do pacman quanto
+    pra decidir se é seguro limpar os caches de pacote (_pre_build_cleanup)
+    — em ambos os casos, mexer nisso com um desses processos genuinamente
+    ativo pode corromper um build/instalação em andamento."""
+    return any(
+        subprocess.run(
+            ["pgrep", "-x", name],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        ).returncode == 0
+        for name in ("pacman", "paru", "yay")
+    )
+
+
 def _clear_stale_pacman_lock(dialog) -> None:
     """Detecta e remove o lock órfão do pacman (mesma lógica do alias
     `pacrm` do Apollo) — só remove se confirmar que não existe nenhum
@@ -948,20 +1073,7 @@ def _clear_stale_pacman_lock(dialog) -> None:
     if not _PACMAN_LOCK.exists():
         return
 
-    # pgrep -x "pacman|paru|yay" tem um bug de precedência de regex: o -x
-    # ancora só as pontas do padrão INTEIRO (^pacman|paru|yay$), não cada
-    # alternativa — "paru" fica sem âncora nenhuma e pode casar com
-    # qualquer processo que contenha esse texto em qualquer lugar do
-    # nome. Chamadas separadas evitam essa ambiguidade por completo.
-    real_process_running = any(
-        subprocess.run(
-            ["pgrep", "-x", name],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        ).returncode == 0
-        for name in ("pacman", "paru", "yay")
-    )
-
-    if real_process_running:
+    if _pkg_manager_running():
         dialog.append_log(tr("eggs_core.log_lock_real_process"))
         return
 
